@@ -47,6 +47,9 @@ type Config struct {
 
 	// Behavior contains browser behavior testing configuration.
 	Behavior BehaviorConfig `mapstructure:"behavior"`
+
+	// Server contains browser server configuration.
+	Server ServerConfig `mapstructure:"server"`
 }
 
 // GeminiConfig holds Gemini API configuration.
@@ -145,6 +148,16 @@ type CaptureConfig struct {
 	MaxNetworkRequests int `mapstructure:"max_network_requests"`
 }
 
+// ServerConfig holds browser server configuration.
+type ServerConfig struct {
+	// Port is the HTTP server port (0 for auto-select, default: 9333).
+	Port int `mapstructure:"port"`
+	// ReadTimeout is the HTTP read timeout.
+	ReadTimeout time.Duration `mapstructure:"read_timeout"`
+	// WriteTimeout is the HTTP write timeout.
+	WriteTimeout time.Duration `mapstructure:"write_timeout"`
+}
+
 // Load loads configuration from file, environment variables, and defaults.
 func Load() (*Config, error) {
 	v := viper.New()
@@ -232,6 +245,11 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("behavior.capture.dom_snapshot", true)
 	v.SetDefault("behavior.capture.max_console_entries", 100)
 	v.SetDefault("behavior.capture.max_network_requests", 50)
+
+	// Server defaults
+	v.SetDefault("server.port", 9333)
+	v.SetDefault("server.read_timeout", "30s")
+	v.SetDefault("server.write_timeout", "30s")
 }
 
 // Validate checks that the configuration is valid and complete.

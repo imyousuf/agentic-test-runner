@@ -251,6 +251,12 @@ behavior:
     dom_snapshot: true          # Capture DOM HTML
     max_console_entries: 100    # Max console entries to capture
     max_network_requests: 50    # Max network requests to capture
+
+# Browser server settings (for `atr browser` commands)
+server:
+  port: 9333           # HTTP server port
+  read_timeout: "30s"  # HTTP read timeout
+  write_timeout: "30s" # HTTP write timeout
 ```
 
 ## Environment Variables
@@ -268,6 +274,7 @@ All configuration can be set via environment variables with the `ATR_` prefix:
 | `ATR_MODEL` | `model` | Model tier |
 | `ATR_AGENT_MAX_ITERATIONS` | `agent.max_iterations` | Max iterations |
 | `ATR_AGENT_TIMEOUT` | `agent.timeout` | Agent timeout |
+| `ATR_SERVER_PORT` | `server.port` | Browser server port |
 
 ## Example Configurations
 

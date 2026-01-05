@@ -114,6 +114,7 @@ Files Examined:
 - **[Configuration](docs/configuration.md)** - Config file and authentication setup
 - **[CLI Reference](docs/cli-reference.md)** - All commands and flags
 - **[Behavior Testing](docs/behavior-testing.md)** - Write browser tests in natural language
+- **[Browser Server](docs/browser-server.md)** - HTTP server for programmatic browser control
 - **[Architecture](docs/architecture.md)** - How ATR works internally
 
 ## Configuration

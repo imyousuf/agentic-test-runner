@@ -96,6 +96,74 @@ atr run --behavior tests/debug.test.txt --cdp-endpoint ws://localhost:9222
 
 ---
 
+## atr browser
+
+Control a browser via HTTP server mode. See [Browser Server Mode](browser-server.md) for detailed documentation.
+
+### Lifecycle Commands
+
+```bash
+atr browser start [--port PORT]   # Start browser daemon
+atr browser stop                  # Stop browser daemon
+atr browser status                # Check if running
+```
+
+### Navigation
+
+```bash
+atr browser navigate <url>        # Navigate to URL
+atr browser back                  # Go back
+atr browser forward               # Go forward
+atr browser reload                # Reload page
+```
+
+### Page Management
+
+```bash
+atr browser new-page [url]        # Open new tab
+atr browser list-pages            # List all tabs
+atr browser select-page <index>   # Switch to tab
+atr browser close-page <index>    # Close tab
+```
+
+### Interaction
+
+```bash
+atr browser click <target>        # Click element
+atr browser fill <target> <value> # Type into input
+atr browser hover <target>        # Hover over element
+atr browser press-key <key>       # Press keyboard key
+atr browser drag <from> <to>      # Drag element
+```
+
+### Inspection
+
+```bash
+atr browser snapshot [--verbose]  # Get page elements with UIDs
+atr browser screenshot [--full]   # Capture screenshot
+atr browser html                  # Get page HTML
+atr browser url                   # Get current URL
+atr browser title                 # Get page title
+atr browser eval <script>         # Run JavaScript
+```
+
+### Debugging
+
+```bash
+atr browser console [--limit N]   # Get console messages
+atr browser network [--limit N]   # Get network requests
+atr browser errors                # Get failed requests
+```
+
+### Common Flags
+
+| Flag | Description |
+|------|-------------|
+| `--json` | Output as JSON |
+| `--endpoint <url>` | Override server endpoint |
+
+---
+
 ## atr config
 
 Manage ATR configuration.
