@@ -206,6 +206,30 @@ Checks that:
 
 ---
 
+## atr test
+
+Test LLM connectivity.
+
+```bash
+atr test
+```
+
+Sends a simple prompt to the configured LLM backend and verifies a response is received. Use this to validate your API key or Vertex AI setup before running actual commands.
+
+Output:
+```
+Testing LLM connectivity...
+  Backend: vertex-ai
+  Model: gemini-3-flash-preview
+
+LLM Response: Hello from ATR!
+Response time: 1.2s
+
+LLM connectivity test passed!
+```
+
+---
+
 ## atr version
 
 Display version information.

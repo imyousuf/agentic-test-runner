@@ -11,6 +11,11 @@ ATR is a command-line tool that:
 
 ## Key Commands
 
+### Test LLM connectivity
+```bash
+atr test    # Verify LLM backend is configured and accessible
+```
+
 ### Run commands with AI failure analysis
 ```bash
 atr run --cmd "go test ./..."
