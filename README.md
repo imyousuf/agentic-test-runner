@@ -116,6 +116,7 @@ Files Examined:
 - **[Behavior Testing](docs/behavior-testing.md)** - Write browser tests in natural language
 - **[Browser Server](docs/browser-server.md)** - HTTP server for programmatic browser control
 - **[Architecture](docs/architecture.md)** - How ATR works internally
+- **[llms.txt](docs/llms.txt)** - Quick reference for AI agents
 
 ## Configuration
 

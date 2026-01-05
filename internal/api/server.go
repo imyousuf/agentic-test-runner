@@ -8,8 +8,6 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"os/signal"
-	"syscall"
 	"time"
 
 	"github.com/imyousuf/agentic-test-runner/internal/browser"
@@ -108,7 +106,7 @@ func (s *Server) Endpoint() string {
 // Wait waits for shutdown signal and gracefully shuts down.
 func (s *Server) Wait() {
 	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+	registerShutdownSignals(sigCh)
 	<-sigCh
 
 	s.Shutdown()
@@ -164,10 +162,8 @@ func StartDaemon(port int) (*BrowserState, error) {
 	cmd.Stderr = nil
 	cmd.Stdin = nil
 
-	// Detach from parent process
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Setsid: true,
-	}
+	// Detach from parent process (platform-specific)
+	setSysProcAttr(cmd)
 
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("failed to start daemon: %w", err)
@@ -208,7 +204,7 @@ func StopDaemon() error {
 		if err != nil {
 			return fmt.Errorf("failed to find process: %w", err)
 		}
-		if err := process.Signal(syscall.SIGTERM); err != nil {
+		if err := terminateProcess(process); err != nil {
 			return fmt.Errorf("failed to terminate process: %w", err)
 		}
 		RemoveState()

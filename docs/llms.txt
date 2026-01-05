@@ -1,0 +1,84 @@
+# ATR - Agentic Test Runner
+
+> AI-powered test runner that analyzes failures and runs browser-based behavior tests
+
+## What is ATR?
+
+ATR is a command-line tool that:
+1. Executes shell commands and uses AI to analyze failures
+2. Runs browser-based behavior tests written in natural language
+3. Provides an HTTP server for programmatic browser control
+
+## Key Commands
+
+### Run commands with AI failure analysis
+```bash
+atr run --cmd "go test ./..."
+atr run --cmd "npm test" --context "Running auth tests"
+```
+
+### Run browser behavior tests
+```bash
+atr run --behavior tests/login.test.txt
+atr run --behavior tests/e2e/ --browser-url http://localhost:3000
+```
+
+### Browser server mode (for AI agents)
+```bash
+# Start browser daemon
+atr browser start
+
+# Navigation
+atr browser navigate <url>
+atr browser back
+atr browser forward
+atr browser reload
+
+# Interaction
+atr browser click <target>    # target: text, element ID (e0), or CSS selector
+atr browser fill <target> <value>
+atr browser hover <target>
+atr browser press-key <key>
+
+# Inspection
+atr browser snapshot          # Get interactive elements with UIDs
+atr browser screenshot        # Capture screenshot
+atr browser url              # Get current URL
+atr browser title            # Get page title
+atr browser html             # Get page HTML
+atr browser eval <script>    # Run JavaScript
+
+# Page management
+atr browser new-page [url]
+atr browser list-pages
+atr browser select-page <index>
+atr browser close-page <index>
+
+# Debugging
+atr browser console          # Get console messages
+atr browser network          # Get network requests
+atr browser errors           # Get failed requests
+
+# Stop browser
+atr browser stop
+```
+
+## Browser Server Architecture
+
+For AI agents, ATR provides HTTP server mode:
+
+```
+AI Agent --> atr CLI --> HTTP --> ATR Server --> Browser
+```
+
+- Daemon runs in background with state at ~/.atr/browser.state
+- Commands output human-readable text by default
+- Use --json flag for structured output
+- Browser always runs in visible (non-headless) mode
+
+## Links
+
+- Repository: https://github.com/imyousuf/agentic-test-runner
+- Documentation: docs/*.md
+- CLI Reference: docs/cli-reference.md
+- Browser Server: docs/browser-server.md
