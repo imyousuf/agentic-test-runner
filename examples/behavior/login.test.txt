@@ -1,0 +1,17 @@
+Test: Login with valid credentials
+
+Prerequisites:
+- Application running at http://localhost:3000
+
+Steps:
+1. Navigate to /login
+2. Enter "user@example.com" in the email field
+3. Enter "password123" in the password field
+4. Click the "Sign In" button
+5. Wait for the page to load
+6. Verify the URL contains /dashboard
+
+Expected Results:
+- User is redirected to dashboard
+- Welcome message is visible
+- No console errors

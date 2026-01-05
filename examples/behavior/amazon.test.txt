@@ -1,0 +1,16 @@
+Test: Browse Amazon homepage
+
+Steps:
+1. Navigate to https://www.amazon.com
+2. Wait for the page to load
+3. Take a snapshot of the page elements
+4. Verify the search box is visible
+5. Type "golang programming" in the search box
+6. Click the search button
+7. Wait for search results to load
+8. Take a screenshot of the results
+
+Expected Results:
+- Amazon homepage loads successfully
+- Search results are displayed
+- No critical console errors
