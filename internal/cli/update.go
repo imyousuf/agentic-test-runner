@@ -470,29 +470,73 @@ func copyFile(src, dst string) error {
 	return err
 }
 
-// CheckAndAutoUpdateDev checks if a dev version should be auto-updated.
+// CheckAndAutoUpdate checks if ATR should be auto-updated on startup.
 // Call this on CLI startup. Returns true if an update was performed.
-func CheckAndAutoUpdateDev() bool {
-	if !isDevVersion(Version) {
+func CheckAndAutoUpdate() bool {
+	// Check if ~/.atr directory exists
+	configDir, err := config.ConfigDir()
+	if err != nil {
+		return false
+	}
+	if _, err := os.Stat(configDir); os.IsNotExist(err) {
 		return false
 	}
 
-	if !shouldAutoUpdateDev() {
+	// Load config to check if auto-update is disabled
+	cfg, err := config.Load()
+	if err != nil {
+		return false
+	}
+
+	if cfg.Update.Disabled {
 		return false
 	}
 
 	osName, arch := detectPlatform()
-	fmt.Println("[Checking for dev version update...]")
 
-	if err := downloadAndInstall("dev", osName, arch); err != nil {
-		// Silent failure for background update
+	if isDevVersion(Version) {
+		// Dev version: check timestamp-based update
+		if !cfg.Update.AutoUpdateDev {
+			return false
+		}
+
+		lastUpdate, err := getLastDevUpdateTime()
+		if err == nil && time.Since(lastUpdate) < devUpdateInterval {
+			// Last update was recent, skip
+			return false
+		}
+
+		fmt.Println("[Checking for dev version update...]")
+		if err := downloadAndInstall("dev", osName, arch); err != nil {
+			// Silent failure for background update
+			return false
+		}
+
+		if err := recordDevUpdate(); err != nil {
+			// Silent failure
+		}
+
+		fmt.Println("[Dev version auto-updated. Restart to use new version.]")
+		return true
+	}
+
+	// Stable version: check for new release
+	fmt.Println("[Checking for updates...]")
+	latestTag, err := getLatestReleaseTag()
+	if err != nil {
 		return false
 	}
 
-	if err := recordDevUpdate(); err != nil {
-		// Silent failure
+	// Compare versions - if current version matches latest, skip
+	if Version == latestTag || "v"+Version == latestTag {
+		return false
 	}
 
-	fmt.Println("[Dev version auto-updated. Restart to use new version.]")
+	fmt.Printf("[New version available: %s]\n", latestTag)
+	if err := downloadAndInstall(latestTag, osName, arch); err != nil {
+		return false
+	}
+
+	fmt.Println("[Updated. Restart to use new version.]")
 	return true
 }

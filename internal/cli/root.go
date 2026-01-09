@@ -37,6 +37,13 @@ Examples:
   atr run --cmd "make build" --model pro`,
 	SilenceUsage:  true,
 	SilenceErrors: true,
+	PersistentPreRun: func(cmd *cobra.Command, args []string) {
+		// Skip auto-update check for update and version commands
+		if cmd.Name() == "update" || cmd.Name() == "version" {
+			return
+		}
+		CheckAndAutoUpdate()
+	},
 }
 
 // Execute runs the root command.
