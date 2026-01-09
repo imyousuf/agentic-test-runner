@@ -296,8 +296,6 @@ func downloadAndInstall(version, osName, arch string) error {
 		return fmt.Errorf("extracted binary not found: %w", err)
 	}
 
-	fmt.Println("Installing...")
-
 	// Get current executable path
 	execPath, err := os.Executable()
 	if err != nil {
@@ -307,6 +305,8 @@ func downloadAndInstall(version, osName, arch string) error {
 	if err != nil {
 		return fmt.Errorf("failed to resolve executable path: %w", err)
 	}
+
+	fmt.Printf("Installing to: %s\n", execPath)
 
 	// Replace the binary
 	if err := replaceBinary(extractedPath, execPath); err != nil {
