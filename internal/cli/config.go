@@ -125,6 +125,40 @@ agent:
 executor:
   command_timeout: "2m"    # Timeout for individual commands
   max_output_size: 10485760 # Max bytes to capture (10MB)
+
+# Browser Behavior Testing Configuration
+behavior:
+  base_url: ""           # Base URL for behavior tests
+  browser:
+    executable: "auto"   # Browser binary path ("auto" for auto-download)
+    cache_dir: ""        # Browser cache directory (empty for default)
+    headless: true       # Run browser in headless mode
+    ignore_https_errors: false  # Ignore SSL certificate errors (useful for local dev)
+    viewport:
+      width: 1920
+      height: 1080
+    page_timeout: "30s"  # Page load timeout
+    action_timeout: "10s"  # Timeout for actions (click, type, etc.)
+    slow_motion: "0s"    # Delay between actions for debugging
+  capture:
+    screenshots: true
+    full_page_screenshot: false
+    console_logs: true
+    network_har: true
+    dom_snapshot: true
+    max_console_entries: 100
+    max_network_requests: 50
+
+# Browser Server Configuration
+server:
+  port: 9333            # HTTP server port
+  read_timeout: "30s"
+  write_timeout: "30s"
+
+# Update Configuration
+update:
+  auto_update_dev: true  # Auto-update dev versions every 2 days
+  disabled: false        # Disable all update checking
 `
 
 			if err := os.WriteFile(configPath, []byte(defaultConfig), 0644); err != nil {
