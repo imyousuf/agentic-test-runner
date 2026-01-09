@@ -27,6 +27,10 @@ type Browser struct {
 	networkRequests []NetworkRequest
 	consoleMu       sync.Mutex
 	networkMu       sync.Mutex
+
+	// Target tracking for detecting manually opened tabs
+	targetIDs          map[proto.TargetTargetID]*rod.Page
+	stopTargetListener func()
 }
 
 // ConsoleMessage represents a browser console message.
@@ -61,6 +65,7 @@ func New(cfg config.BrowserConfig) (*Browser, error) {
 		current:         -1,
 		consoleMessages: make([]ConsoleMessage, 0),
 		networkRequests: make([]NetworkRequest, 0),
+		targetIDs:       make(map[proto.TargetTargetID]*rod.Page),
 	}, nil
 }
 
@@ -110,6 +115,9 @@ func (b *Browser) Launch(ctx context.Context) error {
 
 	b.browser = browser
 
+	// Start listening for new tabs opened manually
+	b.startTargetListener()
+
 	return nil
 }
 
@@ -133,6 +141,13 @@ func (b *Browser) Connect(ctx context.Context, cdpEndpoint string) error {
 	}
 
 	b.browser = browser
+
+	// Sync existing pages from the connected browser
+	b.syncExistingPages()
+
+	// Start listening for new tabs opened manually
+	b.startTargetListener()
+
 	return nil
 }
 
@@ -140,6 +155,12 @@ func (b *Browser) Connect(ctx context.Context, cdpEndpoint string) error {
 func (b *Browser) Close() error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+
+	// Stop target listener
+	if b.stopTargetListener != nil {
+		b.stopTargetListener()
+		b.stopTargetListener = nil
+	}
 
 	if b.browser != nil {
 		return b.browser.Close()
@@ -171,6 +192,10 @@ func (b *Browser) NewPage(ctx context.Context, url string) error {
 
 	// Set up event listeners
 	b.setupEventListeners(page)
+
+	// Register in target ID map for tracking
+	info := page.MustInfo()
+	b.targetIDs[proto.TargetTargetID(info.TargetID)] = page
 
 	b.pages = append(b.pages, page)
 	b.current = len(b.pages) - 1
@@ -526,4 +551,130 @@ func (b *Browser) WaitForText(text string, timeout time.Duration) error {
 		return fmt.Errorf("text not found: %s", text)
 	}
 	return nil
+}
+
+// startTargetListener starts listening for new target (page/tab) creation events.
+// This allows detecting manually opened tabs and popups.
+func (b *Browser) startTargetListener() {
+	if b.browser == nil {
+		return
+	}
+
+	// Register existing pages in target map
+	for _, page := range b.pages {
+		info := page.MustInfo()
+		b.targetIDs[proto.TargetTargetID(info.TargetID)] = page
+	}
+
+	// Listen for new targets
+	b.stopTargetListener = b.browser.EachEvent(
+		func(e *proto.TargetTargetCreated) {
+			// Filter: only track actual pages, not iframes or service workers
+			if e.TargetInfo.Type != proto.TargetTargetInfoTypePage {
+				return
+			}
+
+			b.mu.Lock()
+			defer b.mu.Unlock()
+
+			// Check if we already have this page
+			if _, exists := b.targetIDs[e.TargetInfo.TargetID]; exists {
+				return
+			}
+
+			// Get page from target ID
+			page, err := b.browser.PageFromTarget(e.TargetInfo.TargetID)
+			if err != nil {
+				// Could be a transient target, skip silently
+				return
+			}
+
+			// Set up event listeners for the new page
+			b.setupEventListeners(page)
+
+			// Set viewport if configured
+			if b.config.Viewport.Width > 0 && b.config.Viewport.Height > 0 {
+				_ = page.SetViewport(&proto.EmulationSetDeviceMetricsOverride{
+					Width:  b.config.Viewport.Width,
+					Height: b.config.Viewport.Height,
+				})
+			}
+
+			// Add to tracked pages
+			b.pages = append(b.pages, page)
+			b.targetIDs[e.TargetInfo.TargetID] = page
+
+			// If this is the first page, set it as current
+			if b.current < 0 {
+				b.current = len(b.pages) - 1
+			}
+		},
+		func(e *proto.TargetTargetDestroyed) {
+			b.mu.Lock()
+			defer b.mu.Unlock()
+
+			// Find and remove the destroyed page
+			if page, exists := b.targetIDs[e.TargetID]; exists {
+				delete(b.targetIDs, e.TargetID)
+
+				// Find and remove from pages slice
+				for i, p := range b.pages {
+					if p == page {
+						b.pages = append(b.pages[:i], b.pages[i+1:]...)
+
+						// Adjust current index
+						if b.current >= len(b.pages) {
+							b.current = len(b.pages) - 1
+						}
+						break
+					}
+				}
+			}
+		},
+	)
+}
+
+// syncExistingPages discovers and tracks all existing pages in a connected browser.
+func (b *Browser) syncExistingPages() {
+	if b.browser == nil {
+		return
+	}
+
+	pages, err := b.browser.Pages()
+	if err != nil {
+		return
+	}
+
+	for _, page := range pages {
+		info := page.MustInfo()
+
+		// Skip non-page targets (though Pages() should only return pages)
+		if info.Type != "page" {
+			continue
+		}
+
+		// Skip if already tracked
+		targetID := proto.TargetTargetID(info.TargetID)
+		if _, exists := b.targetIDs[targetID]; exists {
+			continue
+		}
+
+		// Set up event listeners
+		b.setupEventListeners(page)
+
+		// Set viewport
+		if b.config.Viewport.Width > 0 && b.config.Viewport.Height > 0 {
+			_ = page.SetViewport(&proto.EmulationSetDeviceMetricsOverride{
+				Width:  b.config.Viewport.Width,
+				Height: b.config.Viewport.Height,
+			})
+		}
+
+		b.pages = append(b.pages, page)
+		b.targetIDs[targetID] = page
+	}
+
+	if len(b.pages) > 0 && b.current < 0 {
+		b.current = 0
+	}
 }
