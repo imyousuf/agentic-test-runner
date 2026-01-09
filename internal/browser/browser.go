@@ -29,8 +29,7 @@ type Browser struct {
 	networkMu       sync.Mutex
 
 	// Target tracking for detecting manually opened tabs
-	targetIDs          map[proto.TargetTargetID]*rod.Page
-	stopTargetListener func()
+	targetIDs map[proto.TargetTargetID]*rod.Page
 }
 
 // ConsoleMessage represents a browser console message.
@@ -156,12 +155,7 @@ func (b *Browser) Close() error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	// Stop target listener
-	if b.stopTargetListener != nil {
-		b.stopTargetListener()
-		b.stopTargetListener = nil
-	}
-
+	// The target listener goroutine will naturally stop when browser is closed
 	if b.browser != nil {
 		return b.browser.Close()
 	}
@@ -566,8 +560,8 @@ func (b *Browser) startTargetListener() {
 		b.targetIDs[proto.TargetTargetID(info.TargetID)] = page
 	}
 
-	// Listen for new targets
-	b.stopTargetListener = b.browser.EachEvent(
+	// Listen for new targets - EachEvent returns a wait function that must be called
+	wait := b.browser.EachEvent(
 		func(e *proto.TargetTargetCreated) {
 			// Filter: only track actual pages, not iframes or service workers
 			if e.TargetInfo.Type != proto.TargetTargetInfoTypePage {
@@ -632,6 +626,9 @@ func (b *Browser) startTargetListener() {
 			}
 		},
 	)
+
+	// Start the event loop in a background goroutine
+	go wait()
 }
 
 // syncExistingPages discovers and tracks all existing pages in a connected browser.
