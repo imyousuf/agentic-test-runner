@@ -37,6 +37,9 @@ Execute a shell command and analyze failures with AI.
 | `--cmd <command>` | Command to execute (required for this mode) |
 | `--cwd <path>` | Working directory (default: current directory) |
 | `--context <text>` | Additional context for the AI agent |
+| `--python-venv <path>` | Path to Python virtual environment to activate |
+| `--nvm-version <version>` | Node.js version to use via nvm (e.g., `18` or `18.17.0`) |
+| `--no-auto-env` | Disable automatic environment detection |
 
 #### Examples
 
@@ -52,6 +55,15 @@ atr run --cmd "make build" --context "Building after refactoring the auth module
 
 # Use pro model for complex issues
 atr run --cmd "pytest" --model pro
+
+# With specific Python venv
+atr run --cmd "pytest tests/" --python-venv /path/to/.venv
+
+# With specific Node.js version
+atr run --cmd "npm test" --nvm-version 18
+
+# Disable auto environment detection
+atr run --cmd "python script.py" --no-auto-env
 ```
 
 ### Behavior Testing Mode
@@ -230,6 +242,66 @@ LLM connectivity test passed!
 
 ---
 
+## atr test-cmd-env
+
+Test environment detection for a command without executing it.
+
+```bash
+atr test-cmd-env "<command>" [flags]
+```
+
+Analyzes a command to show which Python/Node.js environments would be activated.
+
+### Flags
+
+| Flag | Description |
+|------|-------------|
+| `--cwd <path>` | Working directory for environment detection |
+| `--python-venv <path>` | Override Python venv path |
+| `--nvm-version <version>` | Override Node.js version |
+| `--no-auto-env` | Disable automatic environment detection |
+
+### Examples
+
+```bash
+# Test what environments a command would use
+atr test-cmd-env "pytest tests/"
+atr test-cmd-env "npm run build"
+atr test-cmd-env "make test"
+
+# Test with specific working directory
+atr test-cmd-env "pytest" --cwd /path/to/project
+
+# Test with manual venv override
+atr test-cmd-env "python script.py" --python-venv /path/to/.venv
+```
+
+### Output
+
+```
+Command: pytest tests/
+Working directory: /path/to/project
+
+Detection method: LLM
+Analysis:
+  needs_python: true
+  needs_node: false
+  reasoning: pytest is a standard Python testing framework.
+
+Python environment:
+  Status: FOUND (will be activated)
+  Type: python-venv
+  Path: /path/to/project/.venv
+  Activate: source /path/to/project/.venv/bin/activate
+Node.js environment:
+  Status: NOT NEEDED
+
+Final command would be:
+  source /path/to/project/.venv/bin/activate && pytest tests/
+```
+
+---
+
 ## atr version
 
 Display version information.
@@ -241,6 +313,47 @@ atr version
 Output:
 ```
 atr version dev-abc1234
+```
+
+---
+
+## atr update
+
+Check for and install updates.
+
+```bash
+atr update [flags]
+```
+
+Downloads and installs the latest version of ATR from GitHub releases. Dev versions auto-update every 2 days on startup (configurable).
+
+### Flags
+
+| Flag | Description |
+|------|-------------|
+| `--check` | Only check for updates, don't install |
+| `--force` | Force update even if already on latest version |
+
+### Examples
+
+```bash
+# Check for updates without installing
+atr update --check
+
+# Update to latest version
+atr update
+
+# Force update even if already up to date
+atr update --force
+```
+
+### Auto-Update Configuration
+
+Dev versions automatically check for updates on startup. Configure in `~/.atr/config.yaml`:
+
+```yaml
+update:
+  auto_update_dev: true   # Enable auto-update for dev versions (default: true)
 ```
 
 ---

@@ -227,6 +227,14 @@ agent:
 executor:
   command_timeout: "2m"      # Timeout for executed commands
   max_output_size: 10485760  # Max output capture (10MB)
+  environment:
+    auto_detect: true          # Auto-detect Python/Node.js environments
+    use_llm_detection: true    # Use LLM to analyze if command needs environments
+    python_venv_path: ""       # Manual path to Python venv
+    conda_env_name: ""         # Manual conda environment name
+    node_version: ""           # Manual Node.js version for nvm/fnm
+    disable_python_env: false  # Disable Python environment detection
+    disable_node_env: false    # Disable Node.js environment detection
 
 # Browser behavior testing settings
 behavior:
@@ -236,6 +244,7 @@ behavior:
     executable: "auto"       # "auto" to download, or path to browser
     cache_dir: ""            # Browser cache dir (default: ~/.cache/rod)
     headless: true           # Run browser headless
+    ignore_https_errors: false  # Ignore SSL certificate errors (for local dev with self-signed certs)
     viewport:
       width: 1920
       height: 1080
@@ -257,6 +266,10 @@ server:
   port: 9333           # HTTP server port
   read_timeout: "30s"  # HTTP read timeout
   write_timeout: "30s" # HTTP write timeout
+
+# Update settings
+update:
+  auto_update_dev: true  # Auto-update dev versions on startup (every 2 days)
 ```
 
 ## Environment Variables
@@ -275,6 +288,7 @@ All configuration can be set via environment variables with the `ATR_` prefix:
 | `ATR_AGENT_MAX_ITERATIONS` | `agent.max_iterations` | Max iterations |
 | `ATR_AGENT_TIMEOUT` | `agent.timeout` | Agent timeout |
 | `ATR_SERVER_PORT` | `server.port` | Browser server port |
+| `ATR_UPDATE_AUTO_UPDATE_DEV` | `update.auto_update_dev` | Auto-update dev versions |
 
 ## Example Configurations
 
@@ -345,6 +359,56 @@ behavior:
     headless: false
     slow_motion: "500ms"  # Slow down for debugging
 ```
+
+### Local Development with Self-Signed Certificates
+
+When testing against a local server with self-signed SSL certificates:
+
+```yaml
+behavior:
+  base_url: "https://localhost:3000"
+  browser:
+    ignore_https_errors: true  # Accept self-signed/invalid certificates
+```
+
+### Python/Node.js Environment Detection
+
+ATR can automatically detect and activate Python virtual environments (venv, conda) and Node.js version managers (nvm, fnm) based on the command being run.
+
+```yaml
+executor:
+  environment:
+    auto_detect: true         # Enable auto-detection
+    use_llm_detection: true   # Use LLM to analyze commands (recommended)
+```
+
+**How it works:**
+
+1. When you run a command like `pytest tests/`, ATR uses an LLM to determine the command needs Python
+2. ATR searches for `.venv`, `venv`, or other virtual environments in the working directory
+3. Only the Python environment is activated; Node.js environments are skipped
+
+**Manual override example:**
+
+```yaml
+executor:
+  environment:
+    python_venv_path: "/path/to/project/.venv"  # Always use this venv
+    node_version: "18"                           # Always use Node 18 via nvm
+```
+
+**Disable environment detection:**
+
+```yaml
+executor:
+  environment:
+    auto_detect: false         # Disable all auto-detection
+    # Or disable specific environments:
+    disable_python_env: true   # Disable Python detection only
+    disable_node_env: true     # Disable Node.js detection only
+```
+
+Use `atr test-cmd-env "<command>"` to preview which environments would be activated for a command without executing it.
 
 ## Precedence
 
