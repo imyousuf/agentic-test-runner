@@ -724,8 +724,10 @@ func (b *Browser) WaitForText(text string, timeout time.Duration) error {
 	return nil
 }
 
-// startTargetListener starts listening for new target (page/tab) creation events.
-// This allows detecting manually opened tabs and popups.
+// startTargetListener starts listening for target events including:
+// - New tabs opened manually
+// - Tabs closed
+// - Tab switches (when user clicks on a different tab)
 func (b *Browser) startTargetListener() {
 	if b.browser == nil {
 		return
@@ -737,7 +739,7 @@ func (b *Browser) startTargetListener() {
 		b.targetIDs[proto.TargetTargetID(info.TargetID)] = page
 	}
 
-	// Listen for new targets - EachEvent returns a wait function that must be called
+	// Listen for target events - EachEvent returns a wait function that must be called
 	wait := b.browser.EachEvent(
 		func(e *proto.TargetTargetCreated) {
 			// Filter: only track actual pages, not iframes or service workers
@@ -798,6 +800,28 @@ func (b *Browser) startTargetListener() {
 							b.current = len(b.pages) - 1
 						}
 						break
+					}
+				}
+			}
+		},
+		func(e *proto.TargetTargetInfoChanged) {
+			// Track tab switches - when a page becomes the active/focused tab
+			if e.TargetInfo.Type != proto.TargetTargetInfoTypePage {
+				return
+			}
+
+			b.mu.Lock()
+			defer b.mu.Unlock()
+
+			// Find the page in our tracked pages
+			if page, exists := b.targetIDs[e.TargetInfo.TargetID]; exists {
+				// Update current to this page if it's now attached (focused)
+				if e.TargetInfo.Attached {
+					for i, p := range b.pages {
+						if p == page {
+							b.current = i
+							break
+						}
 					}
 				}
 			}
