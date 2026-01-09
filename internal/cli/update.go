@@ -427,24 +427,23 @@ func extractZip(archivePath, destDir, targetFile string) error {
 
 // replaceBinary replaces the current binary with the new one.
 func replaceBinary(newBinary, currentBinary string) error {
-	// On Windows, we need to rename the old binary first
-	if runtime.GOOS == "windows" {
-		oldPath := currentBinary + ".old"
-		os.Remove(oldPath) // Remove any existing .old file
-		if err := os.Rename(currentBinary, oldPath); err != nil {
-			return fmt.Errorf("failed to rename old binary: %w", err)
-		}
-		if err := copyFile(newBinary, currentBinary); err != nil {
-			// Try to restore old binary
-			os.Rename(oldPath, currentBinary)
-			return fmt.Errorf("failed to copy new binary: %w", err)
-		}
-		os.Remove(oldPath)
-		return nil
+	// On both Windows and Unix, we need to rename/remove the old binary first
+	// because you can't overwrite a running executable ("text file busy" on Linux)
+	oldPath := currentBinary + ".old"
+	os.Remove(oldPath) // Remove any existing .old file
+
+	if err := os.Rename(currentBinary, oldPath); err != nil {
+		return fmt.Errorf("failed to rename old binary: %w", err)
 	}
 
-	// On Unix, we can rename over the existing file
-	return copyFile(newBinary, currentBinary)
+	if err := copyFile(newBinary, currentBinary); err != nil {
+		// Try to restore old binary
+		os.Rename(oldPath, currentBinary)
+		return fmt.Errorf("failed to copy new binary: %w", err)
+	}
+
+	os.Remove(oldPath)
+	return nil
 }
 
 // copyFile copies a file from src to dst, preserving permissions.
