@@ -139,6 +139,7 @@ behavior:
   base_url: ""           # Base URL for behavior tests
   browser:
     executable: "auto"   # Browser binary path ("auto" for auto-download)
+    version: "latest"    # Browser version: "latest", "stable", "beta", "dev", "canary"
     cache_dir: ""        # Browser cache directory (empty for default)
     headless: true       # Run browser in headless mode
     ignore_https_errors: false  # Ignore SSL certificate errors (useful for local dev)

@@ -2,8 +2,15 @@
 package browser
 
 import (
+	"archive/zip"
 	"context"
 	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
 	"sync"
 	"time"
 
@@ -76,8 +83,17 @@ func (b *Browser) Launch(ctx context.Context) error {
 	var l *launcher.Launcher
 
 	if b.config.Executable == "auto" || b.config.Executable == "" {
-		// Use rod's auto-download feature
-		l = launcher.New()
+		// Check if a specific version is requested
+		if b.config.Version != "" {
+			browserPath, err := b.resolveBrowserVersion()
+			if err != nil {
+				return fmt.Errorf("failed to resolve browser version: %w", err)
+			}
+			l = launcher.New().Bin(browserPath)
+		} else {
+			// Use rod's auto-download feature (default bundled version)
+			l = launcher.New()
+		}
 	} else {
 		// Use specified browser path
 		l = launcher.New().Bin(b.config.Executable)
@@ -116,6 +132,167 @@ func (b *Browser) Launch(ctx context.Context) error {
 
 	// Start listening for new tabs opened manually
 	b.startTargetListener()
+
+	return nil
+}
+
+// resolveBrowserVersion resolves and downloads the requested browser version.
+// Returns the path to the browser executable.
+func (b *Browser) resolveBrowserVersion() (string, error) {
+	atrDir, err := GetATRDir()
+	if err != nil {
+		return "", fmt.Errorf("failed to get ATR directory: %w", err)
+	}
+
+	// Resolve version from config
+	versionInfo, err := ResolveVersion(b.config.Version, atrDir)
+	if err != nil {
+		return "", err
+	}
+	if versionInfo == nil {
+		return "", fmt.Errorf("no version info resolved")
+	}
+
+	// Check if browser is already downloaded
+	browserDir := filepath.Join(atrDir, "browsers", versionInfo.Version)
+	browserPath := getBrowserExecutable(browserDir, versionInfo.Platform)
+
+	if _, err := os.Stat(browserPath); err == nil {
+		// Browser already exists
+		fmt.Printf("Using Chrome %s (%s)\n", versionInfo.Version, versionInfo.Channel)
+		return browserPath, nil
+	}
+
+	// Download and extract browser
+	fmt.Printf("Downloading Chrome %s (%s)...\n", versionInfo.Version, versionInfo.Channel)
+	if err := downloadAndExtractBrowser(versionInfo.URL, browserDir); err != nil {
+		return "", fmt.Errorf("failed to download browser: %w", err)
+	}
+
+	// Verify browser executable exists
+	if _, err := os.Stat(browserPath); err != nil {
+		return "", fmt.Errorf("browser executable not found after extraction: %s", browserPath)
+	}
+
+	fmt.Printf("Chrome %s ready\n", versionInfo.Version)
+	return browserPath, nil
+}
+
+// getBrowserExecutable returns the path to the browser executable for a platform.
+func getBrowserExecutable(browserDir, platform string) string {
+	switch {
+	case strings.HasPrefix(platform, "mac"):
+		// macOS: chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing
+		return filepath.Join(browserDir, "chrome-"+platform, "Google Chrome for Testing.app", "Contents", "MacOS", "Google Chrome for Testing")
+	case strings.HasPrefix(platform, "linux"):
+		// Linux: chrome-linux64/chrome
+		return filepath.Join(browserDir, "chrome-linux64", "chrome")
+	case strings.HasPrefix(platform, "win"):
+		// Windows: chrome-win64/chrome.exe
+		return filepath.Join(browserDir, "chrome-"+platform, "chrome.exe")
+	default:
+		return ""
+	}
+}
+
+// downloadAndExtractBrowser downloads and extracts the browser from URL.
+func downloadAndExtractBrowser(url, destDir string) error {
+	// Create temp file for download
+	tmpFile, err := os.CreateTemp("", "chrome-*.zip")
+	if err != nil {
+		return fmt.Errorf("failed to create temp file: %w", err)
+	}
+	defer os.Remove(tmpFile.Name())
+	defer tmpFile.Close()
+
+	// Download
+	resp, err := http.Get(url)
+	if err != nil {
+		return fmt.Errorf("failed to download: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("download failed with status %d", resp.StatusCode)
+	}
+
+	if _, err := io.Copy(tmpFile, resp.Body); err != nil {
+		return fmt.Errorf("failed to save download: %w", err)
+	}
+	tmpFile.Close()
+
+	// Create destination directory
+	if err := os.MkdirAll(destDir, 0755); err != nil {
+		return fmt.Errorf("failed to create directory: %w", err)
+	}
+
+	// Extract zip
+	if err := extractZip(tmpFile.Name(), destDir); err != nil {
+		return fmt.Errorf("failed to extract: %w", err)
+	}
+
+	// Make executable on Unix
+	if runtime.GOOS != "windows" {
+		// Find and chmod the chrome executable
+		filepath.Walk(destDir, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return nil
+			}
+			name := filepath.Base(path)
+			if name == "chrome" || name == "Google Chrome for Testing" {
+				os.Chmod(path, 0755)
+			}
+			return nil
+		})
+	}
+
+	return nil
+}
+
+// extractZip extracts a zip file to destination directory.
+func extractZip(zipPath, destDir string) error {
+	r, err := zip.OpenReader(zipPath)
+	if err != nil {
+		return err
+	}
+	defer r.Close()
+
+	for _, f := range r.File {
+		fpath := filepath.Join(destDir, f.Name)
+
+		// Security check: prevent zip slip
+		if !strings.HasPrefix(fpath, filepath.Clean(destDir)+string(os.PathSeparator)) {
+			return fmt.Errorf("invalid file path in zip: %s", f.Name)
+		}
+
+		if f.FileInfo().IsDir() {
+			os.MkdirAll(fpath, 0755)
+			continue
+		}
+
+		if err := os.MkdirAll(filepath.Dir(fpath), 0755); err != nil {
+			return err
+		}
+
+		outFile, err := os.OpenFile(fpath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, f.Mode())
+		if err != nil {
+			return err
+		}
+
+		rc, err := f.Open()
+		if err != nil {
+			outFile.Close()
+			return err
+		}
+
+		_, err = io.Copy(outFile, rc)
+		outFile.Close()
+		rc.Close()
+
+		if err != nil {
+			return err
+		}
+	}
 
 	return nil
 }

@@ -242,6 +242,7 @@ behavior:
 
   browser:
     executable: "auto"       # "auto" to download, or path to browser
+    version: "latest"        # Browser version: "latest", "stable", "beta", "dev", "canary"
     cache_dir: ""            # Browser cache dir (default: ~/.cache/rod)
     headless: true           # Run browser headless
     ignore_https_errors: false  # Ignore SSL certificate errors (for local dev with self-signed certs)
@@ -369,6 +370,29 @@ behavior:
   base_url: "https://localhost:3000"
   browser:
     ignore_https_errors: true  # Accept self-signed/invalid certificates
+```
+
+### Browser Version Configuration
+
+ATR downloads the latest Chrome for Testing by default. You can configure which version to use:
+
+```yaml
+behavior:
+  browser:
+    version: "latest"   # Always use latest stable (default)
+    # version: "beta"   # Use beta channel
+    # version: "dev"    # Use dev channel
+    # version: "canary" # Use canary channel (bleeding edge)
+```
+
+Browsers are cached in `~/.atr/browsers/` by version. Version information is cached for 24 hours in `~/.atr/browser-version.json`.
+
+To use a specific browser installation instead:
+
+```yaml
+behavior:
+  browser:
+    executable: "/path/to/chrome"  # Use this browser instead of downloading
 ```
 
 ### Python/Node.js Environment Detection

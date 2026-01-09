@@ -131,6 +131,9 @@ type BehaviorConfig struct {
 type BrowserConfig struct {
 	// Executable is the path to browser binary ("auto" for rod's auto-download).
 	Executable string `mapstructure:"executable"`
+	// Version specifies the browser version to download ("latest", "stable", or specific version like "132.0.6834.83").
+	// Only used when Executable is "auto". Default is empty (uses rod's bundled version).
+	Version string `mapstructure:"version"`
 	// CacheDir is the directory for rod's browser cache.
 	CacheDir string `mapstructure:"cache_dir"`
 	// Headless runs browser in headless mode.
@@ -269,7 +272,8 @@ func setDefaults(v *viper.Viper) {
 
 	// Behavior testing defaults
 	v.SetDefault("behavior.browser.executable", "auto")
-	v.SetDefault("behavior.browser.cache_dir", "")    // Empty means use rod's default
+	v.SetDefault("behavior.browser.version", "latest") // Download latest Chrome for Testing
+	v.SetDefault("behavior.browser.cache_dir", "")     // Empty means use rod's default
 	v.SetDefault("behavior.browser.headless", true)
 	v.SetDefault("behavior.browser.ignore_https_errors", false)
 	v.SetDefault("behavior.browser.viewport.width", 1920)
