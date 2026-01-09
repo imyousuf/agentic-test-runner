@@ -127,6 +127,7 @@ executor:
   max_output_size: 10485760 # Max bytes to capture (10MB)
   environment:
     auto_detect: true      # Automatically detect Python venv and Node.js environments
+    use_llm_detection: true  # Use LLM to analyze commands and determine env needs (pattern matching fallback)
     python_venv_path: ""   # Manual path to Python virtual environment
     conda_env_name: ""     # Manual conda environment name
     node_version: ""       # Manual Node.js version for nvm/fnm

@@ -79,6 +79,7 @@ func init() {
 	rootCmd.AddCommand(newBrowserCmd())
 	rootCmd.AddCommand(newTestCmd())
 	rootCmd.AddCommand(newUpdateCmd())
+	rootCmd.AddCommand(newTestCmdEnvCmd())
 }
 
 // initConfig reads in config file and ENV variables if set.

@@ -6,6 +6,8 @@ import (
 	"os"
 	"os/exec"
 	"time"
+
+	"github.com/imyousuf/agentic-test-runner/pkg/llm"
 )
 
 // shellExecutor implements Executor using the system shell.
@@ -14,6 +16,7 @@ type shellExecutor struct {
 	commandTimeout time.Duration
 	maxOutputSize  int
 	envConfig      EnvironmentConfig
+	llmClient      llm.Client
 }
 
 // Execute runs a command using the system shell.
@@ -28,7 +31,15 @@ func (e *shellExecutor) Execute(ctx context.Context, command, cwd string) (*Resu
 
 	envs := e.detectEnvironments(cwd)
 	if len(envs) > 0 {
-		// Apply environment wrapping for the first detected environment of each type
+		// Determine which environments are actually needed for this command
+		needs := e.detectEnvironmentNeeds(ctx, command)
+		if needs != nil {
+			// Filter to only needed environments
+			envs = filterEnvironments(envs, needs)
+		}
+		// If needs is nil (unknown), use all detected environments (backward compatible)
+
+		// Apply environment wrapping for the filtered environments
 		for _, env := range envs {
 			finalCommand = wrapCommandWithEnvironment(finalCommand, env)
 		}
@@ -156,4 +167,76 @@ func (b *limitedBuffer) String() string {
 		s += "\n... [output truncated]"
 	}
 	return s
+}
+
+// detectEnvironmentNeeds determines which environments a command needs.
+// It tries LLM detection first (if enabled and available), then falls back to pattern matching.
+// Returns nil if the command's needs cannot be determined (will use all detected environments).
+func (e *shellExecutor) detectEnvironmentNeeds(ctx context.Context, command string) *EnvironmentNeeds {
+	// Strategy 1: Try LLM if available and enabled
+	if e.envConfig.UseLLMDetection && e.llmClient != nil {
+		needs, err := DetectEnvironmentNeeds(ctx, e.llmClient, command)
+		if err == nil {
+			return needs
+		}
+		// LLM failed, fall through to pattern matching
+	}
+
+	// Strategy 2: Pattern matching fallback
+	return DetectEnvironmentNeedsFromPattern(command)
+}
+
+// TestEnvironmentDetection returns what environments would be used for a command
+// without actually executing it. Used by the test-cmd-env command.
+func TestEnvironmentDetection(ctx context.Context, command, cwd string,
+	envConfig EnvironmentConfig, llmClient llm.Client) *EnvironmentTestResult {
+
+	result := &EnvironmentTestResult{
+		Command: command,
+		Cwd:     cwd,
+	}
+
+	// Create a temporary executor to use detection methods
+	exec := &shellExecutor{
+		envConfig: envConfig,
+		llmClient: llmClient,
+	}
+
+	// Detect available environments
+	result.DetectedEnvs = exec.detectEnvironments(cwd)
+
+	// Determine needs (same logic as Execute)
+	if envConfig.UseLLMDetection && llmClient != nil {
+		needs, err := DetectEnvironmentNeeds(ctx, llmClient, command)
+		if err == nil {
+			result.Needs = needs
+			result.DetectionMethod = "LLM"
+		}
+	}
+
+	if result.Needs == nil {
+		result.Needs = DetectEnvironmentNeedsFromPattern(command)
+		if result.Needs != nil {
+			result.DetectionMethod = "Pattern matching"
+		} else {
+			result.DetectionMethod = "Unknown"
+		}
+	}
+
+	// Filter environments based on needs
+	if result.Needs != nil {
+		result.ActiveEnvs = filterEnvironments(result.DetectedEnvs, result.Needs)
+	} else {
+		// Unknown needs - use all detected environments
+		result.ActiveEnvs = result.DetectedEnvs
+	}
+
+	// Build final command preview
+	finalCommand := command
+	for _, env := range result.ActiveEnvs {
+		finalCommand = wrapCommandWithEnvironment(finalCommand, env)
+	}
+	result.FinalCommand = finalCommand
+
+	return result
 }

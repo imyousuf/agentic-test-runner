@@ -4,6 +4,8 @@ package executor
 import (
 	"context"
 	"time"
+
+	"github.com/imyousuf/agentic-test-runner/pkg/llm"
 )
 
 // Result represents the output of a command execution.
@@ -63,6 +65,8 @@ type Config struct {
 	MaxOutputSize int
 	// Environment contains environment detection configuration.
 	Environment EnvironmentConfig
+	// LLMClient is an optional LLM client for intelligent environment detection.
+	LLMClient llm.Client
 }
 
 // DefaultConfig returns the default executor configuration.
@@ -86,5 +90,6 @@ func New(cfg *Config) Executor {
 		commandTimeout: cfg.CommandTimeout,
 		maxOutputSize:  cfg.MaxOutputSize,
 		envConfig:      cfg.Environment,
+		llmClient:      cfg.LLMClient,
 	}
 }

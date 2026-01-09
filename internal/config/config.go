@@ -113,6 +113,8 @@ type ExecutorEnvironmentConfig struct {
 	DisablePythonEnv bool `mapstructure:"disable_python_env"`
 	// DisableNodeEnv disables Node.js environment detection.
 	DisableNodeEnv bool `mapstructure:"disable_node_env"`
+	// UseLLMDetection uses LLM to analyze commands and determine environment needs (default: true).
+	UseLLMDetection bool `mapstructure:"use_llm_detection"`
 }
 
 // BehaviorConfig holds browser behavior testing configuration.
@@ -263,6 +265,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("executor.environment.node_version", "")
 	v.SetDefault("executor.environment.disable_python_env", false)
 	v.SetDefault("executor.environment.disable_node_env", false)
+	v.SetDefault("executor.environment.use_llm_detection", true)
 
 	// Behavior testing defaults
 	v.SetDefault("behavior.browser.executable", "auto")

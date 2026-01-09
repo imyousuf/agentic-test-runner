@@ -150,6 +150,7 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		NodeVersion:      cfg.Executor.Environment.NodeVersion,
 		DisablePythonEnv: cfg.Executor.Environment.DisablePythonEnv,
 		DisableNodeEnv:   cfg.Executor.Environment.DisableNodeEnv,
+		UseLLMDetection:  cfg.Executor.Environment.UseLLMDetection,
 	}
 
 	// CLI flags take precedence
@@ -163,11 +164,21 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		envConfig.AutoDetect = false
 	}
 
-	// Create executor
+	// Create LLM client for environment detection and agent (may be nil if config invalid)
+	var llmClient llm.Client
+	llmCfg := cfg.GetLLMConfig()
+	llmClient, _ = llm.NewClient(ctx, llmCfg)
+	// Note: we don't fail here if LLM client creation fails - we'll use pattern matching fallback
+	if llmClient != nil {
+		defer llmClient.Close()
+	}
+
+	// Create executor with optional LLM client
 	exec := executor.New(&executor.Config{
 		CommandTimeout: cfg.Executor.CommandTimeout,
 		MaxOutputSize:  cfg.Executor.MaxOutputSize,
 		Environment:    envConfig,
+		LLMClient:      llmClient,
 	})
 
 	// Execute the command
@@ -201,13 +212,10 @@ func runCommand(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Println("\nAnalyzing failure with AI agent...")
 
-	// Create LLM client
-	llmCfg := cfg.GetLLMConfig()
-	llmClient, err := llm.NewClient(ctx, llmCfg)
-	if err != nil {
-		return fmt.Errorf("failed to create LLM client: %w", err)
+	// Ensure we have an LLM client for agent analysis
+	if llmClient == nil {
+		return fmt.Errorf("LLM client not available for agent analysis - check your API key configuration")
 	}
-	defer llmClient.Close()
 
 	fmt.Printf("Using model: %s (%s)\n\n", llmClient.Model(), llmClient.Provider())
 
