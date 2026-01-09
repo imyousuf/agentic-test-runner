@@ -122,6 +122,11 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
+	// Early validation for LLM-dependent operations
+	if err := cfg.ValidateForLLM(); err != nil {
+		return err
+	}
+
 	// Route to appropriate handler
 	if behaviorFlag != "" {
 		return runBehaviorTest(ctx, cfg, cwd)
@@ -163,11 +168,6 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		fmt.Println("  (command timed out)")
 	}
 	fmt.Println("\nAnalyzing failure with AI agent...")
-
-	// Validate config for LLM
-	if err := cfg.Validate(); err != nil {
-		return fmt.Errorf("configuration error: %w", err)
-	}
 
 	// Create LLM client
 	llmCfg := cfg.GetLLMConfig()
@@ -266,11 +266,6 @@ func runBehaviorTest(ctx context.Context, cfg *config.Config, cwd string) error 
 		}
 	}
 	defer b.Close()
-
-	// Validate config for LLM
-	if err := cfg.Validate(); err != nil {
-		return fmt.Errorf("configuration error: %w", err)
-	}
 
 	// Create LLM client
 	llmCfg := cfg.GetLLMConfig()

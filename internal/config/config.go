@@ -274,6 +274,32 @@ func (c *Config) Validate() error {
 	return nil
 }
 
+// ValidateForLLM validates configuration for LLM-dependent operations
+// and returns a user-friendly error message with configuration guidance.
+func (c *Config) ValidateForLLM() error {
+	err := c.Validate()
+	if err == nil {
+		return nil
+	}
+
+	guidance := `
+To configure ATR, you can:
+  1. Set environment variable: GEMINI_API_KEY=your-api-key
+  2. Or run: atr config init
+  3. Or create ~/.atr/config.yaml with:
+     backend: gemini-api
+     gemini:
+       api_key: your-api-key
+
+For Vertex AI, set:
+  - GOOGLE_CLOUD_PROJECT environment variable
+  - backend: vertex-ai
+
+Run 'atr test' to verify your configuration.`
+
+	return fmt.Errorf("%w\n%s", err, guidance)
+}
+
 // GetLLMConfig returns an LLM client configuration based on the current config.
 func (c *Config) GetLLMConfig() llm.Config {
 	var provider llm.Provider
