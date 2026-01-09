@@ -87,6 +87,11 @@ func (b *Browser) Launch(ctx context.Context) error {
 	// Set headless mode
 	l = l.Headless(b.config.Headless)
 
+	// Ignore HTTPS certificate errors if configured (useful for local dev with self-signed certs)
+	if b.config.IgnoreHTTPSErrors {
+		l = l.Set("ignore-certificate-errors")
+	}
+
 	// Launch and get control URL
 	controlURL, err := l.Launch()
 	if err != nil {
@@ -120,6 +125,11 @@ func (b *Browser) Connect(ctx context.Context, cdpEndpoint string) error {
 
 	if err := browser.Connect(); err != nil {
 		return fmt.Errorf("failed to connect to browser at %s: %w", cdpEndpoint, err)
+	}
+
+	// Ignore HTTPS certificate errors if configured (useful for local dev with self-signed certs)
+	if b.config.IgnoreHTTPSErrors {
+		browser.MustIgnoreCertErrors(true)
 	}
 
 	b.browser = browser

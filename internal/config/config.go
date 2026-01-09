@@ -112,6 +112,8 @@ type BrowserConfig struct {
 	CacheDir string `mapstructure:"cache_dir"`
 	// Headless runs browser in headless mode.
 	Headless bool `mapstructure:"headless"`
+	// IgnoreHTTPSErrors ignores SSL/TLS certificate errors (useful for local dev with self-signed certs).
+	IgnoreHTTPSErrors bool `mapstructure:"ignore_https_errors"`
 	// Viewport contains viewport dimensions.
 	Viewport ViewportConfig `mapstructure:"viewport"`
 	// PageTimeout is the default page load timeout.
@@ -231,6 +233,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("behavior.browser.executable", "auto")
 	v.SetDefault("behavior.browser.cache_dir", "")    // Empty means use rod's default
 	v.SetDefault("behavior.browser.headless", true)
+	v.SetDefault("behavior.browser.ignore_https_errors", false)
 	v.SetDefault("behavior.browser.viewport.width", 1920)
 	v.SetDefault("behavior.browser.viewport.height", 1080)
 	v.SetDefault("behavior.browser.page_timeout", "30s")
