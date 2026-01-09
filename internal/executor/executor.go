@@ -61,6 +61,8 @@ type Config struct {
 	CommandTimeout time.Duration
 	// MaxOutputSize is the maximum bytes to capture from command output.
 	MaxOutputSize int
+	// Environment contains environment detection configuration.
+	Environment EnvironmentConfig
 }
 
 // DefaultConfig returns the default executor configuration.
@@ -68,6 +70,9 @@ func DefaultConfig() *Config {
 	return &Config{
 		CommandTimeout: 2 * time.Minute,
 		MaxOutputSize:  100 * 1024, // 100KB
+		Environment: EnvironmentConfig{
+			AutoDetect: true,
+		},
 	}
 }
 
@@ -80,5 +85,6 @@ func New(cfg *Config) Executor {
 		shell:          detectShell(),
 		commandTimeout: cfg.CommandTimeout,
 		maxOutputSize:  cfg.MaxOutputSize,
+		envConfig:      cfg.Environment,
 	}
 }

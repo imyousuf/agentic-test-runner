@@ -34,6 +34,11 @@ var (
 	headlessFlag    bool
 	viewportFlag    string
 	cdpEndpointFlag string
+
+	// Environment flags
+	pythonVenvFlag string
+	nvmVersionFlag string
+	noAutoEnvFlag  bool
 )
 
 func newRunCmd() *cobra.Command {
@@ -81,6 +86,11 @@ will read the test specification and execute it using browser automation tools.`
 	runCmd.Flags().BoolVar(&headlessFlag, "headless", true, "Run browser in headless mode")
 	runCmd.Flags().StringVar(&viewportFlag, "viewport", "", "Viewport size (e.g., 1920x1080)")
 	runCmd.Flags().StringVar(&cdpEndpointFlag, "cdp-endpoint", "", "Connect to existing browser via CDP endpoint")
+
+	// Environment flags (for --cmd mode)
+	runCmd.Flags().StringVar(&pythonVenvFlag, "python-venv", "", "Path to Python virtual environment to activate")
+	runCmd.Flags().StringVar(&nvmVersionFlag, "nvm-version", "", "Node.js version to use via nvm (e.g., '18' or '18.17.0')")
+	runCmd.Flags().BoolVar(&noAutoEnvFlag, "no-auto-env", false, "Disable automatic environment detection")
 
 	return runCmd
 }
@@ -132,10 +142,32 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		return runBehaviorTest(ctx, cfg, cwd)
 	}
 
+	// Build environment config with CLI overrides
+	envConfig := executor.EnvironmentConfig{
+		AutoDetect:       cfg.Executor.Environment.AutoDetect,
+		PythonVenvPath:   cfg.Executor.Environment.PythonVenvPath,
+		CondaEnvName:     cfg.Executor.Environment.CondaEnvName,
+		NodeVersion:      cfg.Executor.Environment.NodeVersion,
+		DisablePythonEnv: cfg.Executor.Environment.DisablePythonEnv,
+		DisableNodeEnv:   cfg.Executor.Environment.DisableNodeEnv,
+	}
+
+	// CLI flags take precedence
+	if pythonVenvFlag != "" {
+		envConfig.PythonVenvPath = pythonVenvFlag
+	}
+	if nvmVersionFlag != "" {
+		envConfig.NodeVersion = nvmVersionFlag
+	}
+	if noAutoEnvFlag {
+		envConfig.AutoDetect = false
+	}
+
 	// Create executor
 	exec := executor.New(&executor.Config{
 		CommandTimeout: cfg.Executor.CommandTimeout,
 		MaxOutputSize:  cfg.Executor.MaxOutputSize,
+		Environment:    envConfig,
 	})
 
 	// Execute the command

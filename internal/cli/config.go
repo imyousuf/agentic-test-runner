@@ -125,6 +125,13 @@ agent:
 executor:
   command_timeout: "2m"    # Timeout for individual commands
   max_output_size: 10485760 # Max bytes to capture (10MB)
+  environment:
+    auto_detect: true      # Automatically detect Python venv and Node.js environments
+    python_venv_path: ""   # Manual path to Python virtual environment
+    conda_env_name: ""     # Manual conda environment name
+    node_version: ""       # Manual Node.js version for nvm/fnm
+    disable_python_env: false  # Disable Python environment detection
+    disable_node_env: false    # Disable Node.js environment detection
 
 # Browser Behavior Testing Configuration
 behavior:

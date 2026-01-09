@@ -95,6 +95,24 @@ type ExecutorConfig struct {
 	CommandTimeout time.Duration `mapstructure:"command_timeout"`
 	// MaxOutputSize is the maximum bytes to capture from command output.
 	MaxOutputSize int `mapstructure:"max_output_size"`
+	// Environment contains environment detection configuration.
+	Environment ExecutorEnvironmentConfig `mapstructure:"environment"`
+}
+
+// ExecutorEnvironmentConfig holds configuration for environment detection and activation.
+type ExecutorEnvironmentConfig struct {
+	// AutoDetect enables automatic environment detection (default: true).
+	AutoDetect bool `mapstructure:"auto_detect"`
+	// PythonVenvPath manually specifies a Python virtual environment path.
+	PythonVenvPath string `mapstructure:"python_venv_path"`
+	// CondaEnvName manually specifies a conda environment name.
+	CondaEnvName string `mapstructure:"conda_env_name"`
+	// NodeVersion manually specifies a Node.js version for nvm/fnm.
+	NodeVersion string `mapstructure:"node_version"`
+	// DisablePythonEnv disables Python environment detection.
+	DisablePythonEnv bool `mapstructure:"disable_python_env"`
+	// DisableNodeEnv disables Node.js environment detection.
+	DisableNodeEnv bool `mapstructure:"disable_node_env"`
 }
 
 // BehaviorConfig holds browser behavior testing configuration.
@@ -239,6 +257,12 @@ func setDefaults(v *viper.Viper) {
 	// Executor defaults
 	v.SetDefault("executor.command_timeout", "2m")
 	v.SetDefault("executor.max_output_size", 10485760) // 10MB
+	v.SetDefault("executor.environment.auto_detect", true)
+	v.SetDefault("executor.environment.python_venv_path", "")
+	v.SetDefault("executor.environment.conda_env_name", "")
+	v.SetDefault("executor.environment.node_version", "")
+	v.SetDefault("executor.environment.disable_python_env", false)
+	v.SetDefault("executor.environment.disable_node_env", false)
 
 	// Behavior testing defaults
 	v.SetDefault("behavior.browser.executable", "auto")
