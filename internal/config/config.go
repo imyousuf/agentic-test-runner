@@ -50,6 +50,9 @@ type Config struct {
 
 	// Server contains browser server configuration.
 	Server ServerConfig `mapstructure:"server"`
+
+	// Update contains update configuration.
+	Update UpdateConfig `mapstructure:"update"`
 }
 
 // GeminiConfig holds Gemini API configuration.
@@ -160,6 +163,14 @@ type ServerConfig struct {
 	WriteTimeout time.Duration `mapstructure:"write_timeout"`
 }
 
+// UpdateConfig holds update configuration.
+type UpdateConfig struct {
+	// AutoUpdateDev enables automatic updates for dev versions (default: true).
+	AutoUpdateDev bool `mapstructure:"auto_update_dev"`
+	// Disabled disables all update checking (default: false).
+	Disabled bool `mapstructure:"disabled"`
+}
+
 // Load loads configuration from file, environment variables, and defaults.
 func Load() (*Config, error) {
 	v := viper.New()
@@ -253,6 +264,10 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("server.port", 9333)
 	v.SetDefault("server.read_timeout", "30s")
 	v.SetDefault("server.write_timeout", "30s")
+
+	// Update defaults
+	v.SetDefault("update.auto_update_dev", true)
+	v.SetDefault("update.disabled", false)
 }
 
 // Validate checks that the configuration is valid and complete.
