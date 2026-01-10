@@ -306,12 +306,13 @@ func (b *Browser) Snapshot(verbose bool) ([]ElementInfo, error) {
 
 			// Get bounds
 			if shape, err := el.Shape(); err == nil {
-				box := shape.Box()
-				info.Bounds = &ElementBounds{
-					X:      box.X,
-					Y:      box.Y,
-					Width:  box.Width,
-					Height: box.Height,
+				if box := shape.Box(); box != nil {
+					info.Bounds = &ElementBounds{
+						X:      box.X,
+						Y:      box.Y,
+						Width:  box.Width,
+						Height: box.Height,
+					}
 				}
 			}
 		}

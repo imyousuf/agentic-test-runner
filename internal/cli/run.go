@@ -309,6 +309,12 @@ func runBehaviorTest(ctx context.Context, cfg *config.Config, cwd string) error 
 
 	// Create LLM client
 	llmCfg := cfg.GetLLMConfig()
+
+	// For CLI backends, pass the browser's CDP endpoint so the MCP server can connect
+	if llmCfg.Provider.IsCLI() && b.CDPEndpoint() != "" {
+		llmCfg.CDPEndpoint = b.CDPEndpoint()
+	}
+
 	llmClient, err := llm.NewClient(ctx, llmCfg)
 	if err != nil {
 		return fmt.Errorf("failed to create LLM client: %w", err)

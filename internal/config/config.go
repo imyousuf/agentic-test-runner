@@ -243,6 +243,15 @@ func Load() (*Config, error) {
 		}
 	}
 
+	// Merge CLI flag values from global viper (flags are bound there in root.go)
+	// CLI flags have highest precedence over config file and env vars
+	globalViper := viper.GetViper()
+	for _, key := range []string{"backend", "model", "gemini.api_key", "vertex.project", "vertex.location"} {
+		if globalViper.IsSet(key) {
+			v.Set(key, globalViper.Get(key))
+		}
+	}
+
 	// Unmarshal into struct
 	var cfg Config
 	if err := v.Unmarshal(&cfg); err != nil {

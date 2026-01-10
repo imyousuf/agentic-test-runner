@@ -1,0 +1,10 @@
+Test: Simple navigation test
+
+Steps:
+1. Navigate to https://example.com
+2. Verify the page title is "Example Domain"
+3. Take a screenshot
+
+Expected Results:
+- Page loads successfully
+- Title is correct

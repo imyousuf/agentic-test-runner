@@ -28,6 +28,7 @@ func newMCPCmd() *cobra.Command {
 func newMCPServeCmd() *cobra.Command {
 	var headless bool
 	var ignoreHTTPSErrors bool
+	var cdpEndpoint string
 
 	cmd := &cobra.Command{
 		Use:   "serve",
@@ -54,6 +55,9 @@ This allows CLI tools like claude and gemini to control a browser via ATR:
       "atr-browser": {"command": "atr", "args": ["mcp", "serve"], "trust": true}
     }
   }
+
+  # Connect to existing browser via CDP endpoint
+  atr mcp serve --cdp-endpoint ws://localhost:9222
 
 The server communicates via JSON-RPC 2.0 over stdio and exposes browser tools:
   - browser_navigate: Navigate to a URL
@@ -89,8 +93,19 @@ The server communicates via JSON-RPC 2.0 over stdio and exposes browser tools:
 				browserCfg.IgnoreHTTPSErrors = ignoreHTTPSErrors
 			}
 
-			// Create MCP server
-			server := mcp.NewServer(browserCfg)
+			// Check for CDP endpoint from flag or environment
+			endpoint := cdpEndpoint
+			if endpoint == "" {
+				endpoint = os.Getenv("ATR_CDP_ENDPOINT")
+			}
+
+			// Create MCP server with options
+			var opts []mcp.ServerOption
+			if endpoint != "" {
+				opts = append(opts, mcp.WithCDPEndpoint(endpoint))
+			}
+
+			server := mcp.NewServer(browserCfg, opts...)
 			defer server.Close()
 
 			// Set up signal handling for graceful shutdown
@@ -112,6 +127,7 @@ The server communicates via JSON-RPC 2.0 over stdio and exposes browser tools:
 
 	cmd.Flags().BoolVar(&headless, "headless", true, "Run browser in headless mode")
 	cmd.Flags().BoolVar(&ignoreHTTPSErrors, "ignore-https-errors", false, "Ignore HTTPS certificate errors")
+	cmd.Flags().StringVar(&cdpEndpoint, "cdp-endpoint", "", "Connect to existing browser via CDP endpoint (or set ATR_CDP_ENDPOINT)")
 
 	return cmd
 }

@@ -16,19 +16,34 @@ import (
 
 // Server implements the MCP server for browser automation.
 type Server struct {
-	browser *browser.Browser
-	config  config.BrowserConfig
-	scanner *bufio.Scanner
-	writer  io.Writer
+	browser     *browser.Browser
+	config      config.BrowserConfig
+	cdpEndpoint string
+	scanner     *bufio.Scanner
+	writer      io.Writer
+}
+
+// ServerOption configures a Server.
+type ServerOption func(*Server)
+
+// WithCDPEndpoint sets the CDP endpoint to connect to an existing browser.
+func WithCDPEndpoint(endpoint string) ServerOption {
+	return func(s *Server) {
+		s.cdpEndpoint = endpoint
+	}
 }
 
 // NewServer creates a new MCP server.
-func NewServer(cfg config.BrowserConfig) *Server {
-	return &Server{
+func NewServer(cfg config.BrowserConfig, opts ...ServerOption) *Server {
+	s := &Server{
 		config:  cfg,
 		scanner: bufio.NewScanner(os.Stdin),
 		writer:  os.Stdout,
 	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 // Request represents a JSON-RPC 2.0 request.
@@ -178,15 +193,23 @@ func (s *Server) handleToolsCall(ctx context.Context, req *Request) {
 }
 
 // executeTool executes a browser tool.
-func (s *Server) executeTool(ctx context.Context, name string, args map[string]interface{}) (string, error) {
+func (s *Server) executeTool(ctx context.Context, name string, args map[string]any) (string, error) {
 	// Lazy browser initialization
 	if s.browser == nil {
 		b, err := browser.New(s.config)
 		if err != nil {
 			return "", fmt.Errorf("failed to create browser: %w", err)
 		}
-		if err := b.Launch(ctx); err != nil {
-			return "", fmt.Errorf("failed to launch browser: %w", err)
+
+		// Connect to existing browser via CDP or launch new one
+		if s.cdpEndpoint != "" {
+			if err := b.Connect(ctx, s.cdpEndpoint); err != nil {
+				return "", fmt.Errorf("failed to connect to browser at %s: %w", s.cdpEndpoint, err)
+			}
+		} else {
+			if err := b.Launch(ctx); err != nil {
+				return "", fmt.Errorf("failed to launch browser: %w", err)
+			}
 		}
 		s.browser = b
 	}
@@ -197,8 +220,15 @@ func (s *Server) executeTool(ctx context.Context, name string, args map[string]i
 		if url == "" {
 			return "", fmt.Errorf("url is required")
 		}
-		if err := s.browser.Navigate(ctx, url); err != nil {
-			return "", err
+		// Use NewPage if no page exists, otherwise Navigate
+		if !s.browser.HasPage() {
+			if err := s.browser.NewPage(ctx, url); err != nil {
+				return "", err
+			}
+		} else {
+			if err := s.browser.Navigate(ctx, url); err != nil {
+				return "", err
+			}
 		}
 		return fmt.Sprintf("Navigated to %s", url), nil
 

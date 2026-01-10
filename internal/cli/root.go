@@ -59,7 +59,7 @@ func init() {
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "verbose output")
 
 	// LLM backend flags
-	rootCmd.PersistentFlags().String("backend", "", "LLM backend: gemini-api or vertex-ai")
+	rootCmd.PersistentFlags().String("backend", "", "LLM backend: claude-cli, gemini-cli, gemini-api, or vertex-ai")
 	rootCmd.PersistentFlags().String("api-key", "", "Gemini API key")
 	rootCmd.PersistentFlags().String("project", "", "GCP project for Vertex AI")
 	rootCmd.PersistentFlags().String("location", "", "GCP location for Vertex AI")

@@ -55,6 +55,10 @@ type Config struct {
 
 	// SystemPrompt is an optional system prompt to prepend to conversations.
 	SystemPrompt string
+
+	// CDPEndpoint is the browser CDP WebSocket URL for CLI backends.
+	// This allows CLI tools to connect to an existing browser instance.
+	CDPEndpoint string
 }
 
 // Validate checks that the configuration is valid.

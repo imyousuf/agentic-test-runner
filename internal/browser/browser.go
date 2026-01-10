@@ -23,11 +23,12 @@ import (
 
 // Browser manages browser lifecycle and page interactions.
 type Browser struct {
-	browser *rod.Browser
-	pages   []*rod.Page
-	current int // index of current page
-	config  config.BrowserConfig
-	mu      sync.RWMutex
+	browser    *rod.Browser
+	pages      []*rod.Page
+	current    int // index of current page
+	config     config.BrowserConfig
+	controlURL string // CDP WebSocket URL for connecting to this browser
+	mu         sync.RWMutex
 
 	// Event tracking
 	consoleMessages []ConsoleMessage
@@ -117,6 +118,9 @@ func (b *Browser) Launch(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to launch browser: %w", err)
 	}
+
+	// Store the control URL for external access (e.g., MCP servers)
+	b.controlURL = controlURL
 
 	// Connect to browser
 	browser := rod.New().ControlURL(controlURL)
@@ -311,6 +315,9 @@ func (b *Browser) Connect(ctx context.Context, cdpEndpoint string) error {
 		return fmt.Errorf("failed to connect to browser at %s: %w", cdpEndpoint, err)
 	}
 
+	// Store the control URL for external access
+	b.controlURL = cdpEndpoint
+
 	// Ignore HTTPS certificate errors if configured (useful for local dev with self-signed certs)
 	if b.config.IgnoreHTTPSErrors {
 		browser.MustIgnoreCertErrors(true)
@@ -325,6 +332,14 @@ func (b *Browser) Connect(ctx context.Context, cdpEndpoint string) error {
 	b.startTargetListener()
 
 	return nil
+}
+
+// CDPEndpoint returns the CDP WebSocket URL for this browser.
+// This can be used by external tools (like MCP servers) to connect to this browser.
+func (b *Browser) CDPEndpoint() string {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return b.controlURL
 }
 
 // Close closes the browser and all pages.
@@ -531,6 +546,13 @@ func (b *Browser) ClosePage(index int) error {
 	}
 
 	return nil
+}
+
+// HasPage returns true if the browser has at least one page/tab.
+func (b *Browser) HasPage() bool {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return len(b.pages) > 0
 }
 
 // Navigate navigates the current page to the given URL.
