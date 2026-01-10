@@ -33,6 +33,9 @@ type Config struct {
 	// Vertex contains Vertex AI configuration.
 	Vertex VertexConfig `mapstructure:"vertex"`
 
+	// CLI contains CLI backend configuration.
+	CLI CLIConfig `mapstructure:"cli"`
+
 	// Model specifies which model tier to use (flash or pro).
 	Model string `mapstructure:"model"`
 
@@ -69,6 +72,14 @@ type VertexConfig struct {
 	Location string `mapstructure:"location"`
 	// CredentialsFile is the path to a service account JSON key file.
 	CredentialsFile string `mapstructure:"credentials_file"`
+}
+
+// CLIConfig holds CLI backend configuration.
+type CLIConfig struct {
+	// AutoDetect enables automatic CLI detection (default: true).
+	AutoDetect bool `mapstructure:"auto_detect"`
+	// Timeout is the maximum time for CLI execution.
+	Timeout time.Duration `mapstructure:"timeout"`
 }
 
 // ModelsConfig holds model name mappings.
@@ -250,6 +261,10 @@ func setDefaults(v *viper.Viper) {
 	// Vertex AI defaults
 	v.SetDefault("vertex.location", "global")
 
+	// CLI defaults
+	v.SetDefault("cli.auto_detect", true)
+	v.SetDefault("cli.timeout", "5m")
+
 	// Model name defaults
 	v.SetDefault("models.flash", "gemini-3-flash-preview")
 	v.SetDefault("models.pro", "gemini-3-pro-preview")
@@ -312,15 +327,24 @@ func (c *Config) Validate() error {
 		if c.Vertex.Project == "" {
 			return fmt.Errorf("vertex AI project required: set GOOGLE_CLOUD_PROJECT environment variable or configure in ~/.atr/config.yaml")
 		}
+	case "claude-cli", "gemini-cli":
+		// CLI backends don't require API keys - they use the CLI's authentication
+		// Validation of CLI availability is done at runtime
 	default:
-		return fmt.Errorf("invalid backend: %s (must be 'gemini-api' or 'vertex-ai')", c.Backend)
+		return fmt.Errorf("invalid backend: %s (must be 'gemini-api', 'vertex-ai', 'claude-cli', or 'gemini-cli')", c.Backend)
 	}
 
-	if c.Model != "flash" && c.Model != "pro" {
+	// Model tier is only relevant for API backends
+	if !c.IsCLIBackend() && c.Model != "flash" && c.Model != "pro" {
 		return fmt.Errorf("invalid model tier: %s (must be 'flash' or 'pro')", c.Model)
 	}
 
 	return nil
+}
+
+// IsCLIBackend returns true if the configured backend is CLI-based.
+func (c *Config) IsCLIBackend() bool {
+	return c.Backend == "claude-cli" || c.Backend == "gemini-cli"
 }
 
 // ValidateForLLM validates configuration for LLM-dependent operations
@@ -344,12 +368,17 @@ For Vertex AI, set:
   - GOOGLE_CLOUD_PROJECT environment variable
   - backend: vertex-ai
 
+For CLI backends (no API key needed):
+  - Install claude CLI and set: backend: claude-cli
+  - Or install gemini CLI and set: backend: gemini-cli
+
 Run 'atr test' to verify your configuration.`
 
 	return fmt.Errorf("%w\n%s", err, guidance)
 }
 
 // GetLLMConfig returns an LLM client configuration based on the current config.
+// For CLI backends, this returns a config with the CLI provider set.
 func (c *Config) GetLLMConfig() llm.Config {
 	var provider llm.Provider
 	switch c.Backend {
@@ -357,6 +386,10 @@ func (c *Config) GetLLMConfig() llm.Config {
 		provider = llm.ProviderGemini
 	case "vertex-ai":
 		provider = llm.ProviderVertexAI
+	case "claude-cli":
+		provider = llm.ProviderClaudeCLI
+	case "gemini-cli":
+		provider = llm.ProviderGeminiCLI
 	}
 
 	model := c.Models.Flash
@@ -373,6 +406,14 @@ func (c *Config) GetLLMConfig() llm.Config {
 		CredentialsFile: c.Vertex.CredentialsFile,
 		Temperature:     c.Agent.Temperature,
 	}
+}
+
+// GetCLITimeout returns the CLI execution timeout.
+func (c *Config) GetCLITimeout() time.Duration {
+	if c.CLI.Timeout > 0 {
+		return c.CLI.Timeout
+	}
+	return 5 * time.Minute
 }
 
 // GetModelName returns the full model name based on the model tier.

@@ -8,6 +8,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/imyousuf/agentic-test-runner/internal/config"
+	"github.com/imyousuf/agentic-test-runner/internal/llm"
+	pkgllm "github.com/imyousuf/agentic-test-runner/pkg/llm"
 )
 
 func newConfigCmd() *cobra.Command {
@@ -37,21 +39,40 @@ func newConfigShowCmd() *cobra.Command {
 			fmt.Println("Current Configuration:")
 			fmt.Println("======================")
 			fmt.Printf("Backend: %s\n", cfg.Backend)
-			fmt.Printf("Model tier: %s\n", cfg.Model)
-			fmt.Printf("Model name: %s\n", cfg.GetModelName())
+
+			if cfg.IsCLIBackend() {
+				fmt.Printf("CLI Timeout: %s\n", cfg.GetCLITimeout())
+			} else {
+				fmt.Printf("Model tier: %s\n", cfg.Model)
+				fmt.Printf("Model name: %s\n", cfg.GetModelName())
+			}
 			fmt.Println()
 
-			if cfg.Backend == "gemini-api" {
+			switch cfg.Backend {
+			case "gemini-api":
 				fmt.Println("Gemini API:")
 				if cfg.Gemini.APIKey != "" {
 					fmt.Println("  API Key: [set]")
 				} else {
 					fmt.Println("  API Key: [not set]")
 				}
-			} else {
+			case "vertex-ai":
 				fmt.Println("Vertex AI:")
 				fmt.Printf("  Project: %s\n", cfg.Vertex.Project)
 				fmt.Printf("  Location: %s\n", cfg.Vertex.Location)
+			case "claude-cli", "gemini-cli":
+				fmt.Println("CLI Backend:")
+				clis := llm.DetectAvailableCLIs()
+				for _, cli := range clis {
+					status := "not installed"
+					if cli.Available {
+						status = "installed"
+						if cli.Version != "" {
+							status = fmt.Sprintf("installed (%s)", cli.Version)
+						}
+					}
+					fmt.Printf("  %s: %s\n", cli.Provider, status)
+				}
 			}
 
 			fmt.Println()
@@ -64,6 +85,23 @@ func newConfigShowCmd() *cobra.Command {
 			fmt.Println("Executor Settings:")
 			fmt.Printf("  Command Timeout: %s\n", cfg.Executor.CommandTimeout)
 			fmt.Printf("  Max Output Size: %d bytes\n", cfg.Executor.MaxOutputSize)
+
+			// Show available CLIs if not using CLI backend
+			if !cfg.IsCLIBackend() {
+				fmt.Println()
+				fmt.Println("Available CLI Backends:")
+				clis := llm.DetectAvailableCLIs()
+				if len(clis) == 0 {
+					fmt.Println("  (none detected)")
+				}
+				for _, cli := range clis {
+					version := ""
+					if cli.Version != "" {
+						version = fmt.Sprintf(" (%s)", cli.Version)
+					}
+					fmt.Printf("  %s%s\n", cli.Provider, version)
+				}
+			}
 
 			return nil
 		},
@@ -91,11 +129,30 @@ func newConfigInitCmd() *cobra.Command {
 				return fmt.Errorf("config file already exists at %s", configPath)
 			}
 
-			defaultConfig := `# ATR Configuration
+			// Detect available CLIs
+			clis := llm.DetectAvailableCLIs()
+			var detectedBackend string
+			var detectedCLIInfo string
+
+			if len(clis) > 0 {
+				detectedBackend = string(clis[0].Provider)
+				detectedCLIInfo = fmt.Sprintf("# Detected CLI: %s", clis[0].Provider)
+				if clis[0].Version != "" {
+					detectedCLIInfo += fmt.Sprintf(" (%s)", clis[0].Version)
+				}
+				detectedCLIInfo += "\n"
+			} else {
+				detectedBackend = "gemini-api"
+				detectedCLIInfo = "# No CLI backends detected. Using API backend.\n"
+			}
+
+			defaultConfig := fmt.Sprintf(`# ATR Configuration
 # See https://github.com/imyousuf/agentic-test-runner for documentation
 
-# LLM Backend: "gemini-api" or "vertex-ai"
-backend: "gemini-api"
+%s
+# LLM Backend: "gemini-api", "vertex-ai", "claude-cli", or "gemini-cli"
+# CLI backends don't require API keys - they use the CLI's authentication
+backend: "%s"
 
 # Gemini API Configuration (when backend: gemini-api)
 gemini:
@@ -107,7 +164,13 @@ vertex:
   location: "global"    # Use "global" for Gemini 3 preview models
   credentials_file: ""  # Path to service account JSON key file
 
+# CLI Backend Configuration (when backend: claude-cli or gemini-cli)
+cli:
+  auto_detect: true     # Automatically detect available CLIs
+  timeout: "5m"         # Timeout for CLI execution
+
 # Model Selection: "flash" (faster, cheaper) or "pro" (more capable)
+# Only used for API backends; CLI backends use their own models
 model: "flash"
 
 # Model name overrides (optional)
@@ -168,17 +231,41 @@ server:
 update:
   auto_update_dev: true  # Auto-update dev versions every 2 days
   disabled: false        # Disable all update checking
-`
+`, detectedCLIInfo, detectedBackend)
 
 			if err := os.WriteFile(configPath, []byte(defaultConfig), 0644); err != nil {
 				return fmt.Errorf("failed to write config file: %w", err)
 			}
 
 			fmt.Printf("Created config file at: %s\n", configPath)
+			fmt.Println()
+
+			// Show detected CLIs
+			if len(clis) > 0 {
+				fmt.Println("Detected CLI backends:")
+				for _, cli := range clis {
+					version := ""
+					if cli.Version != "" {
+						version = fmt.Sprintf(" (%s)", cli.Version)
+					}
+					fmt.Printf("  - %s%s\n", cli.Provider, version)
+				}
+				fmt.Printf("\nUsing '%s' as default backend.\n", detectedBackend)
+			} else {
+				fmt.Println("No CLI backends detected.")
+				fmt.Println("Using 'gemini-api' as default backend.")
+			}
+
 			fmt.Println("\nNext steps:")
-			fmt.Println("1. Edit the config file to add your API key or Vertex AI settings")
-			fmt.Println("2. Run 'atr config validate' to verify your configuration")
-			fmt.Println("3. Run 'atr run --cmd <command>' to test")
+			if len(clis) > 0 {
+				fmt.Println("1. Run 'atr config validate' to verify your configuration")
+				fmt.Println("2. Run 'atr run --cmd <command>' to test")
+			} else {
+				fmt.Println("1. Edit the config file to add your API key or Vertex AI settings")
+				fmt.Println("   Or install claude or gemini CLI for no-API-key usage")
+				fmt.Println("2. Run 'atr config validate' to verify your configuration")
+				fmt.Println("3. Run 'atr run --cmd <command>' to test")
+			}
 
 			return nil
 		},
@@ -196,13 +283,44 @@ func newConfigValidateCmd() *cobra.Command {
 			}
 
 			if err := cfg.Validate(); err != nil {
-				fmt.Printf("❌ Configuration is invalid: %v\n", err)
+				fmt.Printf("Configuration is invalid: %v\n", err)
 				return err
 			}
 
-			fmt.Println("✓ Configuration is valid")
+			// For CLI backends, check if the CLI is available
+			if cfg.IsCLIBackend() {
+				var provider string
+				switch cfg.Backend {
+				case "claude-cli":
+					provider = "claude-cli"
+				case "gemini-cli":
+					provider = "gemini-cli"
+				}
+
+				if !llm.IsCLIAvailable(pkgllm.Provider(provider)) {
+					fmt.Printf("Warning: CLI backend '%s' is configured but the CLI is not installed\n", cfg.Backend)
+					fmt.Println("Install the CLI or change backend to 'gemini-api' or 'vertex-ai'")
+					return fmt.Errorf("CLI '%s' is not available in PATH", cfg.Backend)
+				}
+			}
+
+			fmt.Println("Configuration is valid")
 			fmt.Printf("  Backend: %s\n", cfg.Backend)
-			fmt.Printf("  Model: %s\n", cfg.GetModelName())
+
+			if cfg.IsCLIBackend() {
+				// Show CLI info
+				cliInfo := llm.DetectAvailableCLIs()
+				for _, cli := range cliInfo {
+					if string(cli.Provider) == cfg.Backend {
+						if cli.Version != "" {
+							fmt.Printf("  CLI Version: %s\n", cli.Version)
+						}
+						break
+					}
+				}
+			} else {
+				fmt.Printf("  Model: %s\n", cfg.GetModelName())
+			}
 
 			return nil
 		},

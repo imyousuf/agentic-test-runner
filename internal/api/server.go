@@ -30,9 +30,6 @@ type ServerConfig struct {
 
 // NewServer creates a new browser control server.
 func NewServer(cfg ServerConfig) (*Server, error) {
-	// Always run in head mode (not headless)
-	cfg.BrowserCfg.Headless = false
-
 	b, err := browser.New(cfg.BrowserCfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create browser: %w", err)
