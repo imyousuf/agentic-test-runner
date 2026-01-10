@@ -1,11 +1,11 @@
 {
   "name": "atr-skills",
-  "description": "Claude Code skills for ATR: browser automation, test analysis, and behavior testing",
-  "version": "1.0.0",
+  "description": "Claude Code skills and MCP server for ATR. Skills: atr-browser (browser control), atr-analyze (test failure analysis), atr-behavior (natural language browser tests). MCP Server: 15 browser automation tools (navigate, click, fill, screenshot, console, network) via 'atr mcp serve'.",
+  "version": "1.0.1",
   "author": {
     "name": "imyousuf"
   },
   "repository": "https://github.com/imyousuf/agentic-test-runner",
-  "keywords": ["browser", "testing", "automation", "atr"],
+  "keywords": ["browser", "testing", "automation", "atr", "mcp", "mcp-server", "browser-automation", "screenshots"],
   "skills": "./skills/"
 }

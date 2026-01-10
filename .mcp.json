@@ -1,0 +1,10 @@
+{
+  "name": "atr-skills",
+  "mcpServers": {
+    "atr-browser": {
+      "command": "atr",
+      "args": ["mcp", "serve"],
+      "env": {}
+    }
+  }
+}

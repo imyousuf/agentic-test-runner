@@ -28,11 +28,56 @@ atr config validate
 
 ## LLM Backend Authentication
 
-ATR supports two LLM backends: **Gemini API** and **Vertex AI**.
+ATR supports four LLM backends:
+- **CLI Backends** (recommended): `claude-cli`, `gemini-cli` - No API keys needed
+- **API Backends**: `gemini-api`, `vertex-ai` - Requires API keys or GCP setup
+
+### CLI Backends (Recommended)
+
+CLI backends use installed CLI tools (Claude CLI or Gemini CLI) for LLM operations. This is the easiest setup since you don't need separate API keys - the CLI tools handle their own authentication.
+
+#### Auto-Detection
+
+ATR automatically detects installed CLI tools when you run `atr config init`:
+
+```bash
+atr config init
+# Output: Detected CLI: claude-cli (2.1.3)
+#         Using 'claude-cli' as default backend.
+```
+
+#### Manual Configuration
+
+```yaml
+# ~/.atr/config.yaml
+backend: claude-cli  # or gemini-cli
+
+cli:
+  auto_detect: true  # Auto-detect available CLIs
+  timeout: "5m"      # CLI execution timeout
+```
+
+#### CLI Requirements
+
+| Backend | CLI Tool | Installation |
+|---------|----------|--------------|
+| `claude-cli` | Claude CLI | `npm install -g @anthropic-ai/claude-code` |
+| `gemini-cli` | Gemini CLI | `npm install -g @anthropic-ai/gemini-cli` |
+
+#### Check CLI Availability
+
+```bash
+atr config show
+# Shows: Available CLI Backends:
+#          claude-cli (2.1.3)
+#          gemini-cli (0.23.0)
+```
+
+---
 
 ### Gemini API
 
-The simplest option for getting started. Uses Google's public Gemini API.
+The simplest option for API-based setup. Uses Google's public Gemini API.
 
 #### Get an API Key
 
@@ -196,10 +241,17 @@ Ensure the VM's service account has `roles/aiplatform.user` permission.
 ```yaml
 # ~/.atr/config.yaml
 
-# LLM Backend: "gemini-api" or "vertex-ai"
-backend: gemini-api
+# LLM Backend: "claude-cli", "gemini-cli", "gemini-api", or "vertex-ai"
+# CLI backends (claude-cli, gemini-cli) don't require API keys
+backend: claude-cli
+
+# CLI backend settings (when backend: claude-cli or gemini-cli)
+cli:
+  auto_detect: true  # Auto-detect available CLIs (default: true)
+  timeout: "5m"      # CLI execution timeout (default: 5m)
 
 # Model tier: "flash" (faster, cheaper) or "pro" (more capable)
+# Only used for API backends; CLI backends use their own models
 model: flash
 
 # Gemini API settings (when backend: gemini-api)
@@ -212,7 +264,7 @@ vertex:
   location: "global"    # GCP region (us-central1, europe-west1, etc.)
   credentials_file: ""  # Path to service account JSON (optional)
 
-# Model name overrides (advanced)
+# Model name overrides (advanced, API backends only)
 models:
   flash: "gemini-2.0-flash-exp"
   pro: "gemini-2.0-pro-exp"
@@ -279,19 +331,35 @@ All configuration can be set via environment variables with the `ATR_` prefix:
 
 | Variable | Config Path | Description |
 |----------|-------------|-------------|
+| `ATR_BACKEND` | `backend` | LLM backend (`claude-cli`, `gemini-cli`, `gemini-api`, `vertex-ai`) |
+| `ATR_CLI_TIMEOUT` | `cli.timeout` | CLI execution timeout |
+| `ATR_CLI_AUTO_DETECT` | `cli.auto_detect` | Auto-detect available CLIs |
 | `GEMINI_API_KEY` | `gemini.api_key` | Gemini API key |
 | `GOOGLE_API_KEY` | `gemini.api_key` | Gemini API key (alternative) |
 | `GOOGLE_CLOUD_PROJECT` | `vertex.project` | GCP project for Vertex AI |
 | `GOOGLE_CLOUD_LOCATION` | `vertex.location` | GCP region for Vertex AI |
 | `GOOGLE_APPLICATION_CREDENTIALS` | `vertex.credentials_file` | Service account key path |
-| `ATR_BACKEND` | `backend` | LLM backend |
-| `ATR_MODEL` | `model` | Model tier |
+| `ATR_MODEL` | `model` | Model tier (API backends only) |
 | `ATR_AGENT_MAX_ITERATIONS` | `agent.max_iterations` | Max iterations |
 | `ATR_AGENT_TIMEOUT` | `agent.timeout` | Agent timeout |
 | `ATR_SERVER_PORT` | `server.port` | Browser server port |
 | `ATR_UPDATE_AUTO_UPDATE_DEV` | `update.auto_update_dev` | Auto-update dev versions |
 
 ## Example Configurations
+
+### CLI Backend (Simplest - No API Key)
+
+```yaml
+backend: claude-cli  # or gemini-cli
+```
+
+### CLI Backend with Custom Timeout
+
+```yaml
+backend: claude-cli
+cli:
+  timeout: "10m"  # Longer timeout for complex analyses
+```
 
 ### Minimal Gemini API Setup
 

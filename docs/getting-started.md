@@ -5,7 +5,8 @@ This guide will help you get ATR up and running quickly.
 ## Prerequisites
 
 - **Go 1.23+** (for building from source)
-- **LLM API Access** - one of:
+- **LLM Backend** - one of:
+  - **Claude CLI** or **Gemini CLI** (recommended - no API key needed), OR
   - Google Gemini API key, OR
   - Google Cloud project with Vertex AI enabled
 
@@ -39,7 +40,21 @@ atr version
 
 ## Configuration
 
-### Using Gemini API (Quickest)
+### Using CLI Backends (Recommended - No API Key)
+
+If you have Claude CLI or Gemini CLI installed, ATR can use them directly:
+
+```bash
+# Initialize config - auto-detects installed CLIs
+atr config init
+
+# Output: Detected CLI: claude-cli (2.1.3)
+#         Using 'claude-cli' as default backend.
+```
+
+That's it! ATR will use the detected CLI for all LLM operations.
+
+### Using Gemini API
 
 1. Get an API key from [Google AI Studio](https://aistudio.google.com/apikey)
 

@@ -10,7 +10,9 @@
 
 - **AI Failure Analysis**: Run any command and get intelligent analysis when it fails
 - **Browser Behavior Testing**: Write tests in natural language, let AI execute them
-- **Multiple LLM Backends**: Supports Google Gemini API and Vertex AI
+- **Multiple LLM Backends**: Supports Google Gemini API, Vertex AI, and CLI tools (Claude, Gemini)
+- **CLI Backend Support**: Use Claude CLI or Gemini CLI as backends - no API keys needed
+- **MCP Server**: Expose browser tools to any MCP-compatible client
 - **Cross-Platform**: Works on Linux, macOS, and Windows
 - **Extensible**: Tool-based architecture for custom extensions
 
@@ -27,10 +29,14 @@ Or download from [Releases](https://github.com/imyousuf/agentic-test-runner/rele
 ### Configure
 
 ```bash
-# Using Gemini API (quickest)
+# Option 1: Using Claude or Gemini CLI (no API key needed)
+# If you have claude or gemini CLI installed, ATR auto-detects them
+atr config init  # Creates config with detected CLI as default backend
+
+# Option 2: Using Gemini API
 export GEMINI_API_KEY="your-api-key"
 
-# Or using Vertex AI
+# Option 3: Using Vertex AI
 gcloud auth application-default login
 export GOOGLE_CLOUD_PROJECT="your-project"
 ```
@@ -115,6 +121,7 @@ Files Examined:
 - **[CLI Reference](docs/cli-reference.md)** - All commands and flags
 - **[Behavior Testing](docs/behavior-testing.md)** - Write browser tests in natural language
 - **[Browser Server](docs/browser-server.md)** - HTTP server for programmatic browser control
+- **[MCP Server](docs/mcp-server.md)** - MCP protocol server for CLI tool integration
 - **[Architecture](docs/architecture.md)** - How ATR works internally
 - **[llms.txt](docs/llms.txt)** - Quick reference for AI agents
 
@@ -150,11 +157,53 @@ Once installed, Claude Code automatically uses these skills when relevant:
 - "Analyze why my tests are failing"
 - "Run the behavior tests in tests/e2e/"
 
+## MCP Server
+
+ATR can run as an MCP (Model Context Protocol) server, exposing browser automation tools to any MCP-compatible client like Claude CLI or Gemini CLI.
+
+```bash
+# Start the MCP server
+atr mcp serve
+```
+
+### Integration with Claude CLI
+
+```bash
+# Inline configuration
+claude -p "Navigate to example.com and take a screenshot" \
+  --mcp-config '{"mcpServers":{"atr-browser":{"command":"atr","args":["mcp","serve"]}}}' \
+  --allowedTools "mcp__atr-browser__*"
+
+# Or add to ~/.claude.json
+```
+
+### Integration with Gemini CLI
+
+Add to your project's `.gemini/settings.json`:
+
+```json
+{
+  "mcpServers": {
+    "atr-browser": {
+      "command": "atr",
+      "args": ["mcp", "serve"],
+      "trust": true
+    }
+  }
+}
+```
+
+See [MCP Server Documentation](docs/mcp-server.md) for the full list of available browser tools.
+
 ## Configuration
 
 ATR can be configured via `~/.atr/config.yaml`:
 
 ```yaml
+# CLI backend (no API key needed - uses installed CLI tools)
+backend: claude-cli  # or gemini-cli
+
+# Or API backends:
 backend: gemini-api  # or vertex-ai
 model: flash         # or pro
 
@@ -167,12 +216,15 @@ vertex:
   location: us-central1
 ```
 
-See [Configuration Guide](docs/configuration.md) for all options including Vertex AI authentication methods (ADC, service account, workload identity).
+See [Configuration Guide](docs/configuration.md) for all options including CLI backends, Vertex AI authentication methods (ADC, service account, workload identity), and MCP server configuration.
 
 ## Requirements
 
 - Go 1.23+ (for building from source)
-- Google Gemini API key or Google Cloud project with Vertex AI
+- One of the following LLM backends:
+  - **Claude CLI** or **Gemini CLI** (recommended - no API key needed)
+  - Google Gemini API key
+  - Google Cloud project with Vertex AI
 
 ## Contributing
 

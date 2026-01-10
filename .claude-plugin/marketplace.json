@@ -4,14 +4,14 @@
     "name": "imyousuf"
   },
   "metadata": {
-    "description": "ATR (Agentic Test Runner) Claude Code skills"
+    "description": "ATR (Agentic Test Runner) Claude Code skills and MCP server for browser automation"
   },
   "plugins": [
     {
       "name": "atr-skills",
       "source": "./",
-      "description": "Browser automation, test failure analysis, and behavior testing skills for ATR",
-      "version": "1.0.0"
+      "description": "Skills: browser control (atr-browser), test failure analysis (atr-analyze), behavior testing (atr-behavior). MCP Server: 15 browser tools (navigate, click, fill, screenshot, etc.) via 'atr mcp serve'",
+      "version": "1.0.1"
     }
   ]
 }

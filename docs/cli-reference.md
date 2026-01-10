@@ -10,11 +10,11 @@ These flags are available for all commands:
 |------|-------------|
 | `--config <path>` | Config file path (default: `~/.atr/config.yaml`) |
 | `-v, --verbose` | Enable verbose output |
-| `--backend <name>` | LLM backend: `gemini-api` or `vertex-ai` |
-| `--api-key <key>` | Gemini API key |
+| `--backend <name>` | LLM backend: `claude-cli`, `gemini-cli`, `gemini-api`, or `vertex-ai` |
+| `--api-key <key>` | Gemini API key (for `gemini-api` backend) |
 | `--project <id>` | GCP project for Vertex AI |
 | `--location <region>` | GCP region for Vertex AI |
-| `--model <tier>` | Model tier: `flash` or `pro` |
+| `--model <tier>` | Model tier: `flash` or `pro` (API backends only) |
 
 ---
 
@@ -176,6 +176,76 @@ atr browser errors                # Get failed requests
 
 ---
 
+## atr mcp
+
+Run ATR as an MCP (Model Context Protocol) server, exposing browser automation tools to MCP-compatible clients like Claude CLI or Gemini CLI.
+
+### atr mcp serve
+
+Start the MCP server for browser automation.
+
+```bash
+atr mcp serve [flags]
+```
+
+The server communicates via JSON-RPC 2.0 over stdio and exposes browser tools for navigation, interaction, and inspection.
+
+#### Flags
+
+| Flag | Description |
+|------|-------------|
+| `--headless` | Run browser in headless mode (default: `true`) |
+| `--ignore-https-errors` | Ignore HTTPS certificate errors |
+
+#### Available Tools
+
+| Tool | Description |
+|------|-------------|
+| `browser_navigate` | Navigate to a URL |
+| `browser_click` | Click on an element |
+| `browser_fill` | Fill a form field |
+| `browser_screenshot` | Take a screenshot |
+| `browser_get_url` | Get current page URL |
+| `browser_get_title` | Get page title |
+| `browser_get_html` | Get page HTML content |
+| `browser_snapshot` | Get accessibility tree snapshot |
+| `browser_console` | Get console messages |
+| `browser_network` | Get network requests |
+| `browser_press_key` | Press a key |
+| `browser_hover` | Hover over an element |
+| `browser_go_back` | Navigate back |
+| `browser_go_forward` | Navigate forward |
+| `browser_reload` | Reload the page |
+
+#### Integration Examples
+
+**With Claude CLI:**
+
+```bash
+# Inline configuration
+claude -p "Navigate to example.com" \
+  --mcp-config '{"mcpServers":{"atr-browser":{"command":"atr","args":["mcp","serve"]}}}' \
+  --allowedTools "mcp__atr-browser__*"
+```
+
+**With Gemini CLI (project settings `.gemini/settings.json`):**
+
+```json
+{
+  "mcpServers": {
+    "atr-browser": {
+      "command": "atr",
+      "args": ["mcp", "serve"],
+      "trust": true
+    }
+  }
+}
+```
+
+See [MCP Server Documentation](mcp-server.md) for detailed usage.
+
+---
+
 ## atr config
 
 Manage ATR configuration.
@@ -200,6 +270,8 @@ atr config init
 
 Creates `~/.atr/config.yaml` with default values and comments.
 
+**Auto-Detection**: Automatically detects installed CLI tools (Claude CLI, Gemini CLI) and sets the first available as the default backend.
+
 If the file already exists, you'll be prompted to confirm overwrite.
 
 ### atr config validate
@@ -212,9 +284,10 @@ atr config validate
 
 Checks that:
 - Required fields are present
-- Backend is valid
-- API credentials are configured
-- Model tier is valid
+- Backend is valid (`claude-cli`, `gemini-cli`, `gemini-api`, or `vertex-ai`)
+- API credentials are configured (for API backends)
+- CLI tools are available in PATH (for CLI backends)
+- Model tier is valid (for API backends)
 
 ---
 
