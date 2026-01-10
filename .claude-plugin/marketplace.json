@@ -1,0 +1,17 @@
+{
+  "name": "atr-marketplace",
+  "owner": {
+    "name": "imyousuf"
+  },
+  "metadata": {
+    "description": "ATR (Agentic Test Runner) Claude Code skills"
+  },
+  "plugins": [
+    {
+      "name": "atr-skills",
+      "source": "./",
+      "description": "Browser automation, test failure analysis, and behavior testing skills for ATR",
+      "version": "1.0.0"
+    }
+  ]
+}

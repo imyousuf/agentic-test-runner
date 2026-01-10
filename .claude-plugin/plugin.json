@@ -1,0 +1,11 @@
+{
+  "name": "atr-skills",
+  "description": "Claude Code skills for ATR: browser automation, test analysis, and behavior testing",
+  "version": "1.0.0",
+  "author": {
+    "name": "imyousuf"
+  },
+  "repository": "https://github.com/imyousuf/agentic-test-runner",
+  "keywords": ["browser", "testing", "automation", "atr"],
+  "skills": "./skills/"
+}

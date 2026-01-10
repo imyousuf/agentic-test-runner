@@ -118,6 +118,38 @@ Files Examined:
 - **[Architecture](docs/architecture.md)** - How ATR works internally
 - **[llms.txt](docs/llms.txt)** - Quick reference for AI agents
 
+## Claude Code Integration
+
+ATR includes Claude Code skills for seamless AI-assisted browser automation. Install the skills to enable natural language control of ATR within Claude Code.
+
+### Installation
+
+1. Add the ATR marketplace:
+   ```
+   /plugin marketplace add imyousuf/agentic-test-runner
+   ```
+
+2. Install the skills plugin:
+   ```
+   /plugin install atr-skills@atr-marketplace
+   ```
+
+### Available Skills
+
+| Skill | Description |
+|-------|-------------|
+| **atr-browser** | Control browser via ATR server (navigate, click, fill, screenshot) |
+| **atr-analyze** | AI-powered test failure analysis |
+| **atr-behavior** | Run natural language browser tests |
+
+### Usage Examples
+
+Once installed, Claude Code automatically uses these skills when relevant:
+
+- "Navigate to google.com and take a screenshot"
+- "Analyze why my tests are failing"
+- "Run the behavior tests in tests/e2e/"
+
 ## Configuration
 
 ATR can be configured via `~/.atr/config.yaml`:
