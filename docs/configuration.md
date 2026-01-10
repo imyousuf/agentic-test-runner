@@ -295,7 +295,9 @@ behavior:
   browser:
     executable: "auto"       # "auto" to download, or path to browser
     version: "latest"        # Browser version: "latest", "stable", "beta", "dev", "canary"
-    cache_dir: ""            # Browser cache dir (default: ~/.cache/rod)
+    cache_dir: ""            # Browser cache dir (deprecated, use data_dir)
+    data_dir: ""             # Browser data dir for cookies/sessions (default: ~/.atr/browser-data when persist_session is true)
+    persist_session: false   # Keep cookies/sessions after browser closes
     headless: true           # Run browser headless
     ignore_https_errors: false  # Ignore SSL certificate errors (for local dev with self-signed certs)
     viewport:
@@ -342,6 +344,8 @@ All configuration can be set via environment variables with the `ATR_` prefix:
 | `ATR_MODEL` | `model` | Model tier (API backends only) |
 | `ATR_AGENT_MAX_ITERATIONS` | `agent.max_iterations` | Max iterations |
 | `ATR_AGENT_TIMEOUT` | `agent.timeout` | Agent timeout |
+| `ATR_BEHAVIOR_BROWSER_DATA_DIR` | `behavior.browser.data_dir` | Browser data directory |
+| `ATR_BEHAVIOR_BROWSER_PERSIST_SESSION` | `behavior.browser.persist_session` | Keep sessions after close |
 | `ATR_SERVER_PORT` | `server.port` | Browser server port |
 | `ATR_UPDATE_AUTO_UPDATE_DEV` | `update.auto_update_dev` | Auto-update dev versions |
 
@@ -429,6 +433,26 @@ behavior:
     slow_motion: "500ms"  # Slow down for debugging
 ```
 
+### Session Persistence Setup
+
+Keep login sessions across browser restarts:
+
+```yaml
+behavior:
+  browser:
+    persist_session: true
+    data_dir: "~/.atr/browser-data"  # Optional, this is the default
+```
+
+For project-specific sessions, use `.atr/config.yaml` in your project:
+
+```yaml
+behavior:
+  browser:
+    persist_session: true
+    data_dir: ".atr/browser-data"  # Project-local sessions
+```
+
 ### Local Development with Self-Signed Certificates
 
 When testing against a local server with self-signed SSL certificates:
@@ -507,9 +531,27 @@ Use `atr test-cmd-env "<command>"` to preview which environments would be activa
 Configuration is loaded in this order (later overrides earlier):
 
 1. Default values
-2. Config file (`~/.atr/config.yaml`)
-3. Environment variables
-4. Command-line flags
+2. User config file (`~/.atr/config.yaml`)
+3. Project config file (`.atr/config.yaml` in current directory)
+4. Environment variables
+5. Command-line flags
+
+### Project-Level Configuration
+
+Create `.atr/config.yaml` in your project directory to override global settings:
+
+```yaml
+# .atr/config.yaml (in project root)
+behavior:
+  browser:
+    persist_session: true
+    data_dir: ".atr/browser-data"  # Project-local sessions
+```
+
+This is useful for:
+- Project-specific browser session isolation
+- Different base URLs per project
+- Custom viewport sizes for specific apps
 
 ## Regions for Vertex AI
 

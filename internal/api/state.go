@@ -62,9 +62,9 @@ func SaveState(state *BrowserState) error {
 		return err
 	}
 
-	// Ensure directory exists
+	// Ensure directory exists with restrictive permissions (user-only)
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0700); err != nil {
 		return fmt.Errorf("failed to create state directory: %w", err)
 	}
 
@@ -73,7 +73,8 @@ func SaveState(state *BrowserState) error {
 		return fmt.Errorf("failed to marshal state: %w", err)
 	}
 
-	if err := os.WriteFile(path, data, 0644); err != nil {
+	// Use restrictive permissions - state file contains server endpoint
+	if err := os.WriteFile(path, data, 0600); err != nil {
 		return fmt.Errorf("failed to write state file: %w", err)
 	}
 

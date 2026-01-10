@@ -18,9 +18,11 @@ import (
 )
 
 var (
-	browserJSONOutput bool
-	browserEndpoint   string
-	browserPort       int
+	browserJSONOutput  bool
+	browserEndpoint    string
+	browserPort        int
+	browserDataDir     string
+	browserPersistFlag bool
 )
 
 func newBrowserCmd() *cobra.Command {
@@ -89,10 +91,22 @@ func newBrowserStartCmd() *cobra.Command {
 		RunE:  runBrowserStart,
 	}
 	cmd.Flags().IntVar(&browserPort, "port", 0, "Server port (default: 9333)")
+	cmd.Flags().BoolVar(&browserPersistFlag, "persist-session", false,
+		"Keep cookies/sessions after browser closes")
+	cmd.Flags().StringVar(&browserDataDir, "data-dir", "",
+		"Directory for browser data (default: ~/.atr/browser-data when --persist-session)")
 	return cmd
 }
 
 func runBrowserStart(cmd *cobra.Command, args []string) error {
+	// Set environment variables for session persistence (inherited by daemon)
+	if browserPersistFlag {
+		os.Setenv("ATR_BEHAVIOR_BROWSER_PERSIST_SESSION", "true")
+	}
+	if browserDataDir != "" {
+		os.Setenv("ATR_BEHAVIOR_BROWSER_DATA_DIR", browserDataDir)
+	}
+
 	state, err := api.StartDaemon(browserPort)
 	if err != nil {
 		return err

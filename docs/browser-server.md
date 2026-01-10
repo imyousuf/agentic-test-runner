@@ -60,6 +60,8 @@ The browser always runs in visible (non-headless) mode for debugging.
 | Flag | Description |
 |------|-------------|
 | `--port <port>` | HTTP server port (default: 9333) |
+| `--persist-session` | Keep cookies/sessions after browser closes |
+| `--data-dir <path>` | Directory for browser data (default: `~/.atr/browser-data`) |
 
 ### Stop Browser
 
@@ -422,3 +424,71 @@ Use `atr browser snapshot --verbose` to see all elements with their UIDs, then t
 # Specify a different port
 atr browser start --port 9334
 ```
+
+## Session Persistence
+
+By default, browser sessions are ephemeral - cookies and login state are lost when the browser closes. Enable session persistence to maintain login state across browser restarts.
+
+### Configuration
+
+**Via CLI flags:**
+```bash
+atr browser start --persist-session
+atr browser start --persist-session --data-dir ~/my-browser-data
+```
+
+**Via config file (`~/.atr/config.yaml`):**
+```yaml
+behavior:
+  browser:
+    persist_session: true
+    data_dir: "~/.atr/browser-data"  # Optional, this is the default
+```
+
+**Via project config (`.atr/config.yaml`):**
+```yaml
+behavior:
+  browser:
+    persist_session: true
+    data_dir: ".atr/browser-data"  # Project-local sessions
+```
+
+### How It Works
+
+When `persist_session` is enabled:
+1. Browser data (cookies, localStorage, etc.) is stored in `data_dir`
+2. Data is preserved when the browser closes
+3. On next launch, the browser loads the saved session data
+
+### Use Cases
+
+- **Development testing**: Login once, stay logged in across test runs
+- **E2E testing**: Pre-authenticate test accounts
+- **Manual testing**: Avoid repeated logins during iterative testing
+
+### Example Workflow
+
+```bash
+# 1. Start browser with session persistence
+atr browser start --persist-session
+
+# 2. Login to a site
+atr browser navigate https://github.com
+# ... manually login ...
+
+# 3. Stop browser
+atr browser stop
+
+# 4. Later: start again - still logged in!
+atr browser start --persist-session
+atr browser navigate https://github.com
+# Session restored, still logged in!
+```
+
+### Security Considerations
+
+- The data directory contains authentication cookies - treat as sensitive
+- Use restrictive file permissions (the default location uses 0700)
+- Don't commit browser data directories to version control
+- Add `.atr/browser-data` to `.gitignore`
+- Clear with `rm -rf ~/.atr/browser-data` to logout from all sites

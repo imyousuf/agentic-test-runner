@@ -234,3 +234,23 @@ func GetATRDir() (string, error) {
 	}
 	return filepath.Join(home, ".atr"), nil
 }
+
+// expandPath expands ~ to home directory and resolves relative paths.
+// Returns an error if path expansion fails.
+func expandPath(path string) (string, error) {
+	if strings.HasPrefix(path, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("failed to expand ~: %w", err)
+		}
+		path = filepath.Join(home, path[2:])
+	}
+	if !filepath.IsAbs(path) {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return "", fmt.Errorf("failed to resolve relative path: %w", err)
+		}
+		path = filepath.Join(cwd, path)
+	}
+	return path, nil
+}

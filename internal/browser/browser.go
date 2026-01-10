@@ -100,9 +100,35 @@ func (b *Browser) Launch(ctx context.Context) error {
 		l = launcher.New().Bin(b.config.Executable)
 	}
 
-	// Set cache directory if specified
-	if b.config.CacheDir != "" {
-		l = l.UserDataDir(b.config.CacheDir)
+	// Determine user data directory
+	userDataDir := b.config.DataDir
+	if userDataDir == "" {
+		userDataDir = b.config.CacheDir // Backward compatibility
+	}
+	if userDataDir == "" && b.config.PersistSession {
+		// Use default location when persist is enabled but no dir specified
+		atrDir, err := GetATRDir()
+		if err != nil {
+			return fmt.Errorf("failed to get ATR directory: %w", err)
+		}
+		userDataDir = filepath.Join(atrDir, "browser-data")
+	}
+
+	// Set user data directory if specified
+	// Note: When UserDataDir is set, rod does NOT delete it on close
+	// (it only cleans up temp directories when UserDataDir is not set)
+	if userDataDir != "" {
+		var err error
+		userDataDir, err = expandPath(userDataDir)
+		if err != nil {
+			return fmt.Errorf("failed to expand data directory path: %w", err)
+		}
+		// Create directory with restrictive permissions (user-only) for security
+		// Browser data contains sensitive cookies and session data
+		if err := os.MkdirAll(userDataDir, 0700); err != nil {
+			return fmt.Errorf("failed to create browser data directory %s: %w", userDataDir, err)
+		}
+		l = l.UserDataDir(userDataDir)
 	}
 
 	// Set headless mode

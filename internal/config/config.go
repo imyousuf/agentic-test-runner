@@ -145,8 +145,14 @@ type BrowserConfig struct {
 	// Version specifies the browser version to download ("latest", "stable", or specific version like "132.0.6834.83").
 	// Only used when Executable is "auto". Default is empty (uses rod's bundled version).
 	Version string `mapstructure:"version"`
-	// CacheDir is the directory for rod's browser cache.
+	// CacheDir is the directory for rod's browser cache (deprecated, use DataDir).
 	CacheDir string `mapstructure:"cache_dir"`
+	// DataDir is the directory for browser data (cookies, localStorage, etc.).
+	// Supports ~ for home directory and relative paths.
+	DataDir string `mapstructure:"data_dir"`
+	// PersistSession keeps cookies/session data after browser closes.
+	// Uses DataDir if set, otherwise defaults to ~/.atr/browser-data.
+	PersistSession bool `mapstructure:"persist_session"`
 	// Headless runs browser in headless mode.
 	Headless bool `mapstructure:"headless"`
 	// IgnoreHTTPSErrors ignores SSL/TLS certificate errors (useful for local dev with self-signed certs).
@@ -222,8 +228,8 @@ func Load() (*Config, error) {
 		v.AddConfigPath(filepath.Join(homeDir, DefaultConfigDir))
 	}
 
-	// Also look in current directory
-	v.AddConfigPath(".")
+	// Also look in .atr directory in current directory (project-level config)
+	v.AddConfigPath(".atr")
 
 	// Environment variables
 	v.SetEnvPrefix("ATR")
@@ -297,7 +303,9 @@ func setDefaults(v *viper.Viper) {
 	// Behavior testing defaults
 	v.SetDefault("behavior.browser.executable", "auto")
 	v.SetDefault("behavior.browser.version", "latest") // Download latest Chrome for Testing
-	v.SetDefault("behavior.browser.cache_dir", "")     // Empty means use rod's default
+	v.SetDefault("behavior.browser.cache_dir", "")     // Empty means use rod's default (deprecated, use data_dir)
+	v.SetDefault("behavior.browser.data_dir", "")      // Empty = use cache_dir or default when persist_session is true
+	v.SetDefault("behavior.browser.persist_session", false)
 	v.SetDefault("behavior.browser.headless", true)
 	v.SetDefault("behavior.browser.ignore_https_errors", false)
 	v.SetDefault("behavior.browser.viewport.width", 1920)
