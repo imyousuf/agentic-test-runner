@@ -3,7 +3,6 @@ package output
 import (
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/imyousuf/agentic-test-runner/pkg/result"
 )
@@ -36,62 +35,40 @@ const (
 func (f *TextFormatter) Format(r *result.AnalysisResult) (string, error) {
 	var sb strings.Builder
 
-	// Header
-	sb.WriteString("\n")
-	sb.WriteString(f.line("=", 70))
-	sb.WriteString("\n")
-	sb.WriteString(f.bold("ANALYSIS RESULTS"))
-	sb.WriteString("\n")
-	sb.WriteString(f.line("=", 70))
-	sb.WriteString("\n\n")
-
-	// Status
-	sb.WriteString(f.bold("Status: "))
+	// Status line
 	if r.Status == result.StatusSuccess {
-		sb.WriteString(f.green("SUCCESS"))
+		sb.WriteString(f.green("✓ PASS"))
 	} else {
-		sb.WriteString(f.red("FAILURE"))
+		sb.WriteString(f.red("✗ FAIL"))
 	}
-	sb.WriteString("\n\n")
 
-	// Summary
+	// Summary on same line if short, otherwise new line
 	if r.Summary != "" {
-		sb.WriteString(f.bold("Summary:"))
+		summary := strings.TrimSpace(r.Summary)
+		if len(summary) < 80 && !strings.Contains(summary, "\n") {
+			sb.WriteString(": ")
+			sb.WriteString(summary)
+		} else {
+			sb.WriteString("\n")
+			sb.WriteString(f.indent(summary, 2))
+		}
+	}
+	sb.WriteString("\n")
+
+	// Root Cause (only on failure)
+	if r.RootCause != "" && r.Status != result.StatusSuccess {
+		sb.WriteString(f.bold("Root Cause: "))
+		sb.WriteString(r.RootCause)
 		sb.WriteString("\n")
-		sb.WriteString(f.indent(r.Summary, 2))
-		sb.WriteString("\n\n")
 	}
 
-	// Root Cause
-	if r.RootCause != "" {
-		sb.WriteString(f.bold("Root Cause:"))
-		sb.WriteString("\n")
-		sb.WriteString(f.indent(r.RootCause, 2))
-		sb.WriteString("\n\n")
-	}
-
-	// Recommendations
-	if len(r.Recommendations) > 0 {
-		sb.WriteString(f.bold("Recommendations:"))
+	// Recommendations (only on failure)
+	if len(r.Recommendations) > 0 && r.Status != result.StatusSuccess {
+		sb.WriteString(f.bold("Fix:"))
 		sb.WriteString("\n")
 		for i, rec := range r.Recommendations {
 			sb.WriteString(fmt.Sprintf("  %d. %s\n", i+1, rec))
 		}
-		sb.WriteString("\n")
-	}
-
-	// Metrics
-	if r.AgentMetrics != nil {
-		sb.WriteString(f.line("-", 70))
-		sb.WriteString("\n")
-		sb.WriteString(f.dim(fmt.Sprintf("Agent made %d tool calls in %d iterations (%s)",
-			r.AgentMetrics.ToolCallsMade,
-			r.AgentMetrics.IterationCount,
-			r.AgentMetrics.TotalDuration.Round(time.Millisecond))))
-		if r.AgentMetrics.TokensUsed > 0 {
-			sb.WriteString(f.dim(fmt.Sprintf(" | %d tokens", r.AgentMetrics.TokensUsed)))
-		}
-		sb.WriteString("\n")
 	}
 
 	return sb.String(), nil

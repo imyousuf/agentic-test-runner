@@ -76,6 +76,31 @@ func New(cfg config.BrowserConfig) (*Browser, error) {
 	}, nil
 }
 
+// CLIOptions configures browser for CLI usage with sensible defaults.
+type CLIOptions struct {
+	Headless    bool   // default: false (visible browser)
+	Sandbox     bool   // default: false (disabled for Ubuntu 23.10+ compatibility)
+	CDPEndpoint string // if set, connect to existing browser instead of launching
+}
+
+// NewForCLI creates a browser configured for CLI usage.
+// It applies CLI-friendly defaults: visible browser, no sandbox.
+func NewForCLI(baseCfg config.BrowserConfig, opts CLIOptions) (*Browser, error) {
+	// Apply CLI defaults
+	baseCfg.Headless = opts.Headless
+	baseCfg.NoSandbox = !opts.Sandbox
+	return New(baseCfg)
+}
+
+// LaunchOrConnect either connects to an existing browser via CDP endpoint,
+// or launches a new browser instance.
+func (b *Browser) LaunchOrConnect(ctx context.Context, cdpEndpoint string) error {
+	if cdpEndpoint != "" {
+		return b.Connect(ctx, cdpEndpoint)
+	}
+	return b.Launch(ctx)
+}
+
 // Launch starts a new browser instance.
 func (b *Browser) Launch(ctx context.Context) error {
 	b.mu.Lock()
@@ -134,6 +159,11 @@ func (b *Browser) Launch(ctx context.Context) error {
 	// Set headless mode
 	l = l.Headless(b.config.Headless)
 
+	// Disable sandbox if configured (needed on Ubuntu 23.10+ with AppArmor)
+	if b.config.NoSandbox {
+		l = l.Set("no-sandbox")
+	}
+
 	// Ignore HTTPS certificate errors if configured (useful for local dev with self-signed certs)
 	if b.config.IgnoreHTTPSErrors {
 		l = l.Set("ignore-certificate-errors")
@@ -189,12 +219,11 @@ func (b *Browser) resolveBrowserVersion() (string, error) {
 
 	if _, err := os.Stat(browserPath); err == nil {
 		// Browser already exists
-		fmt.Printf("Using Chrome %s (%s)\n", versionInfo.Version, versionInfo.Channel)
 		return browserPath, nil
 	}
 
-	// Download and extract browser
-	fmt.Printf("Downloading Chrome %s (%s)...\n", versionInfo.Version, versionInfo.Channel)
+	// Download and extract browser (only print during first-time download)
+	fmt.Fprintf(os.Stderr, "Downloading Chrome %s...\n", versionInfo.Version)
 	if err := downloadAndExtractBrowser(versionInfo.URL, browserDir); err != nil {
 		return "", fmt.Errorf("failed to download browser: %w", err)
 	}
@@ -204,7 +233,6 @@ func (b *Browser) resolveBrowserVersion() (string, error) {
 		return "", fmt.Errorf("browser executable not found after extraction: %s", browserPath)
 	}
 
-	fmt.Printf("Chrome %s ready\n", versionInfo.Version)
 	return browserPath, nil
 }
 

@@ -155,6 +155,8 @@ type BrowserConfig struct {
 	PersistSession bool `mapstructure:"persist_session"`
 	// Headless runs browser in headless mode.
 	Headless bool `mapstructure:"headless"`
+	// NoSandbox disables Chrome sandbox (needed on Ubuntu 23.10+ with AppArmor restrictions).
+	NoSandbox bool `mapstructure:"no_sandbox"`
 	// IgnoreHTTPSErrors ignores SSL/TLS certificate errors (useful for local dev with self-signed certs).
 	IgnoreHTTPSErrors bool `mapstructure:"ignore_https_errors"`
 	// Viewport contains viewport dimensions.
@@ -307,6 +309,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("behavior.browser.data_dir", "")      // Empty = use cache_dir or default when persist_session is true
 	v.SetDefault("behavior.browser.persist_session", false)
 	v.SetDefault("behavior.browser.headless", true)
+	v.SetDefault("behavior.browser.no_sandbox", false)
 	v.SetDefault("behavior.browser.ignore_https_errors", false)
 	v.SetDefault("behavior.browser.viewport.width", 1920)
 	v.SetDefault("behavior.browser.viewport.height", 1080)

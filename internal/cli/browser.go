@@ -23,6 +23,8 @@ var (
 	browserPort        int
 	browserDataDir     string
 	browserPersistFlag bool
+	browserHeadless    bool
+	browserSandbox     bool // opt-in to enable sandbox (default: disabled for compatibility)
 )
 
 func newBrowserCmd() *cobra.Command {
@@ -95,16 +97,35 @@ func newBrowserStartCmd() *cobra.Command {
 		"Keep cookies/sessions after browser closes")
 	cmd.Flags().StringVar(&browserDataDir, "data-dir", "",
 		"Directory for browser data (default: ~/.atr/browser-data when --persist-session)")
+	cmd.Flags().BoolVar(&browserHeadless, "headless", false,
+		"Run browser in headless mode (no visible window)")
+	cmd.Flags().BoolVar(&browserSandbox, "sandbox", false,
+		"Enable Chrome sandbox (disabled by default for Ubuntu 23.10+ compatibility)")
 	return cmd
 }
 
 func runBrowserStart(cmd *cobra.Command, args []string) error {
-	// Set environment variables for session persistence (inherited by daemon)
+	// Set environment variables (inherited by daemon process)
+	// Note: For CLI usage, headless defaults to false (visible browser)
+	// This overrides the config default of headless=true
+	if browserHeadless {
+		os.Setenv("ATR_BEHAVIOR_BROWSER_HEADLESS", "true")
+	} else {
+		// Explicitly set false to override config default
+		os.Setenv("ATR_BEHAVIOR_BROWSER_HEADLESS", "false")
+	}
 	if browserPersistFlag {
 		os.Setenv("ATR_BEHAVIOR_BROWSER_PERSIST_SESSION", "true")
 	}
 	if browserDataDir != "" {
 		os.Setenv("ATR_BEHAVIOR_BROWSER_DATA_DIR", browserDataDir)
+	}
+	// For CLI usage, sandbox is disabled by default for Ubuntu 23.10+ compatibility
+	// User can opt-in with --sandbox flag
+	if browserSandbox {
+		os.Setenv("ATR_BEHAVIOR_BROWSER_NO_SANDBOX", "false")
+	} else {
+		os.Setenv("ATR_BEHAVIOR_BROWSER_NO_SANDBOX", "true")
 	}
 
 	state, err := api.StartDaemon(browserPort)
@@ -127,6 +148,9 @@ func runBrowserStart(cmd *cobra.Command, args []string) error {
 
 	statePath, _ := api.StateFilePath()
 	fmt.Printf("  State: %s\n", statePath)
+
+	logPath, _ := api.LogFilePath()
+	fmt.Printf("  Logs: %s\n", logPath)
 
 	return nil
 }

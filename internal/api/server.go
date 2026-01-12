@@ -153,10 +153,21 @@ func StartDaemon(port int) (*BrowserState, error) {
 		args = append(args, "--port", fmt.Sprintf("%d", port))
 	}
 
+	// Open log file for daemon output (helps debug startup issues)
+	logPath, err := LogFilePath()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get log file path: %w", err)
+	}
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open log file %s: %w", logPath, err)
+	}
+	// Note: logFile is intentionally not closed here - daemon inherits and uses it
+
 	// Start daemon process
 	cmd := exec.Command(exe, args...)
-	cmd.Stdout = nil
-	cmd.Stderr = nil
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
 	cmd.Stdin = nil
 
 	// Detach from parent process (platform-specific)
@@ -179,7 +190,7 @@ func StartDaemon(port int) (*BrowserState, error) {
 		time.Sleep(100 * time.Millisecond)
 	}
 
-	return nil, fmt.Errorf("daemon started but state file not created (timeout)")
+	return nil, fmt.Errorf("daemon started but state file not created (timeout). Check logs at: %s", logPath)
 }
 
 // StopDaemon stops the running daemon.

@@ -201,15 +201,8 @@ func (s *Server) executeTool(ctx context.Context, name string, args map[string]a
 			return "", fmt.Errorf("failed to create browser: %w", err)
 		}
 
-		// Connect to existing browser via CDP or launch new one
-		if s.cdpEndpoint != "" {
-			if err := b.Connect(ctx, s.cdpEndpoint); err != nil {
-				return "", fmt.Errorf("failed to connect to browser at %s: %w", s.cdpEndpoint, err)
-			}
-		} else {
-			if err := b.Launch(ctx); err != nil {
-				return "", fmt.Errorf("failed to launch browser: %w", err)
-			}
+		if err := b.LaunchOrConnect(ctx, s.cdpEndpoint); err != nil {
+			return "", fmt.Errorf("failed to start browser: %w", err)
 		}
 		s.browser = b
 	}

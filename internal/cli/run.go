@@ -32,6 +32,7 @@ var (
 	behaviorFlag    string
 	browserURLFlag  string
 	headlessFlag    bool
+	sandboxFlag     bool // opt-in to enable sandbox (default: disabled for compatibility)
 	viewportFlag    string
 	cdpEndpointFlag string
 
@@ -83,7 +84,8 @@ will read the test specification and execute it using browser automation tools.`
 	// Behavior testing flags
 	runCmd.Flags().StringVar(&behaviorFlag, "behavior", "", "Path to .test.txt file or directory for browser behavior testing")
 	runCmd.Flags().StringVar(&browserURLFlag, "browser-url", "", "Base URL for behavior tests (overrides config)")
-	runCmd.Flags().BoolVar(&headlessFlag, "headless", true, "Run browser in headless mode")
+	runCmd.Flags().BoolVar(&headlessFlag, "headless", false, "Run browser in headless mode (no visible window)")
+	runCmd.Flags().BoolVar(&sandboxFlag, "sandbox", false, "Enable Chrome sandbox (disabled by default for Ubuntu 23.10+ compatibility)")
 	runCmd.Flags().StringVar(&viewportFlag, "viewport", "", "Viewport size (e.g., 1920x1080)")
 	runCmd.Flags().StringVar(&cdpEndpointFlag, "cdp-endpoint", "", "Connect to existing browser via CDP endpoint")
 
@@ -271,13 +273,8 @@ func runBehaviorTest(ctx context.Context, cfg *config.Config, cwd string) error 
 		return fmt.Errorf("no .test.txt files found in %s", behaviorFlag)
 	}
 
-	fmt.Printf("Found %d behavior test(s)\n\n", len(testFiles))
-
-	// Apply CLI overrides to config
+	// Apply viewport override if specified
 	browserCfg := cfg.Behavior.Browser
-	if !headlessFlag {
-		browserCfg.Headless = false
-	}
 	if viewportFlag != "" {
 		width, height, err := parseViewport(viewportFlag)
 		if err != nil {
@@ -287,23 +284,18 @@ func runBehaviorTest(ctx context.Context, cfg *config.Config, cwd string) error 
 		browserCfg.Viewport.Height = height
 	}
 
-	// Create browser
-	b, err := browser.New(browserCfg)
+	// Create browser with CLI defaults (visible, no sandbox)
+	b, err := browser.NewForCLI(browserCfg, browser.CLIOptions{
+		Headless: headlessFlag,
+		Sandbox:  sandboxFlag,
+	})
 	if err != nil {
 		return fmt.Errorf("failed to create browser: %w", err)
 	}
 
 	// Launch or connect to browser
-	if cdpEndpointFlag != "" {
-		fmt.Printf("Connecting to browser at %s...\n", cdpEndpointFlag)
-		if err := b.Connect(ctx, cdpEndpointFlag); err != nil {
-			return fmt.Errorf("failed to connect to browser: %w", err)
-		}
-	} else {
-		fmt.Println("Launching browser...")
-		if err := b.Launch(ctx); err != nil {
-			return fmt.Errorf("failed to launch browser: %w", err)
-		}
+	if err := b.LaunchOrConnect(ctx, cdpEndpointFlag); err != nil {
+		return fmt.Errorf("failed to start browser: %w", err)
 	}
 	defer b.Close()
 
@@ -320,8 +312,6 @@ func runBehaviorTest(ctx context.Context, cfg *config.Config, cwd string) error 
 		return fmt.Errorf("failed to create LLM client: %w", err)
 	}
 	defer llmClient.Close()
-
-	fmt.Printf("Using model: %s (%s)\n", llmClient.Model(), llmClient.Provider())
 
 	// Determine base URL
 	baseURL := browserURLFlag
@@ -340,9 +330,9 @@ func runBehaviorTest(ctx context.Context, cfg *config.Config, cwd string) error 
 	// Run each test file
 	var failedTests []string
 	for i, testFile := range testFiles {
-		fmt.Printf("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
-		fmt.Printf("Test %d/%d: %s\n", i+1, len(testFiles), filepath.Base(testFile))
-		fmt.Printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n")
+		if len(testFiles) > 1 {
+			fmt.Printf("\n[%d/%d] %s\n", i+1, len(testFiles), filepath.Base(testFile))
+		}
 
 		// Read test file content
 		content, err := os.ReadFile(testFile)
@@ -354,7 +344,6 @@ func runBehaviorTest(ctx context.Context, cfg *config.Config, cwd string) error 
 
 		// Navigate to base URL first if specified
 		if baseURL != "" {
-			fmt.Printf("Opening %s...\n", baseURL)
 			if err := b.NewPage(ctx, baseURL); err != nil {
 				fmt.Printf("✗ Failed to open page: %v\n", err)
 				failedTests = append(failedTests, testFile)
@@ -390,16 +379,18 @@ func runBehaviorTest(ctx context.Context, cfg *config.Config, cwd string) error 
 		}
 	}
 
-	// Summary
-	fmt.Printf("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
-	fmt.Printf("Summary: %d/%d tests passed\n", len(testFiles)-len(failedTests), len(testFiles))
-	fmt.Printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+	// Summary (only show if multiple tests)
+	if len(testFiles) > 1 {
+		fmt.Printf("\nPassed: %d/%d\n", len(testFiles)-len(failedTests), len(testFiles))
+		if len(failedTests) > 0 {
+			fmt.Println("Failed:")
+			for _, t := range failedTests {
+				fmt.Printf("  - %s\n", t)
+			}
+		}
+	}
 
 	if len(failedTests) > 0 {
-		fmt.Println("\nFailed tests:")
-		for _, t := range failedTests {
-			fmt.Printf("  - %s\n", t)
-		}
 		os.Exit(1)
 	}
 

@@ -226,6 +226,14 @@ See [Configuration Guide](docs/configuration.md) for all options including CLI b
   - Google Gemini API key
   - Google Cloud project with Vertex AI
 
+## Simple Testing
+
+To test the browser functionality just using this command should give you some idea -
+
+```bash
+atr browser stop; atr browser start && atr browser navigate "https://optimizely.com" && atr browser screenshot --full --file && atr browser stop && atr run --behavior=<PATH_TO_GOPATH>/src/github.com/imyousuf/agentic-test-runner/examples/behavior/simple.test.txt && echo "test passed"
+```
+
 ## Contributing
 
 Contributions are welcome! Please feel free to submit issues and pull requests.

@@ -27,6 +27,7 @@ func newMCPCmd() *cobra.Command {
 
 func newMCPServeCmd() *cobra.Command {
 	var headless bool
+	var sandbox bool
 	var ignoreHTTPSErrors bool
 	var cdpEndpoint string
 
@@ -85,10 +86,11 @@ The server communicates via JSON-RPC 2.0 over stdio and exposes browser tools:
 			// Build browser config from behavior settings
 			browserCfg := cfg.Behavior.Browser
 
-			// Override with flags if provided
-			if cmd.Flags().Changed("headless") {
-				browserCfg.Headless = headless
-			}
+			// Apply CLI defaults via factory options
+			browserCfg.Headless = headless
+			browserCfg.NoSandbox = !sandbox
+
+			// Override with other flags if provided
 			if cmd.Flags().Changed("ignore-https-errors") {
 				browserCfg.IgnoreHTTPSErrors = ignoreHTTPSErrors
 			}
@@ -125,7 +127,8 @@ The server communicates via JSON-RPC 2.0 over stdio and exposes browser tools:
 		},
 	}
 
-	cmd.Flags().BoolVar(&headless, "headless", true, "Run browser in headless mode")
+	cmd.Flags().BoolVar(&headless, "headless", false, "Run browser in headless mode (no visible window)")
+	cmd.Flags().BoolVar(&sandbox, "sandbox", false, "Enable Chrome sandbox (disabled by default for Ubuntu 23.10+ compatibility)")
 	cmd.Flags().BoolVar(&ignoreHTTPSErrors, "ignore-https-errors", false, "Ignore HTTPS certificate errors")
 	cmd.Flags().StringVar(&cdpEndpoint, "cdp-endpoint", "", "Connect to existing browser via CDP endpoint (or set ATR_CDP_ENDPOINT)")
 
