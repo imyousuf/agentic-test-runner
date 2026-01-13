@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -33,10 +34,13 @@ type cliClient struct {
 
 // newClaudeCLIClient creates a new Claude CLI client.
 func newClaudeCLIClient(_ context.Context, cfg llm.Config) (llm.Client, error) {
-	// Verify Claude CLI is available
-	path, err := exec.LookPath("claude")
-	if err != nil {
-		return nil, fmt.Errorf("claude CLI not found: %w (install with: npm install -g @anthropic-ai/claude-code)", err)
+	// Find Claude CLI in common locations or PATH
+	path := findClaudeCLI()
+	if path == "" {
+		return nil, fmt.Errorf("claude CLI not found in PATH or common locations\n" +
+			"  Searched: ~/.claude/local/claude, ~/.local/bin/claude, /usr/local/bin/claude, PATH\n" +
+			"  Install with: npm install -g @anthropic-ai/claude-code\n" +
+			"  Or ensure claude is in your PATH")
 	}
 
 	return &cliClient{
@@ -49,10 +53,13 @@ func newClaudeCLIClient(_ context.Context, cfg llm.Config) (llm.Client, error) {
 
 // newGeminiCLIClient creates a new Gemini CLI client.
 func newGeminiCLIClient(_ context.Context, cfg llm.Config) (llm.Client, error) {
-	// Verify Gemini CLI is available
-	path, err := exec.LookPath("gemini")
-	if err != nil {
-		return nil, fmt.Errorf("gemini CLI not found: %w (install with: npm install -g @anthropic-ai/gemini-cli)", err)
+	// Find Gemini CLI in common locations or PATH
+	path := findGeminiCLI()
+	if path == "" {
+		return nil, fmt.Errorf("gemini CLI not found in PATH or common locations\n" +
+			"  Searched: ~/.local/bin/gemini, /usr/local/bin/gemini, PATH\n" +
+			"  Install with: npm install -g @anthropic-ai/gemini-cli\n" +
+			"  Or ensure gemini is in your PATH")
 	}
 
 	return &cliClient{
@@ -315,4 +322,84 @@ func (c *cliClient) parseClaudeResponse(output []byte) (string, error) {
 func (c *cliClient) parseGeminiResponse(output []byte) (string, error) {
 	// Gemini CLI outputs plain text by default
 	return string(output), nil
+}
+
+// findClaudeCLI looks for the Claude CLI in common installation locations.
+// It checks well-known paths first, then falls back to PATH search.
+func findClaudeCLI() string {
+	// Check common installation paths first
+	home, _ := os.UserHomeDir()
+	if home != "" {
+		homePaths := []string{
+			filepath.Join(home, ".claude", "local", "claude"), // Official Claude Code installer
+			filepath.Join(home, ".local", "bin", "claude"),    // npm global with custom prefix
+		}
+		for _, p := range homePaths {
+			if isExecutable(p) {
+				return p
+			}
+		}
+	}
+
+	// System paths
+	systemPaths := []string{
+		"/usr/local/bin/claude",     // Manual installation / Homebrew (Intel)
+		"/opt/homebrew/bin/claude",  // Homebrew (Apple Silicon)
+	}
+	for _, p := range systemPaths {
+		if isExecutable(p) {
+			return p
+		}
+	}
+
+	// Fall back to PATH search
+	if path, err := exec.LookPath("claude"); err == nil {
+		return path
+	}
+
+	return ""
+}
+
+// findGeminiCLI looks for the Gemini CLI in common installation locations.
+func findGeminiCLI() string {
+	// Check common installation paths first
+	home, _ := os.UserHomeDir()
+	if home != "" {
+		homePaths := []string{
+			filepath.Join(home, ".local", "bin", "gemini"), // npm global with custom prefix
+		}
+		for _, p := range homePaths {
+			if isExecutable(p) {
+				return p
+			}
+		}
+	}
+
+	// System paths
+	systemPaths := []string{
+		"/usr/local/bin/gemini",    // Manual installation / Homebrew (Intel)
+		"/opt/homebrew/bin/gemini", // Homebrew (Apple Silicon)
+	}
+	for _, p := range systemPaths {
+		if isExecutable(p) {
+			return p
+		}
+	}
+
+	// Fall back to PATH search
+	if path, err := exec.LookPath("gemini"); err == nil {
+		return path
+	}
+
+	return ""
+}
+
+// isExecutable checks if a file exists and is executable.
+func isExecutable(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+	// Check if it's a regular file and has execute permission
+	return info.Mode().IsRegular() && info.Mode()&0111 != 0
 }

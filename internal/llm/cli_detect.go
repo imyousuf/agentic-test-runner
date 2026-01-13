@@ -57,9 +57,23 @@ func detectCLI(provider llm.Provider) CLIInfo {
 		return CLIInfo{Provider: provider, Available: false}
 	}
 
-	// Check if executable exists in PATH
-	path, err := exec.LookPath(executable)
-	if err != nil {
+	// Find executable using common paths, then fall back to PATH
+	var path string
+	switch provider {
+	case llm.ProviderClaudeCLI:
+		path = findClaudeCLI()
+	case llm.ProviderGeminiCLI:
+		path = findGeminiCLI()
+	default:
+		// For unknown providers, just check PATH
+		var err error
+		path, err = exec.LookPath(executable)
+		if err != nil {
+			return CLIInfo{Provider: provider, Available: false}
+		}
+	}
+
+	if path == "" {
 		return CLIInfo{Provider: provider, Available: false}
 	}
 
