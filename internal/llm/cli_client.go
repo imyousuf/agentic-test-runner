@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -25,11 +26,11 @@ func init() {
 // CLI backends work differently from API backends - they are autonomous agents
 // that execute tools themselves via MCP rather than returning tool calls.
 type cliClient struct {
-	provider    llm.Provider
-	executable  string
-	timeout     time.Duration
-	workingDir  string
-	cdpEndpoint string // CDP endpoint for connecting to existing browser
+	provider   llm.Provider
+	executable string
+	timeout    time.Duration
+	workingDir string
+	verbose    bool // Enable debug logging
 }
 
 // newClaudeCLIClient creates a new Claude CLI client.
@@ -44,10 +45,10 @@ func newClaudeCLIClient(_ context.Context, cfg llm.Config) (llm.Client, error) {
 	}
 
 	return &cliClient{
-		provider:    llm.ProviderClaudeCLI,
-		executable:  path,
-		timeout:     10 * time.Minute, // CLI needs longer timeout for browser automation
-		cdpEndpoint: cfg.CDPEndpoint,
+		provider:   llm.ProviderClaudeCLI,
+		executable: path,
+		timeout:    10 * time.Minute, // CLI needs longer timeout for browser automation
+		verbose:    cfg.Verbose,
 	}, nil
 }
 
@@ -63,10 +64,10 @@ func newGeminiCLIClient(_ context.Context, cfg llm.Config) (llm.Client, error) {
 	}
 
 	return &cliClient{
-		provider:    llm.ProviderGeminiCLI,
-		executable:  path,
-		timeout:     10 * time.Minute, // CLI needs longer timeout for browser automation
-		cdpEndpoint: cfg.CDPEndpoint,
+		provider:   llm.ProviderGeminiCLI,
+		executable: path,
+		timeout:    10 * time.Minute, // CLI needs longer timeout for browser automation
+		verbose:    cfg.Verbose,
 	}, nil
 }
 
@@ -157,12 +158,13 @@ func (c *cliClient) buildMCPConfig(_ []llm.Tool) (string, error) {
 	}
 
 	// Build MCP server config
+	// Note: MCP server discovers browser via ~/.atr/browser.state file
+	// which is written by `atr run --behavior` before invoking the CLI
 	config := map[string]any{
 		"mcpServers": map[string]any{
 			"atr-browser": map[string]any{
 				"command": atrPath,
 				"args":    []string{"mcp", "serve"},
-				"env":     map[string]string{},
 			},
 		},
 	}
@@ -189,6 +191,27 @@ func (c *cliClient) getAllowedTools(tools []llm.Tool) []string {
 	return allowed
 }
 
+// verboseLog prints a debug message if verbose mode is enabled.
+func (c *cliClient) verboseLog(format string, args ...interface{}) {
+	if c.verbose {
+		fmt.Fprintf(os.Stderr, "[ATR CLI DEBUG] "+format+"\n", args...)
+	}
+}
+
+// sanitizeArgsForLog returns args with the prompt truncated for cleaner logging.
+func (c *cliClient) sanitizeArgsForLog(args []string) []string {
+	result := make([]string, len(args))
+	for i, arg := range args {
+		// Truncate long prompts
+		if i > 0 && args[i-1] == "-p" && len(arg) > 100 {
+			result[i] = arg[:100] + "...[truncated]"
+		} else {
+			result[i] = arg
+		}
+	}
+	return result
+}
+
 // execute runs the CLI with the given prompt and configuration.
 func (c *cliClient) execute(ctx context.Context, prompt, mcpConfig string, allowedTools []string) (string, error) {
 	// Create timeout context
@@ -198,35 +221,72 @@ func (c *cliClient) execute(ctx context.Context, prompt, mcpConfig string, allow
 	// Build command arguments
 	args := c.buildArgs(prompt, mcpConfig, allowedTools)
 
+	c.verboseLog("Executing CLI: %s", c.executable)
+	c.verboseLog("Arguments: %v", c.sanitizeArgsForLog(args))
+	if mcpConfig != "" {
+		c.verboseLog("MCP config: %s", mcpConfig)
+	}
 	// Create command
 	cmd := exec.CommandContext(execCtx, c.executable, args...)
 	if c.workingDir != "" {
 		cmd.Dir = c.workingDir
 	}
 
-	// Set up environment with CDP endpoint if available
+	// MCP server discovers browser via ~/.atr/browser.state file
 	cmd.Env = os.Environ()
-	if c.cdpEndpoint != "" {
-		cmd.Env = append(cmd.Env, "ATR_CDP_ENDPOINT="+c.cdpEndpoint)
-	}
 
 	// Capture output
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+
+	// In verbose mode, stream stderr to console in real-time for debugging
+	if c.verbose {
+		cmd.Stderr = io.MultiWriter(&stderr, os.Stderr)
+	} else {
+		cmd.Stderr = &stderr
+	}
+
+	c.verboseLog("Starting CLI process...")
+	startTime := time.Now()
 
 	// Run command
 	if err := cmd.Run(); err != nil {
+		duration := time.Since(startTime)
+		c.verboseLog("CLI process failed after %v: %v", duration, err)
+
+		// Always print captured output in verbose mode on failure/interrupt
+		if c.verbose {
+			if stdout.Len() > 0 {
+				fmt.Fprintf(os.Stderr, "[ATR CLI DEBUG] Captured stdout (%d bytes):\n%s\n", stdout.Len(), stdout.String())
+			} else {
+				fmt.Fprintf(os.Stderr, "[ATR CLI DEBUG] No stdout captured\n")
+			}
+			if stderr.Len() > 0 {
+				fmt.Fprintf(os.Stderr, "[ATR CLI DEBUG] Captured stderr (%d bytes):\n%s\n", stderr.Len(), stderr.String())
+			} else {
+				fmt.Fprintf(os.Stderr, "[ATR CLI DEBUG] No stderr captured\n")
+			}
+		}
+
 		if execCtx.Err() == context.DeadlineExceeded {
 			return "", fmt.Errorf("CLI execution timed out after %v", c.timeout)
 		}
-		// Include stderr in error message
+		if ctx.Err() == context.Canceled {
+			return "", fmt.Errorf("CLI execution interrupted after %v", duration)
+		}
+		// Include both stdout and stderr in error message for debugging
 		errMsg := err.Error()
 		if stderr.Len() > 0 {
-			errMsg = fmt.Sprintf("%s: %s", errMsg, stderr.String())
+			errMsg = fmt.Sprintf("%s\nstderr: %s", errMsg, stderr.String())
+		}
+		if stdout.Len() > 0 {
+			errMsg = fmt.Sprintf("%s\nstdout: %s", errMsg, stdout.String())
 		}
 		return "", fmt.Errorf("CLI execution failed: %s", errMsg)
 	}
+
+	c.verboseLog("CLI process completed in %v", time.Since(startTime))
+	c.verboseLog("stdout length: %d bytes, stderr length: %d bytes", stdout.Len(), stderr.Len())
 
 	// Parse response based on provider
 	return c.parseResponse(stdout.Bytes())
@@ -249,6 +309,12 @@ func (c *cliClient) buildClaudeArgs(prompt, mcpConfig string, allowedTools []str
 	args := []string{
 		"-p", prompt,
 		"--output-format", "json",
+		"--dangerously-skip-permissions", // Required for automation - skip interactive permission prompts
+	}
+
+	// Add verbose flag if enabled (passes through to Claude CLI)
+	if c.verbose {
+		args = append(args, "--verbose")
 	}
 
 	// Add MCP config if provided
@@ -256,7 +322,7 @@ func (c *cliClient) buildClaudeArgs(prompt, mcpConfig string, allowedTools []str
 		args = append(args, "--mcp-config", mcpConfig)
 	}
 
-	// Add allowed tools
+	// Add allowed tools to restrict what Claude can use
 	if len(allowedTools) > 0 {
 		args = append(args, "--allowedTools", strings.Join(allowedTools, ","))
 	}

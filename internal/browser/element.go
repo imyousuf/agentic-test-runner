@@ -325,6 +325,9 @@ func (b *Browser) Snapshot(verbose bool) ([]ElementInfo, error) {
 
 // findElement finds an element using various strategies.
 func (b *Browser) findElement(page *rod.Page, target string) (*rod.Element, error) {
+	// Use a short timeout for element finding to avoid long waits
+	page = page.Timeout(3 * time.Second)
+
 	// If target starts with special prefixes, use direct selectors
 	if strings.HasPrefix(target, "#") || strings.HasPrefix(target, ".") ||
 		strings.HasPrefix(target, "[") || strings.HasPrefix(target, "//") {

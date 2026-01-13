@@ -59,6 +59,9 @@ type Config struct {
 	// CDPEndpoint is the browser CDP WebSocket URL for CLI backends.
 	// This allows CLI tools to connect to an existing browser instance.
 	CDPEndpoint string
+
+	// Verbose enables debug logging for CLI backends.
+	Verbose bool
 }
 
 // Validate checks that the configuration is valid.

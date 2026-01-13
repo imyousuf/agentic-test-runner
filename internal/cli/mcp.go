@@ -5,10 +5,13 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/imyousuf/agentic-test-runner/internal/api"
 	"github.com/imyousuf/agentic-test-runner/internal/config"
 	"github.com/imyousuf/agentic-test-runner/internal/mcp"
 )
@@ -95,11 +98,43 @@ The server communicates via JSON-RPC 2.0 over stdio and exposes browser tools:
 				browserCfg.IgnoreHTTPSErrors = ignoreHTTPSErrors
 			}
 
-			// Check for CDP endpoint from flag or environment
+			// Open debug log file
+			homeDir, _ := os.UserHomeDir()
+			logPath := filepath.Join(homeDir, ".atr", "mcp-debug.log")
+			os.MkdirAll(filepath.Dir(logPath), 0700)
+			logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+			if err == nil {
+				defer logFile.Close()
+				fmt.Fprintf(logFile, "\n=== MCP Server Starting at %s ===\n", time.Now().Format(time.RFC3339))
+			}
+			mcpLog := func(format string, args ...interface{}) {
+				msg := fmt.Sprintf(format, args...)
+				if logFile != nil {
+					fmt.Fprintf(logFile, "[%s] %s\n", time.Now().Format("15:04:05.000"), msg)
+				}
+			}
+
+			// Check for CDP endpoint from flag, environment, or state file
 			endpoint := cdpEndpoint
+			mcpLog("Checking for CDP endpoint...")
+			mcpLog("From flag: %q", endpoint)
 			if endpoint == "" {
 				endpoint = os.Getenv("ATR_CDP_ENDPOINT")
+				mcpLog("From env ATR_CDP_ENDPOINT: %q", endpoint)
 			}
+			if endpoint == "" {
+				// Try to read from browser state file (written by atr run --behavior or atr browser start)
+				mcpLog("Checking state file...")
+				if state, err := api.GetRunningState(); err == nil && state != nil {
+					endpoint = state.Endpoint
+					mcpLog("From state file: %q", endpoint)
+				} else if err != nil {
+					mcpLog("State file error: %v", err)
+				} else {
+					mcpLog("No state file found")
+				}
+			}
+			mcpLog("Final endpoint: %q", endpoint)
 
 			// Create MCP server with options
 			var opts []mcp.ServerOption

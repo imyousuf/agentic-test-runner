@@ -9,10 +9,12 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/imyousuf/agentic-test-runner/internal/agent"
+	"github.com/imyousuf/agentic-test-runner/internal/api"
 	"github.com/imyousuf/agentic-test-runner/internal/browser"
 	"github.com/imyousuf/agentic-test-runner/internal/config"
 	"github.com/imyousuf/agentic-test-runner/internal/executor"
@@ -236,6 +238,7 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		MaxIterations: cfg.Agent.MaxIterations,
 		Timeout:       cfg.Agent.Timeout,
 		WorkingDir:    cwd,
+		Verbose:       verbose,
 	})
 
 	analysisResult, err := ag.AnalyzeFailure(ctx, &agent.AnalysisRequest{
@@ -307,8 +310,23 @@ func runBehaviorTest(ctx context.Context, cfg *config.Config, cwd string) error 
 	}
 	defer b.Close()
 
+	// Save browser state so MCP server can discover it
+	if cdpEndpoint := b.CDPEndpoint(); cdpEndpoint != "" {
+		state := &api.BrowserState{
+			PID:       os.Getpid(),
+			Endpoint:  cdpEndpoint,
+			StartedAt: time.Now(),
+		}
+		if err := api.SaveState(state); err != nil {
+			// Non-fatal - log warning but continue
+			fmt.Fprintf(os.Stderr, "Warning: failed to save browser state: %v\n", err)
+		}
+		defer api.RemoveState() // Clean up when done
+	}
+
 	// Create LLM client
 	llmCfg := cfg.GetLLMConfig()
+	llmCfg.Verbose = verbose
 
 	// For CLI backends, pass the browser's CDP endpoint so the MCP server can connect
 	if llmCfg.Provider.IsCLI() && b.CDPEndpoint() != "" {
@@ -333,6 +351,7 @@ func runBehaviorTest(ctx context.Context, cfg *config.Config, cwd string) error 
 		Browser:       b,
 		MaxIterations: cfg.Agent.MaxIterations,
 		Timeout:       cfg.Agent.Timeout,
+		Verbose:       verbose,
 	})
 
 	// Run each test file

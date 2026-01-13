@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -20,6 +21,7 @@ type Agent struct {
 	registry      Registry
 	maxIterations int
 	timeout       time.Duration
+	verbose       bool
 }
 
 // Config holds configuration for creating an agent.
@@ -34,6 +36,8 @@ type Config struct {
 	Timeout time.Duration
 	// WorkingDir is the working directory for tool execution.
 	WorkingDir string
+	// Verbose enables debug logging.
+	Verbose bool
 }
 
 // AnalysisRequest contains the information about the failed command.
@@ -76,6 +80,7 @@ func New(cfg Config) *Agent {
 		registry:      registry,
 		maxIterations: cfg.MaxIterations,
 		timeout:       cfg.Timeout,
+		verbose:       cfg.Verbose,
 	}
 }
 
@@ -89,6 +94,8 @@ type BehaviorConfig struct {
 	MaxIterations int
 	// Timeout is the maximum time for the entire analysis.
 	Timeout time.Duration
+	// Verbose enables debug logging.
+	Verbose bool
 }
 
 // BehaviorRequest contains information for behavior test execution.
@@ -115,12 +122,41 @@ func NewBehaviorAgent(cfg BehaviorConfig) *Agent {
 		registry:      registry,
 		maxIterations: cfg.MaxIterations,
 		timeout:       cfg.Timeout,
+		verbose:       cfg.Verbose,
 	}
+}
+
+// verboseLog prints a debug message if verbose mode is enabled.
+func (a *Agent) verboseLog(format string, args ...interface{}) {
+	if a.verbose {
+		fmt.Fprintf(os.Stderr, "[ATR DEBUG] "+format+"\n", args...)
+	}
+}
+
+// truncate shortens a string to maxLen characters, adding "..." if truncated.
+func truncate(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
+}
+
+// formatArgs converts tool arguments map to a string for logging.
+func formatArgs(args map[string]any) string {
+	if args == nil {
+		return "{}"
+	}
+	var parts []string
+	for k, v := range args {
+		parts = append(parts, fmt.Sprintf("%s=%v", k, v))
+	}
+	return "{" + strings.Join(parts, ", ") + "}"
 }
 
 // ExecuteBehaviorTest runs a behavior test using the LLM to interpret and execute steps.
 func (a *Agent) ExecuteBehaviorTest(ctx context.Context, req *BehaviorRequest) (*result.AnalysisResult, error) {
 	startTime := time.Now()
+	a.verboseLog("Starting behavior test: %s", req.TestFile)
 
 	// Create context with timeout
 	ctx, cancel := context.WithTimeout(ctx, a.timeout)
@@ -132,6 +168,7 @@ func (a *Agent) ExecuteBehaviorTest(ctx context.Context, req *BehaviorRequest) (
 	}
 
 	tools := a.registry.Definitions()
+	a.verboseLog("Registered %d tools for behavior testing", len(tools))
 
 	// Track metrics
 	metrics := &result.AgentMetrics{}
@@ -139,32 +176,57 @@ func (a *Agent) ExecuteBehaviorTest(ctx context.Context, req *BehaviorRequest) (
 	// Agent loop
 	for iteration := 0; iteration < a.maxIterations; iteration++ {
 		metrics.IterationCount = iteration + 1
+		a.verboseLog("=== Iteration %d/%d ===", iteration+1, a.maxIterations)
 
 		// Check context
 		if err := ctx.Err(); err != nil {
+			a.verboseLog("Context error: %v", err)
 			return nil, fmt.Errorf("behavior test timeout after %d iterations: %w", iteration, err)
 		}
 
 		// Call LLM
 		metrics.LLMCalls++
+		a.verboseLog("Calling LLM with %d messages, %d tools", len(messages), len(tools))
+		if a.verbose && len(messages) > 0 {
+			lastMsg := messages[len(messages)-1]
+			a.verboseLog("Last message role: %s, content length: %d", lastMsg.Role, len(lastMsg.Content))
+		}
+
+		llmStart := time.Now()
 		resp, err := a.llmClient.Chat(ctx, messages, tools)
+		llmDuration := time.Since(llmStart)
+
 		if err != nil {
+			a.verboseLog("LLM call failed after %v: %v", llmDuration, err)
 			return nil, fmt.Errorf("LLM call failed at iteration %d: %w", iteration, err)
 		}
+
+		a.verboseLog("LLM response received in %v: tool_calls=%d, finish_reason=%s",
+			llmDuration, len(resp.ToolCalls), resp.FinishReason)
 
 		// Track token usage
 		if resp.Usage != nil {
 			metrics.TokensUsed += resp.Usage.TotalTokens
+			a.verboseLog("Tokens: prompt=%d, completion=%d, total=%d",
+				resp.Usage.PromptTokens, resp.Usage.CompletionTokens, resp.Usage.TotalTokens)
 		}
 
 		// If no tool calls, we have the final result
 		if !resp.HasToolCalls() {
+			a.verboseLog("No tool calls - parsing final result")
+			a.verboseLog("Response content preview: %s", truncate(resp.Content, 200))
 			metrics.TotalDuration = time.Since(startTime)
 
 			analysisResult := a.parseBehaviorResult(resp.Content, req)
 			analysisResult.AgentMetrics = metrics
+			a.verboseLog("Behavior test completed with status: %s", analysisResult.Status)
 
 			return analysisResult, nil
+		}
+
+		// Log tool calls
+		for i, tc := range resp.ToolCalls {
+			a.verboseLog("Tool call %d: %s(%s)", i+1, tc.Name, truncate(formatArgs(tc.Arguments), 100))
 		}
 
 		// Add assistant message with tool calls
@@ -176,11 +238,19 @@ func (a *Agent) ExecuteBehaviorTest(ctx context.Context, req *BehaviorRequest) (
 		// Execute tool calls
 		for _, tc := range resp.ToolCalls {
 			metrics.ToolCallsMade++
+			a.verboseLog("Executing tool: %s", tc.Name)
+			toolStart := time.Now()
 
 			toolResult, isError, err := a.registry.Execute(ctx, tc.Name, tc.Arguments)
+			toolDuration := time.Since(toolStart)
+
 			if err != nil {
+				a.verboseLog("Tool %s error after %v: %v", tc.Name, toolDuration, err)
 				toolResult = fmt.Sprintf("Error: %v", err)
 				isError = true
+			} else {
+				a.verboseLog("Tool %s completed in %v (error=%v)", tc.Name, toolDuration, isError)
+				a.verboseLog("Tool result preview: %s", truncate(toolResult, 200))
 			}
 
 			// Add tool result message
@@ -195,6 +265,7 @@ func (a *Agent) ExecuteBehaviorTest(ctx context.Context, req *BehaviorRequest) (
 	}
 
 	// Max iterations reached
+	a.verboseLog("Max iterations (%d) reached without completion", a.maxIterations)
 	metrics.TotalDuration = time.Since(startTime)
 
 	return &result.AnalysisResult{
@@ -319,6 +390,7 @@ func (a *Agent) parseBehaviorResult(content string, req *BehaviorRequest) *resul
 // AnalyzeFailure runs the agent loop to analyze a command failure.
 func (a *Agent) AnalyzeFailure(ctx context.Context, req *AnalysisRequest) (*result.AnalysisResult, error) {
 	startTime := time.Now()
+	a.verboseLog("Starting failure analysis for command: %s", req.Command)
 
 	// Create context with timeout
 	ctx, cancel := context.WithTimeout(ctx, a.timeout)
@@ -330,6 +402,7 @@ func (a *Agent) AnalyzeFailure(ctx context.Context, req *AnalysisRequest) (*resu
 	}
 
 	tools := a.registry.Definitions()
+	a.verboseLog("Registered %d tools for analysis", len(tools))
 
 	// Track metrics
 	metrics := &result.AgentMetrics{}
@@ -337,32 +410,53 @@ func (a *Agent) AnalyzeFailure(ctx context.Context, req *AnalysisRequest) (*resu
 	// Agent loop
 	for iteration := 0; iteration < a.maxIterations; iteration++ {
 		metrics.IterationCount = iteration + 1
+		a.verboseLog("=== Iteration %d/%d ===", iteration+1, a.maxIterations)
 
 		// Check context
 		if err := ctx.Err(); err != nil {
+			a.verboseLog("Context error: %v", err)
 			return nil, fmt.Errorf("agent timeout after %d iterations: %w", iteration, err)
 		}
 
 		// Call LLM
 		metrics.LLMCalls++
+		a.verboseLog("Calling LLM with %d messages, %d tools", len(messages), len(tools))
+
+		llmStart := time.Now()
 		resp, err := a.llmClient.Chat(ctx, messages, tools)
+		llmDuration := time.Since(llmStart)
+
 		if err != nil {
+			a.verboseLog("LLM call failed after %v: %v", llmDuration, err)
 			return nil, fmt.Errorf("LLM call failed at iteration %d: %w", iteration, err)
 		}
+
+		a.verboseLog("LLM response received in %v: tool_calls=%d, finish_reason=%s",
+			llmDuration, len(resp.ToolCalls), resp.FinishReason)
 
 		// Track token usage
 		if resp.Usage != nil {
 			metrics.TokensUsed += resp.Usage.TotalTokens
+			a.verboseLog("Tokens: prompt=%d, completion=%d, total=%d",
+				resp.Usage.PromptTokens, resp.Usage.CompletionTokens, resp.Usage.TotalTokens)
 		}
 
 		// If no tool calls, we have the final answer
 		if !resp.HasToolCalls() {
+			a.verboseLog("No tool calls - parsing final result")
+			a.verboseLog("Response content preview: %s", truncate(resp.Content, 200))
 			metrics.TotalDuration = time.Since(startTime)
 
 			analysisResult := a.parseAnalysisResult(resp.Content, req)
 			analysisResult.AgentMetrics = metrics
+			a.verboseLog("Analysis completed with status: %s", analysisResult.Status)
 
 			return analysisResult, nil
+		}
+
+		// Log tool calls
+		for i, tc := range resp.ToolCalls {
+			a.verboseLog("Tool call %d: %s(%s)", i+1, tc.Name, truncate(formatArgs(tc.Arguments), 100))
 		}
 
 		// Add assistant message with tool calls
@@ -374,17 +468,25 @@ func (a *Agent) AnalyzeFailure(ctx context.Context, req *AnalysisRequest) (*resu
 		// Execute tool calls
 		for _, tc := range resp.ToolCalls {
 			metrics.ToolCallsMade++
+			a.verboseLog("Executing tool: %s", tc.Name)
+			toolStart := time.Now()
 
-			result, isError, err := a.registry.Execute(ctx, tc.Name, tc.Arguments)
+			toolResult, isError, err := a.registry.Execute(ctx, tc.Name, tc.Arguments)
+			toolDuration := time.Since(toolStart)
+
 			if err != nil {
-				result = fmt.Sprintf("Error: %v", err)
+				a.verboseLog("Tool %s error after %v: %v", tc.Name, toolDuration, err)
+				toolResult = fmt.Sprintf("Error: %v", err)
 				isError = true
+			} else {
+				a.verboseLog("Tool %s completed in %v (error=%v)", tc.Name, toolDuration, isError)
+				a.verboseLog("Tool result preview: %s", truncate(toolResult, 200))
 			}
 
 			// Add tool result message
 			messages = append(messages, llm.Message{
 				Role:       llm.RoleTool,
-				Content:    result,
+				Content:    toolResult,
 				ToolCallID: tc.Name, // Use tool name as ID for Gemini
 			})
 
@@ -393,6 +495,7 @@ func (a *Agent) AnalyzeFailure(ctx context.Context, req *AnalysisRequest) (*resu
 	}
 
 	// Max iterations reached
+	a.verboseLog("Max iterations (%d) reached without completion", a.maxIterations)
 	metrics.TotalDuration = time.Since(startTime)
 
 	return &result.AnalysisResult{

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 
 	"github.com/imyousuf/agentic-test-runner/internal/browser"
 	"github.com/imyousuf/agentic-test-runner/internal/config"
@@ -180,6 +181,7 @@ func (s *Server) handleToolsCall(ctx context.Context, req *Request) {
 
 	result, err := s.executeTool(ctx, params.Name, params.Arguments)
 	if err != nil {
+		mcpLog("Tool %s returned error: %v", params.Name, err)
 		s.sendResult(req.ID, ToolCallResult{
 			Content: []ContentItem{{Type: "text", Text: err.Error()}},
 			IsError: true,
@@ -187,25 +189,46 @@ func (s *Server) handleToolsCall(ctx context.Context, req *Request) {
 		return
 	}
 
+	mcpLog("Tool %s completed successfully, result length: %d", params.Name, len(result))
 	s.sendResult(req.ID, ToolCallResult{
 		Content: []ContentItem{{Type: "text", Text: result}},
 	})
+}
+
+// mcpLog writes to the MCP debug log file
+func mcpLog(format string, args ...interface{}) {
+	homeDir, _ := os.UserHomeDir()
+	logPath := homeDir + "/.atr/mcp-debug.log"
+	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	msg := fmt.Sprintf(format, args...)
+	fmt.Fprintf(f, "[%s] %s\n", time.Now().Format("15:04:05.000"), msg)
 }
 
 // executeTool executes a browser tool.
 func (s *Server) executeTool(ctx context.Context, name string, args map[string]any) (string, error) {
 	// Lazy browser initialization
 	if s.browser == nil {
+		mcpLog("Initializing browser, cdpEndpoint=%q", s.cdpEndpoint)
 		b, err := browser.New(s.config)
 		if err != nil {
+			mcpLog("Failed to create browser: %v", err)
 			return "", fmt.Errorf("failed to create browser: %w", err)
 		}
 
+		mcpLog("Calling LaunchOrConnect...")
 		if err := b.LaunchOrConnect(ctx, s.cdpEndpoint); err != nil {
+			mcpLog("LaunchOrConnect failed: %v", err)
 			return "", fmt.Errorf("failed to start browser: %w", err)
 		}
+		mcpLog("Browser connected successfully")
 		s.browser = b
 	}
+
+	mcpLog("Executing tool: %s with args: %v", name, args)
 
 	switch name {
 	case "browser_navigate":
@@ -213,16 +236,24 @@ func (s *Server) executeTool(ctx context.Context, name string, args map[string]a
 		if url == "" {
 			return "", fmt.Errorf("url is required")
 		}
+		mcpLog("browser_navigate: url=%s, hasPage=%v", url, s.browser.HasPage())
 		// Use NewPage if no page exists, otherwise Navigate
 		if !s.browser.HasPage() {
+			mcpLog("browser_navigate: calling NewPage...")
 			if err := s.browser.NewPage(ctx, url); err != nil {
+				mcpLog("browser_navigate: NewPage failed: %v", err)
 				return "", err
 			}
+			mcpLog("browser_navigate: NewPage completed")
 		} else {
+			mcpLog("browser_navigate: calling Navigate...")
 			if err := s.browser.Navigate(ctx, url); err != nil {
+				mcpLog("browser_navigate: Navigate failed: %v", err)
 				return "", err
 			}
+			mcpLog("browser_navigate: Navigate completed")
 		}
+		mcpLog("browser_navigate: success")
 		return fmt.Sprintf("Navigated to %s", url), nil
 
 	case "browser_click":
@@ -231,9 +262,12 @@ func (s *Server) executeTool(ctx context.Context, name string, args map[string]a
 			return "", fmt.Errorf("selector is required")
 		}
 		doubleClick, _ := args["double"].(bool)
+		mcpLog("browser_click: selector=%q, doubleClick=%v", selector, doubleClick)
 		if err := s.browser.Click(ctx, selector, doubleClick); err != nil {
-			return "", err
+			mcpLog("browser_click: FAILED: %v", err)
+			return "", fmt.Errorf("click failed on %q: %w", selector, err)
 		}
+		mcpLog("browser_click: success")
 		return fmt.Sprintf("Clicked on %s", selector), nil
 
 	case "browser_fill":
