@@ -81,7 +81,9 @@ func (s *Server) Start(ctx context.Context, port int) error {
 	}
 	if err := SaveState(state); err != nil {
 		s.browser.Close()
-		listener.Close()
+		if closeErr := listener.Close(); closeErr != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to close listener: %v\n", closeErr)
+		}
 		return fmt.Errorf("failed to save state: %w", err)
 	}
 
@@ -115,7 +117,9 @@ func (s *Server) Shutdown() {
 	defer cancel()
 
 	if s.httpServer != nil {
-		s.httpServer.Shutdown(ctx)
+		if err := s.httpServer.Shutdown(ctx); err != nil && err != http.ErrServerClosed {
+			fmt.Fprintf(os.Stderr, "Warning: HTTP server shutdown error: %v\n", err)
+		}
 	}
 
 	if s.browser != nil {

@@ -32,7 +32,9 @@ API key or Vertex AI setup before running actual commands.`,
 
 			fmt.Printf("Testing LLM connectivity...\n")
 			fmt.Printf("  Backend: %s\n", cfg.Backend)
-			fmt.Printf("  Model: %s\n", cfg.GetModelName())
+			if !cfg.IsCLIBackend() {
+				fmt.Printf("  Model: %s\n", cfg.GetModelName())
+			}
 			fmt.Println()
 
 			// Create context with timeout

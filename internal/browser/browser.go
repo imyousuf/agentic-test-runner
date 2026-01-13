@@ -294,11 +294,14 @@ func downloadAndExtractBrowser(url, destDir string) error {
 		// Find and chmod the chrome executable
 		filepath.Walk(destDir, func(path string, info os.FileInfo, err error) error {
 			if err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to walk %s: %v\n", path, err)
 				return nil
 			}
 			name := filepath.Base(path)
 			if name == "chrome" || name == "Google Chrome for Testing" {
-				os.Chmod(path, 0755)
+				if err := os.Chmod(path, 0755); err != nil {
+					fmt.Fprintf(os.Stderr, "Warning: failed to chmod %s: %v\n", path, err)
+				}
 			}
 			return nil
 		})

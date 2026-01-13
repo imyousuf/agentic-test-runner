@@ -108,24 +108,43 @@ func runBrowserStart(cmd *cobra.Command, args []string) error {
 	// Set environment variables (inherited by daemon process)
 	// Note: For CLI usage, headless defaults to false (visible browser)
 	// This overrides the config default of headless=true
+	setEnv := func(key, value string) error {
+		if err := os.Setenv(key, value); err != nil {
+			return fmt.Errorf("failed to set %s: %w", key, err)
+		}
+		return nil
+	}
+
 	if browserHeadless {
-		os.Setenv("ATR_BEHAVIOR_BROWSER_HEADLESS", "true")
+		if err := setEnv("ATR_BEHAVIOR_BROWSER_HEADLESS", "true"); err != nil {
+			return err
+		}
 	} else {
 		// Explicitly set false to override config default
-		os.Setenv("ATR_BEHAVIOR_BROWSER_HEADLESS", "false")
+		if err := setEnv("ATR_BEHAVIOR_BROWSER_HEADLESS", "false"); err != nil {
+			return err
+		}
 	}
 	if browserPersistFlag {
-		os.Setenv("ATR_BEHAVIOR_BROWSER_PERSIST_SESSION", "true")
+		if err := setEnv("ATR_BEHAVIOR_BROWSER_PERSIST_SESSION", "true"); err != nil {
+			return err
+		}
 	}
 	if browserDataDir != "" {
-		os.Setenv("ATR_BEHAVIOR_BROWSER_DATA_DIR", browserDataDir)
+		if err := setEnv("ATR_BEHAVIOR_BROWSER_DATA_DIR", browserDataDir); err != nil {
+			return err
+		}
 	}
 	// For CLI usage, sandbox is disabled by default for Ubuntu 23.10+ compatibility
 	// User can opt-in with --sandbox flag
 	if browserSandbox {
-		os.Setenv("ATR_BEHAVIOR_BROWSER_NO_SANDBOX", "false")
+		if err := setEnv("ATR_BEHAVIOR_BROWSER_NO_SANDBOX", "false"); err != nil {
+			return err
+		}
 	} else {
-		os.Setenv("ATR_BEHAVIOR_BROWSER_NO_SANDBOX", "true")
+		if err := setEnv("ATR_BEHAVIOR_BROWSER_NO_SANDBOX", "true"); err != nil {
+			return err
+		}
 	}
 
 	state, err := api.StartDaemon(browserPort)
@@ -146,11 +165,19 @@ func runBrowserStart(cmd *cobra.Command, args []string) error {
 	fmt.Printf("  Endpoint: %s\n", state.Endpoint)
 	fmt.Printf("  PID: %d\n", state.PID)
 
-	statePath, _ := api.StateFilePath()
-	fmt.Printf("  State: %s\n", statePath)
+	statePath, err := api.StateFilePath()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not get state file path: %v\n", err)
+	} else {
+		fmt.Printf("  State: %s\n", statePath)
+	}
 
-	logPath, _ := api.LogFilePath()
-	fmt.Printf("  Logs: %s\n", logPath)
+	logPath, err := api.LogFilePath()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not get log file path: %v\n", err)
+	} else {
+		fmt.Printf("  Logs: %s\n", logPath)
+	}
 
 	return nil
 }

@@ -132,7 +132,9 @@ func GetRunningState() (*BrowserState, error) {
 	// Verify the process is actually running
 	if !IsProcessRunning(state.PID) {
 		// Process died, clean up stale state
-		_ = RemoveState()
+		if err := RemoveState(); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to remove stale state file: %v\n", err)
+		}
 		return nil, nil
 	}
 

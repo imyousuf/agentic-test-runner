@@ -169,8 +169,11 @@ func runCommand(cmd *cobra.Command, args []string) error {
 	// Create LLM client for environment detection and agent (may be nil if config invalid)
 	var llmClient llm.Client
 	llmCfg := cfg.GetLLMConfig()
-	llmClient, _ = llm.NewClient(ctx, llmCfg)
-	// Note: we don't fail here if LLM client creation fails - we'll use pattern matching fallback
+	llmClient, err = llm.NewClient(ctx, llmCfg)
+	if err != nil {
+		// Log warning but continue - pattern matching fallback will be used for env detection
+		fmt.Fprintf(os.Stderr, "Warning: LLM client creation failed: %v\n", err)
+	}
 	if llmClient != nil {
 		defer llmClient.Close()
 	}
@@ -219,7 +222,12 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("LLM client not available for agent analysis - check your API key configuration")
 	}
 
-	fmt.Printf("Using model: %s (%s)\n\n", llmClient.Model(), llmClient.Provider())
+	// Display backend/model info appropriately
+	if llmClient.Provider().IsCLI() {
+		fmt.Printf("Using backend: %s\n\n", llmClient.Provider())
+	} else {
+		fmt.Printf("Using model: %s (%s)\n\n", llmClient.Model(), llmClient.Provider())
+	}
 
 	// Create and run agent
 	ag := agent.New(agent.Config{

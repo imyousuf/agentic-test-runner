@@ -383,7 +383,12 @@ func (s *Server) sendError(id interface{}, code int, message, data string) {
 
 // send writes a response to stdout.
 func (s *Server) send(resp Response) {
-	data, _ := json.Marshal(resp)
+	data, err := json.Marshal(resp)
+	if err != nil {
+		// Log error to stderr (not stdout which is for protocol)
+		fmt.Fprintf(os.Stderr, "MCP: failed to marshal response: %v\n", err)
+		return
+	}
 	fmt.Fprintln(s.writer, string(data))
 }
 

@@ -2,6 +2,8 @@
 package cli
 
 import (
+	"fmt"
+
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -65,12 +67,17 @@ func init() {
 	rootCmd.PersistentFlags().String("location", "", "GCP location for Vertex AI")
 	rootCmd.PersistentFlags().String("model", "", "Model tier to use: flash or pro")
 
-	// Bind flags to viper
-	_ = viper.BindPFlag("backend", rootCmd.PersistentFlags().Lookup("backend"))
-	_ = viper.BindPFlag("gemini.api_key", rootCmd.PersistentFlags().Lookup("api-key"))
-	_ = viper.BindPFlag("vertex.project", rootCmd.PersistentFlags().Lookup("project"))
-	_ = viper.BindPFlag("vertex.location", rootCmd.PersistentFlags().Lookup("location"))
-	_ = viper.BindPFlag("model", rootCmd.PersistentFlags().Lookup("model"))
+	// Bind flags to viper - use panic since the application can't function properly without flag binding
+	bindFlag := func(key, flag string) {
+		if err := viper.BindPFlag(key, rootCmd.PersistentFlags().Lookup(flag)); err != nil {
+			panic(fmt.Sprintf("failed to bind %s flag: %v", flag, err))
+		}
+	}
+	bindFlag("backend", "backend")
+	bindFlag("gemini.api_key", "api-key")
+	bindFlag("vertex.project", "project")
+	bindFlag("vertex.location", "location")
+	bindFlag("model", "model")
 
 	// Add subcommands
 	rootCmd.AddCommand(newRunCmd())

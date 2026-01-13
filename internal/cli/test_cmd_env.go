@@ -100,7 +100,11 @@ func runTestCmdEnv(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
 	var llmClient llm.Client
 	if err := cfg.ValidateForLLM(); err == nil {
-		llmClient, _ = llm.NewClient(ctx, cfg.GetLLMConfig())
+		var llmErr error
+		llmClient, llmErr = llm.NewClient(ctx, cfg.GetLLMConfig())
+		if llmErr != nil {
+			fmt.Fprintf(os.Stderr, "Note: LLM-based detection unavailable: %v\n", llmErr)
+		}
 		if llmClient != nil {
 			defer llmClient.Close()
 		}

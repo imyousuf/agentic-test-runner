@@ -73,7 +73,11 @@ func (c *cliClient) Chat(ctx context.Context, messages []llm.Message, tools []ll
 	// Build MCP config if tools are provided
 	var mcpConfig string
 	if len(tools) > 0 {
-		mcpConfig = c.buildMCPConfig(tools)
+		var err error
+		mcpConfig, err = c.buildMCPConfig(tools)
+		if err != nil {
+			return nil, fmt.Errorf("failed to build MCP config: %w", err)
+		}
 	}
 
 	// Execute CLI
@@ -138,7 +142,7 @@ func (c *cliClient) buildPrompt(messages []llm.Message) string {
 }
 
 // buildMCPConfig builds MCP configuration JSON for the CLI.
-func (c *cliClient) buildMCPConfig(_ []llm.Tool) string {
+func (c *cliClient) buildMCPConfig(_ []llm.Tool) (string, error) {
 	// Get the ATR executable path
 	atrPath, err := os.Executable()
 	if err != nil {
@@ -156,8 +160,11 @@ func (c *cliClient) buildMCPConfig(_ []llm.Tool) string {
 		},
 	}
 
-	jsonBytes, _ := json.Marshal(config)
-	return string(jsonBytes)
+	jsonBytes, err := json.Marshal(config)
+	if err != nil {
+		return "", fmt.Errorf("failed to serialize MCP config: %w", err)
+	}
+	return string(jsonBytes), nil
 }
 
 // getAllowedTools returns the list of allowed tool names for the CLI.
@@ -292,8 +299,8 @@ type claudeJSONResponse struct {
 func (c *cliClient) parseClaudeResponse(output []byte) (string, error) {
 	var resp claudeJSONResponse
 	if err := json.Unmarshal(output, &resp); err != nil {
-		// If not JSON, return raw output
-		return string(output), nil
+		// Return error with raw output for debugging
+		return "", fmt.Errorf("failed to parse CLI response as JSON: %w\nRaw output: %s", err, string(output))
 	}
 
 	// Check for error response
