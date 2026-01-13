@@ -41,6 +41,11 @@ func newConfigShowCmd() *cobra.Command {
 			fmt.Printf("Backend: %s\n", cfg.Backend)
 
 			if cfg.IsCLIBackend() {
+				if cfg.Model != "" {
+					fmt.Printf("Model: %s\n", cfg.Model)
+				} else {
+					fmt.Printf("Model: (default)\n")
+				}
 				fmt.Printf("CLI Timeout: %s\n", cfg.GetCLITimeout())
 			} else {
 				fmt.Printf("Model tier: %s\n", cfg.Model)
@@ -308,6 +313,12 @@ func newConfigValidateCmd() *cobra.Command {
 			fmt.Printf("  Backend: %s\n", cfg.Backend)
 
 			if cfg.IsCLIBackend() {
+				// Show model for CLI backends
+				if cfg.Model != "" {
+					fmt.Printf("  Model: %s\n", cfg.Model)
+				} else {
+					fmt.Printf("  Model: (default)\n")
+				}
 				// Show CLI info
 				cliInfo := llm.DetectAvailableCLIs()
 				for _, cli := range cliInfo {

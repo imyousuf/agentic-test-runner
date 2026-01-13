@@ -220,18 +220,24 @@ func Load() (*Config, error) {
 	// Set defaults
 	setDefaults(v)
 
-	// Config file settings
-	v.SetConfigName(DefaultConfigFile)
-	v.SetConfigType(DefaultConfigType)
+	// Check if a specific config file was set via CLI flag (stored in global viper)
+	globalViper := viper.GetViper()
+	if configFile := globalViper.GetString("config_file"); configFile != "" {
+		v.SetConfigFile(configFile)
+	} else {
+		// Config file settings for default paths
+		v.SetConfigName(DefaultConfigFile)
+		v.SetConfigType(DefaultConfigType)
 
-	// Look for config in home directory
-	homeDir, err := os.UserHomeDir()
-	if err == nil {
-		v.AddConfigPath(filepath.Join(homeDir, DefaultConfigDir))
+		// Look for config in home directory
+		homeDir, err := os.UserHomeDir()
+		if err == nil {
+			v.AddConfigPath(filepath.Join(homeDir, DefaultConfigDir))
+		}
+
+		// Also look in .atr directory in current directory (project-level config)
+		v.AddConfigPath(".atr")
 	}
-
-	// Also look in .atr directory in current directory (project-level config)
-	v.AddConfigPath(".atr")
 
 	// Environment variables
 	v.SetEnvPrefix("ATR")
@@ -253,7 +259,6 @@ func Load() (*Config, error) {
 
 	// Merge CLI flag values from global viper (flags are bound there in root.go)
 	// CLI flags have highest precedence over config file and env vars
-	globalViper := viper.GetViper()
 	for _, key := range []string{"backend", "model", "gemini.api_key", "vertex.project", "vertex.location"} {
 		if globalViper.IsSet(key) {
 			v.Set(key, globalViper.Get(key))
@@ -354,9 +359,26 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("invalid backend: %s (must be 'gemini-api', 'vertex-ai', 'claude-cli', or 'gemini-cli')", c.Backend)
 	}
 
-	// Model tier is only relevant for API backends
-	if !c.IsCLIBackend() && c.Model != "flash" && c.Model != "pro" {
-		return fmt.Errorf("invalid model tier: %s (must be 'flash' or 'pro')", c.Model)
+	// Validate model based on backend type
+	if c.IsCLIBackend() {
+		// For CLI backends, validate model aliases
+		if c.Backend == "claude-cli" && c.Model != "" {
+			validModels := map[string]bool{
+				"opus": true, "sonnet": true, "haiku": true,
+				"claude-opus": true, "claude-sonnet": true, "claude-haiku": true,
+				"claude-opus-4": true, "claude-sonnet-4": true, "claude-haiku-3": true,
+			}
+			// Also allow full model names like claude-opus-4-20250514
+			if !validModels[strings.ToLower(c.Model)] && !strings.HasPrefix(c.Model, "claude-") {
+				return fmt.Errorf("invalid claude-cli model: %s (use 'opus', 'sonnet', or 'haiku')", c.Model)
+			}
+		}
+		// gemini-cli model validation can be added when needed
+	} else {
+		// For API backends, validate model tier
+		if c.Model != "flash" && c.Model != "pro" {
+			return fmt.Errorf("invalid model tier: %s (must be 'flash' or 'pro')", c.Model)
+		}
 	}
 
 	return nil
@@ -412,9 +434,18 @@ func (c *Config) GetLLMConfig() llm.Config {
 		provider = llm.ProviderGeminiCLI
 	}
 
-	model := c.Models.Flash
-	if c.Model == "pro" {
-		model = c.Models.Pro
+	// Determine model based on backend type
+	var model string
+	if c.IsCLIBackend() {
+		// For CLI backends, pass the model directly (opus, sonnet, haiku)
+		// If not specified, CLI will use its default
+		model = c.Model
+	} else {
+		// For API backends, use flash/pro tier mapping
+		model = c.Models.Flash
+		if c.Model == "pro" {
+			model = c.Models.Pro
+		}
 	}
 
 	return llm.Config{

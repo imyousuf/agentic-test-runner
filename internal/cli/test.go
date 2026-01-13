@@ -32,7 +32,13 @@ API key or Vertex AI setup before running actual commands.`,
 
 			fmt.Printf("Testing LLM connectivity...\n")
 			fmt.Printf("  Backend: %s\n", cfg.Backend)
-			if !cfg.IsCLIBackend() {
+			if cfg.IsCLIBackend() {
+				if cfg.Model != "" {
+					fmt.Printf("  Model: %s\n", cfg.Model)
+				} else {
+					fmt.Printf("  Model: (default)\n")
+				}
+			} else {
 				fmt.Printf("  Model: %s\n", cfg.GetModelName())
 			}
 			fmt.Println()

@@ -65,7 +65,7 @@ func init() {
 	rootCmd.PersistentFlags().String("api-key", "", "Gemini API key")
 	rootCmd.PersistentFlags().String("project", "", "GCP project for Vertex AI")
 	rootCmd.PersistentFlags().String("location", "", "GCP location for Vertex AI")
-	rootCmd.PersistentFlags().String("model", "", "Model tier to use: flash or pro")
+	rootCmd.PersistentFlags().String("model", "", "Model: flash/pro (API backends) or opus/sonnet/haiku (claude-cli)")
 
 	// Bind flags to viper - use panic since the application can't function properly without flag binding
 	bindFlag := func(key, flag string) {
@@ -73,6 +73,7 @@ func init() {
 			panic(fmt.Sprintf("failed to bind %s flag: %v", flag, err))
 		}
 	}
+	bindFlag("config_file", "config") // Bind config flag for config.Load() to access
 	bindFlag("backend", "backend")
 	bindFlag("gemini.api_key", "api-key")
 	bindFlag("vertex.project", "project")

@@ -28,6 +28,7 @@ func init() {
 type cliClient struct {
 	provider   llm.Provider
 	executable string
+	model      string // Model alias: opus, sonnet, haiku
 	timeout    time.Duration
 	workingDir string
 	verbose    bool // Enable debug logging
@@ -44,12 +45,35 @@ func newClaudeCLIClient(_ context.Context, cfg llm.Config) (llm.Client, error) {
 			"  Or ensure claude is in your PATH")
 	}
 
+	// Normalize model name to Claude CLI alias
+	model := normalizeClaudeModel(cfg.Model)
+
 	return &cliClient{
 		provider:   llm.ProviderClaudeCLI,
 		executable: path,
+		model:      model,
 		timeout:    10 * time.Minute, // CLI needs longer timeout for browser automation
 		verbose:    cfg.Verbose,
 	}, nil
+}
+
+// normalizeClaudeModel converts model names to Claude CLI aliases.
+func normalizeClaudeModel(model string) string {
+	switch strings.ToLower(model) {
+	case "opus", "claude-opus", "claude-opus-4":
+		return "opus"
+	case "sonnet", "claude-sonnet", "claude-sonnet-4":
+		return "sonnet"
+	case "haiku", "claude-haiku", "claude-haiku-3":
+		return "haiku"
+	default:
+		// If it looks like a full model name, pass it through
+		if strings.HasPrefix(model, "claude-") {
+			return model
+		}
+		// Default to sonnet if not specified
+		return ""
+	}
 }
 
 // newGeminiCLIClient creates a new Gemini CLI client.
@@ -105,13 +129,16 @@ func (c *cliClient) ChatWithHistory(ctx context.Context, history []llm.Message, 
 	return c.Chat(ctx, history, tools)
 }
 
-// Model returns the model name (CLI uses its own default).
+// Model returns the model name.
 func (c *cliClient) Model() string {
+	if c.model != "" {
+		return c.model
+	}
 	switch c.provider {
 	case llm.ProviderClaudeCLI:
-		return "claude-cli"
+		return "claude-cli (default)"
 	case llm.ProviderGeminiCLI:
-		return "gemini-cli"
+		return "gemini-cli (default)"
 	default:
 		return "cli"
 	}
@@ -310,6 +337,11 @@ func (c *cliClient) buildClaudeArgs(prompt, mcpConfig string, allowedTools []str
 		"-p", prompt,
 		"--output-format", "json",
 		"--dangerously-skip-permissions", // Required for automation - skip interactive permission prompts
+	}
+
+	// Add model if specified (opus, sonnet, haiku, or full model name)
+	if c.model != "" {
+		args = append(args, "--model", c.model)
 	}
 
 	// Add verbose flag if enabled (passes through to Claude CLI)
