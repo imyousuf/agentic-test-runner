@@ -89,6 +89,7 @@ func init() {
 	rootCmd.AddCommand(newUpdateCmd())
 	rootCmd.AddCommand(newTestCmdEnvCmd())
 	rootCmd.AddCommand(newMCPCmd())
+	rootCmd.AddCommand(newInstallCompletionCmd())
 }
 
 // initConfig reads in config file and ENV variables if set.

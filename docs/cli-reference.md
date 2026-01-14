@@ -14,7 +14,7 @@ These flags are available for all commands:
 | `--api-key <key>` | Gemini API key (for `gemini-api` backend) |
 | `--project <id>` | GCP project for Vertex AI |
 | `--location <region>` | GCP region for Vertex AI |
-| `--model <tier>` | Model tier: `flash` or `pro` (API backends only) |
+| `--model <tier>` | Model: `flash`/`pro` (API backends) or `opus`/`sonnet`/`haiku` (claude-cli) |
 
 ---
 
@@ -443,29 +443,49 @@ update:
 
 ## Shell Completion
 
-ATR uses Cobra, which supports shell completion.
+ATR supports shell completion for bash and zsh.
 
-### Bash
+### atr install-completion
+
+Automatically install shell completion for your current shell.
+
+```bash
+atr install-completion
+```
+
+This command:
+- Auto-detects your shell (bash or zsh)
+- Installs completion to the appropriate location based on permissions:
+  - **With sudo**: System-wide (`/etc/bash_completion.d/` or `/usr/local/share/zsh/site-functions/`)
+  - **Without sudo**: User directory (`~/.bash_completion.d/` or `~/.zsh/completions/`)
+
+After installation, follow the printed instructions to enable completions in your shell.
+
+### Manual Installation
+
+If you prefer manual setup:
+
+#### Bash
 
 ```bash
 # Add to ~/.bashrc
 source <(atr completion bash)
 ```
 
-### Zsh
+#### Zsh
 
 ```bash
 # Add to ~/.zshrc
 source <(atr completion zsh)
 ```
 
-### Fish
+#### Fish
 
 ```bash
 atr completion fish | source
 ```
 
-### PowerShell
+#### PowerShell
 
 ```powershell
 atr completion powershell | Out-String | Invoke-Expression

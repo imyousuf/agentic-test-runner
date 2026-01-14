@@ -118,6 +118,16 @@ Expected output:
 atr version dev-abc1234
 ```
 
+## Shell Completion (Optional)
+
+Enable tab completion for bash or zsh:
+
+```bash
+atr install-completion
+```
+
+This auto-detects your shell and installs completion scripts. Follow the printed instructions to enable completions.
+
 ## Verify LLM Connectivity
 
 Test that ATR can connect to your LLM provider:
