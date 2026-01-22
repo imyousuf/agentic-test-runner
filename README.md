@@ -146,7 +146,7 @@ ATR includes Claude Code skills for seamless AI-assisted browser automation. Ins
 | Skill | Description |
 |-------|-------------|
 | **atr-browser** | Control browser via ATR server (navigate, click, fill, screenshot) |
-| **atr-analyze** | AI-powered test failure analysis |
+| **atr-analyze** | Run tests with AI analysis (default for test suites - keeps context clean) |
 | **atr-behavior** | Run natural language browser tests |
 
 ### Usage Examples
@@ -154,7 +154,7 @@ ATR includes Claude Code skills for seamless AI-assisted browser automation. Ins
 Once installed, Claude Code automatically uses these skills when relevant:
 
 - "Navigate to google.com and take a screenshot"
-- "Analyze why my tests are failing"
+- "Run the pytest tests" (uses atr-analyze for clean output)
 - "Run the behavior tests in tests/e2e/"
 
 ## MCP Server

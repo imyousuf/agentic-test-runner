@@ -1,24 +1,24 @@
 ---
 name: atr-analyze
-description: Analyze test failures, debug failing tests, run tests with AI analysis, understand why tests fail, get help with build failures, analyze command output, debug command errors, or get AI-powered analysis of shell command failures using ATR.
+description: Run tests with AI-powered analysis and clean summarized output. Use this as the DEFAULT way to run test suites (pytest, jest, go test, make test, npm test, etc.) to keep conversation context clean. ATR analyzes the full output and returns a concise summary of results, highlighting any failures with actionable insights. Also useful for analyzing build failures and debugging command errors.
 ---
 
 # ATR Command Analysis Skill
 
-This skill provides AI-powered analysis of command failures using ATR (Agentic Test Runner). When a command fails, ATR's AI agent automatically investigates the failure by reading files, running diagnostic commands, and providing actionable recommendations.
+This skill runs commands through ATR (Agentic Test Runner) which provides AI-powered analysis and **clean summarized output**. Use this as your **default way to run test suites** - the AI analyzes the full output and returns a concise summary, keeping your conversation context clean and focused.
 
 ## When to Use This Skill vs Direct Commands
 
-**Use ATR analyze when:**
-- A command is failing and the reason is unclear
-- Test failures need deep investigation
-- Build errors require understanding project context
-- Multiple files or dependencies may be involved
+**Use ATR analyze (RECOMMENDED DEFAULT) when:**
+- Running test suites (pytest, jest, go test, npm test, make test)
+- Running builds that produce verbose output
+- You want clean, summarized results instead of raw output
+- You want automatic failure analysis if something goes wrong
 
-**Use direct commands when:**
-- The command is expected to succeed
-- Simple one-off execution is needed
-- No failure analysis is required
+**Use direct Bash commands only when:**
+- Running quick one-off commands with minimal output
+- You specifically need the raw, unprocessed output
+- Interactive commands that require user input
 
 ## Basic Usage
 
@@ -102,13 +102,15 @@ atr run --cmd "go test ./..." --model pro
 
 ## What the AI Agent Does
 
-When a command fails, the ATR agent:
+The ATR agent processes command output and:
 
-1. **Analyzes** the failure output for error patterns
-2. **Reads** relevant source files mentioned in errors
-3. **Searches** the codebase for related code
-4. **Runs** diagnostic commands for more context
-5. **Provides** root cause analysis and recommendations
+1. **Summarizes** results into a clean, concise report
+2. **Identifies** test pass/fail status and key metrics
+3. **Analyzes** any failures for error patterns and root causes
+4. **Reads** relevant source files when failures occur
+5. **Provides** actionable recommendations for fixing issues
+
+This keeps your conversation context clean by replacing verbose test output with a focused summary.
 
 ## Example Output
 
@@ -182,7 +184,8 @@ export GOOGLE_CLOUD_PROJECT="project-id"
 
 ## Best Practices
 
-1. **Provide context** when the failure might be related to recent changes
-2. **Use --model pro** for complex, multi-file issues
-3. **Specify --cwd** when running from a different directory
-4. **Check environment** with `atr test-cmd-env "<command>"` to preview detection
+1. **Use as default** for running test suites to keep conversation context clean
+2. **Provide context** when the failure might be related to recent changes
+3. **Use --model pro** for complex, multi-file issues
+4. **Specify --cwd** when running from a different directory
+5. **Check environment** with `atr test-cmd-env "<command>"` to preview detection
