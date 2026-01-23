@@ -198,26 +198,33 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to execute command: %w", err)
 	}
 
-	// Print immediate output
-	if result.Stdout != "" {
-		fmt.Println(result.Stdout)
+	// 1. Save full output to file (always)
+	outputFile, saveErr := output.SaveOutput(result.Stdout, result.Stderr, cmdFlag, cwd)
+	if saveErr != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to save output file: %v\n", saveErr)
 	}
-	if result.Stderr != "" {
-		fmt.Fprintln(os.Stderr, result.Stderr)
+
+	// 2. Get LLM summary (uses configured model for concise one-line summary)
+	summary, _ := output.SummarizeOutput(ctx, llmClient, result.Stdout, result.Stderr, result.ExitCode)
+
+	// 3. Print concise summary
+	fmt.Println(summary)
+
+	// 4. Print output file path
+	if outputFile != "" {
+		fmt.Printf("Full output: %s\n", outputFile)
 	}
 
 	// If command succeeded, we're done
 	if result.Success() {
-		fmt.Printf("\n✓ Command completed successfully (exit code: %d, duration: %s)\n", result.ExitCode, result.Duration)
 		return nil
 	}
 
-	// Command failed - engage the agent
-	fmt.Printf("\n✗ Command failed (exit code: %d, duration: %s)\n", result.ExitCode, result.Duration)
+	// Command failed - engage the agent for detailed analysis
 	if result.TimedOut {
 		fmt.Println("  (command timed out)")
 	}
-	fmt.Println("\nAnalyzing failure with AI agent...")
+	fmt.Println("\nAnalyzing failure...")
 
 	// Ensure we have an LLM client for agent analysis
 	if llmClient == nil {

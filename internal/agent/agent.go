@@ -552,14 +552,26 @@ FAILURE
 [Detailed explanation of why the failure occurred]
 
 ## Recommendations
-1. [First actionable step]
-2. [Second actionable step]
-...
+For each recommendation, you MUST include:
+1. The exact file path and line number (e.g., auth_test.py:38)
+2. The current problematic code snippet
+3. The suggested fix as actual code
+4. Brief explanation of why this fixes the issue
+
+Example format:
+1. Fix missing auth header in auth_test.py:38
+   Current:
+     req = client.get("/api/user")
+   Change to:
+     req = client.get("/api/user", headers={"Authorization": f"Bearer {token}"})
+   This adds the required JWT token that middleware/auth.py:15 expects.
+
+2. [Next recommendation with same format...]
 
 IMPORTANT:
 - Do NOT use tool calls in your final response - only include the formatted analysis above
-- Be specific in your recommendations - include exact commands or file changes when possible
-- If the failure is due to missing dependencies, list them explicitly
+- Be specific in your recommendations - include exact file:line references and code snippets
+- If the failure is due to missing dependencies, list them explicitly with install commands
 
 ---
 
