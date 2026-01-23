@@ -23,10 +23,14 @@ import (
 const (
 	// githubRepo is the GitHub repository for ATR.
 	githubRepo = "imyousuf/agentic-test-runner"
-	// devUpdateInterval is how often dev versions auto-update (2 days).
-	devUpdateInterval = 2 * 24 * time.Hour
-	// timestampFile stores the last dev update time.
-	timestampFileName = "dev-update-timestamp"
+	// devCheckInterval is how often to check GitHub for updates (6 hours).
+	devCheckInterval = 6 * time.Hour
+	// devReleaseDateFile stores the published date of our installed dev release.
+	devReleaseDateFile = "dev-release-date"
+	// devLastCheckFile stores when we last checked GitHub.
+	devLastCheckFile = "dev-last-check"
+	// legacyTimestampFile is the old timestamp file name (for backwards compatibility).
+	legacyTimestampFile = "dev-update-timestamp"
 )
 
 var (
@@ -41,7 +45,8 @@ func newUpdateCmd() *cobra.Command {
 		Long: `Check for new versions of ATR and optionally install them.
 
 By default, this command will download and install the latest version.
-For dev versions, ATR auto-updates every 2 days on startup.`,
+For dev versions, ATR checks for updates every 6 hours on startup
+and only downloads when GitHub has a newer release.`,
 		Example: `  # Check for updates without installing
   atr update --check
 
@@ -92,13 +97,25 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 	}
 
 	// Check if we should skip (for dev versions without force)
-	if isDevVersion(Version) && !forceFlag && !shouldAutoUpdateDev() {
-		lastUpdate, _ := getLastDevUpdateTime()
-		nextUpdate := lastUpdate.Add(devUpdateInterval)
-		fmt.Printf("Last dev update: %s\n", lastUpdate.Format(time.RFC3339))
-		fmt.Printf("Next auto-update: %s\n", nextUpdate.Format(time.RFC3339))
-		fmt.Println("\nUse --force to update now.")
-		return nil
+	var devRelease *githubRelease
+	if isDevVersion(Version) && !forceFlag {
+		shouldUpdate, release := shouldAutoUpdateDev()
+		if !shouldUpdate {
+			localDate, _ := getLocalReleaseDate()
+			lastCheck, _ := readDateFile(devLastCheckFile)
+			nextCheck := lastCheck.Add(devCheckInterval)
+			fmt.Printf("Installed release date: %s\n", localDate.Format(time.RFC3339))
+			if !lastCheck.IsZero() {
+				fmt.Printf("Last check: %s\n", lastCheck.Format(time.RFC3339))
+				fmt.Printf("Next check: %s\n", nextCheck.Format(time.RFC3339))
+			}
+			fmt.Println("\nYou already have the latest dev release.")
+			fmt.Println("Use --force to re-download anyway.")
+			// Record that we checked (even though no update was needed)
+			_ = recordLastCheck()
+			return nil
+		}
+		devRelease = release
 	}
 
 	// Download and install
@@ -108,9 +125,21 @@ func runUpdate(cmd *cobra.Command, args []string) error {
 
 	// Record update time for dev versions
 	if isDevVersion(Version) {
-		if err := recordDevUpdate(); err != nil {
+		var releaseDate time.Time
+		if devRelease != nil {
+			releaseDate = devRelease.PublishedAt
+		} else {
+			// Force update - fetch the release info for the date
+			if release, err := getDevReleaseInfo(); err == nil {
+				releaseDate = release.PublishedAt
+			} else {
+				releaseDate = time.Now() // Fallback to now if we can't get the date
+			}
+		}
+		if err := recordDevUpdate(releaseDate); err != nil {
 			fmt.Printf("Warning: failed to record update time: %v\n", err)
 		}
+		_ = recordLastCheck()
 	}
 
 	fmt.Println("\nUpdate complete! Please restart ATR to use the new version.")
@@ -164,8 +193,9 @@ func buildDownloadURL(tag, osName, arch string) string {
 
 // githubRelease represents a GitHub release response.
 type githubRelease struct {
-	TagName string `json:"tag_name"`
-	Name    string `json:"name"`
+	TagName     string    `json:"tag_name"`
+	Name        string    `json:"name"`
+	PublishedAt time.Time `json:"published_at"`
 }
 
 // getLatestReleaseTag fetches the latest release tag from GitHub.
@@ -199,53 +229,142 @@ func getLatestReleaseTag() (string, error) {
 	return release.TagName, nil
 }
 
-// shouldAutoUpdateDev checks if enough time has passed since the last dev update.
-func shouldAutoUpdateDev() bool {
-	lastUpdate, err := getLastDevUpdateTime()
+// getDevReleaseInfo fetches the dev release info from GitHub.
+func getDevReleaseInfo() (*githubRelease, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	url := fmt.Sprintf("https://api.github.com/repos/%s/releases/tags/dev", githubRepo)
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
-		// No timestamp = never updated = should update
-		return true
+		return nil, err
 	}
-	return time.Since(lastUpdate) >= devUpdateInterval
+	req.Header.Set("Accept", "application/vnd.github.v3+json")
+	req.Header.Set("User-Agent", fmt.Sprintf("atr/%s", Version))
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("GitHub API returned %s", resp.Status)
+	}
+
+	var release githubRelease
+	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
+		return nil, err
+	}
+
+	return &release, nil
 }
 
-// getLastDevUpdateTime reads the last dev update timestamp.
-func getLastDevUpdateTime() (time.Time, error) {
-	timestampPath, err := getTimestampPath()
+// getBinaryModTime returns the modification time of the current executable.
+func getBinaryModTime() (time.Time, error) {
+	execPath, err := os.Executable()
 	if err != nil {
 		return time.Time{}, err
 	}
-
-	data, err := os.ReadFile(timestampPath)
+	execPath, err = filepath.EvalSymlinks(execPath)
 	if err != nil {
 		return time.Time{}, err
 	}
+	info, err := os.Stat(execPath)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return info.ModTime(), nil
+}
 
+// readDateFile reads a date from a file in the config directory.
+func readDateFile(filename string) (time.Time, error) {
+	configDir, err := config.ConfigDir()
+	if err != nil {
+		return time.Time{}, err
+	}
+	data, err := os.ReadFile(filepath.Join(configDir, filename))
+	if err != nil {
+		return time.Time{}, err
+	}
 	return time.Parse(time.RFC3339, strings.TrimSpace(string(data)))
 }
 
-// recordDevUpdate saves the current time as the last dev update.
-func recordDevUpdate() error {
-	timestampPath, err := getTimestampPath()
+// writeDateFile writes a date to a file in the config directory.
+func writeDateFile(filename string, t time.Time) error {
+	configDir, err := config.ConfigDir()
 	if err != nil {
 		return err
 	}
-
-	// Ensure directory exists
 	if err := config.EnsureConfigDir(); err != nil {
 		return err
 	}
-
-	return os.WriteFile(timestampPath, []byte(time.Now().Format(time.RFC3339)), 0644)
+	return os.WriteFile(filepath.Join(configDir, filename), []byte(t.Format(time.RFC3339)), 0644)
 }
 
-// getTimestampPath returns the path to the timestamp file.
-func getTimestampPath() (string, error) {
-	configDir, err := config.ConfigDir()
-	if err != nil {
-		return "", err
+// getLocalReleaseDate returns the date of our installed dev release.
+// It checks multiple sources in order of priority:
+// 1. ~/.atr/dev-release-date (new file)
+// 2. ~/.atr/dev-update-timestamp (legacy file, backwards compat)
+// 3. Executable's modification time (fallback)
+func getLocalReleaseDate() (time.Time, error) {
+	// 1. Try the new release date file
+	if date, err := readDateFile(devReleaseDateFile); err == nil {
+		return date, nil
 	}
-	return filepath.Join(configDir, timestampFileName), nil
+
+	// 2. Try the legacy timestamp file (backwards compat)
+	if date, err := readDateFile(legacyTimestampFile); err == nil {
+		return date, nil
+	}
+
+	// 3. Fallback: executable's modification time
+	return getBinaryModTime()
+}
+
+// shouldCheckNow returns true if enough time has passed since the last check.
+func shouldCheckNow() bool {
+	lastCheck, err := readDateFile(devLastCheckFile)
+	if err != nil {
+		// No timestamp = never checked = should check
+		return true
+	}
+	return time.Since(lastCheck) >= devCheckInterval
+}
+
+// shouldAutoUpdateDev checks if we should update the dev version.
+// Returns true if an update is needed, along with the release info.
+func shouldAutoUpdateDev() (bool, *githubRelease) {
+	// 1. Check if enough time has passed since last CHECK
+	if !shouldCheckNow() {
+		return false, nil
+	}
+
+	// 2. Fetch release info from GitHub
+	release, err := getDevReleaseInfo()
+	if err != nil {
+		return false, nil
+	}
+
+	// 3. Get local reference date
+	localDate, _ := getLocalReleaseDate()
+
+	// 4. Compare: update if GitHub release is newer
+	if release.PublishedAt.After(localDate) {
+		return true, release
+	}
+
+	return false, nil
+}
+
+// recordDevUpdate stores the release's published date after a successful update.
+func recordDevUpdate(releaseDate time.Time) error {
+	return writeDateFile(devReleaseDateFile, releaseDate)
+}
+
+// recordLastCheck stores the current time as when we last checked GitHub.
+func recordLastCheck() error {
+	return writeDateFile(devLastCheckFile, time.Now())
 }
 
 // downloadAndInstall downloads and installs the update.
@@ -494,25 +613,32 @@ func CheckAndAutoUpdate() bool {
 	osName, arch := detectPlatform()
 
 	if isDevVersion(Version) {
-		// Dev version: check timestamp-based update
+		// Dev version: smart update based on GitHub release date
 		if !cfg.Update.AutoUpdateDev {
 			return false
 		}
 
-		lastUpdate, err := getLastDevUpdateTime()
-		if err == nil && time.Since(lastUpdate) < devUpdateInterval {
-			// Last update was recent, skip
+		// Use shouldAutoUpdateDev which checks:
+		// 1. Has enough time passed since last check?
+		// 2. Is there a newer release on GitHub?
+		shouldUpdate, release := shouldAutoUpdateDev()
+
+		// Always record that we checked (even if no update needed)
+		_ = recordLastCheck()
+
+		if !shouldUpdate {
 			return false
 		}
 
-		fmt.Println("[Checking for dev version update...]")
+		fmt.Println("[New dev version available, downloading...]")
 		if err := downloadAndInstall("dev", osName, arch); err != nil {
 			// Silent failure for background update
 			return false
 		}
 
-		if err := recordDevUpdate(); err != nil {
-			// Silent failure
+		// Record the release date from GitHub
+		if release != nil {
+			_ = recordDevUpdate(release.PublishedAt)
 		}
 
 		fmt.Println("[Dev version auto-updated. Restart to use new version.]")
