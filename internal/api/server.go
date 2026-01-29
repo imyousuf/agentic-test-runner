@@ -20,12 +20,14 @@ type Server struct {
 	httpServer *http.Server
 	endpoint   string
 	mux        *http.ServeMux
+	appConfig  *config.Config
 }
 
 // ServerConfig holds configuration for the server.
 type ServerConfig struct {
 	Port       int
 	BrowserCfg config.BrowserConfig
+	AppConfig  *config.Config
 }
 
 // NewServer creates a new browser control server.
@@ -36,8 +38,9 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 	}
 
 	s := &Server{
-		browser: b,
-		mux:     http.NewServeMux(),
+		browser:   b,
+		mux:       http.NewServeMux(),
+		appConfig: cfg.AppConfig,
 	}
 
 	s.registerRoutes()
@@ -70,7 +73,7 @@ func (s *Server) Start(ctx context.Context, port int) error {
 	s.httpServer = &http.Server{
 		Handler:      s.mux,
 		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 30 * time.Second,
+		WriteTimeout: 120 * time.Second,
 	}
 
 	// Save state

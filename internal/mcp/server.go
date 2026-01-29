@@ -11,8 +11,10 @@ import (
 	"os"
 	"time"
 
+	"github.com/imyousuf/agentic-test-runner/internal/agent"
 	"github.com/imyousuf/agentic-test-runner/internal/browser"
 	"github.com/imyousuf/agentic-test-runner/internal/config"
+	"github.com/imyousuf/agentic-test-runner/pkg/llm"
 )
 
 // Server implements the MCP server for browser automation.
@@ -22,6 +24,7 @@ type Server struct {
 	cdpEndpoint string
 	scanner     *bufio.Scanner
 	writer      io.Writer
+	appConfig   *config.Config
 }
 
 // ServerOption configures a Server.
@@ -31,6 +34,13 @@ type ServerOption func(*Server)
 func WithCDPEndpoint(endpoint string) ServerOption {
 	return func(s *Server) {
 		s.cdpEndpoint = endpoint
+	}
+}
+
+// WithAppConfig sets the full application config for LLM-powered features.
+func WithAppConfig(cfg *config.Config) ServerOption {
+	return func(s *Server) {
+		s.appConfig = cfg
 	}
 }
 
@@ -385,6 +395,34 @@ func (s *Server) executeTool(ctx context.Context, name string, args map[string]a
 			return "", err
 		}
 		return "Reloaded page", nil
+
+	case "browser_ask":
+		question, _ := args["question"].(string)
+		if question == "" {
+			return "", fmt.Errorf("question is required")
+		}
+		if s.appConfig == nil {
+			return "", fmt.Errorf("LLM not configured: app config not provided to MCP server")
+		}
+		if err := s.appConfig.ValidateForLLM(); err != nil {
+			return "", fmt.Errorf("LLM configuration error: %w", err)
+		}
+		llmCfg := s.appConfig.GetLLMConfig()
+		llmClient, err := llm.NewClient(ctx, llmCfg)
+		if err != nil {
+			return "", fmt.Errorf("failed to create LLM client: %w", err)
+		}
+		defer llmClient.Close()
+
+		askAgent := agent.NewAskAgent(agent.AskConfig{
+			LLMClient: llmClient,
+			Browser:   s.browser,
+		})
+		answer, err := askAgent.Ask(ctx, question)
+		if err != nil {
+			return "", fmt.Errorf("ask failed: %w", err)
+		}
+		return answer, nil
 
 	default:
 		return "", fmt.Errorf("unknown tool: %s", name)

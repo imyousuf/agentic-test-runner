@@ -80,6 +80,9 @@ to control a browser via shell commands.`,
 	browserCmd.AddCommand(newBrowserNetworkCmd())
 	browserCmd.AddCommand(newBrowserErrorsCmd())
 
+	// AI-powered
+	browserCmd.AddCommand(newBrowserAskCmd())
+
 	return browserCmd
 }
 
@@ -265,6 +268,7 @@ func runBrowserServe(cmd *cobra.Command, args []string) error {
 	server, err := api.NewServer(api.ServerConfig{
 		Port:       browserPort,
 		BrowserCfg: cfg.Behavior.Browser,
+		AppConfig:  cfg,
 	})
 	if err != nil {
 		return err
@@ -554,6 +558,20 @@ func newBrowserErrorsCmd() *cobra.Command {
 		Use:   "errors",
 		Short: "Get failed requests",
 		RunE:  func(cmd *cobra.Command, args []string) error { return apiGet("/errors") },
+	}
+}
+
+// AI-powered commands
+
+func newBrowserAskCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "ask <question>",
+		Short: "Ask a question about the current page",
+		Long:  "Ask a natural language question about the current browser page. A sub-agent inspects the page and returns a concise answer.",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return apiPost("/ask", map[string]interface{}{"question": args[0]})
+		},
 	}
 }
 

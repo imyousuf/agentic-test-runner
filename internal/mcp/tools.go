@@ -190,5 +190,19 @@ func GetBrowserTools() []Tool {
 				"properties": map[string]interface{}{},
 			},
 		},
+		{
+			Name:        "browser_ask",
+			Description: "Ask a natural language question about the current browser page. A sub-agent inspects the page and returns a concise answer without polluting your context with raw page content.",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"question": map[string]interface{}{
+						"type":        "string",
+						"description": "The question to ask about the current page",
+					},
+				},
+				"required": []string{"question"},
+			},
+		},
 	}
 }

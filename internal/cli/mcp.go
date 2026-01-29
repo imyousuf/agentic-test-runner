@@ -78,7 +78,8 @@ The server communicates via JSON-RPC 2.0 over stdio and exposes browser tools:
   - browser_hover: Hover over an element
   - browser_go_back: Navigate back
   - browser_go_forward: Navigate forward
-  - browser_reload: Reload the page`,
+  - browser_reload: Reload the page
+  - browser_ask: Ask a question about the current page (AI-powered)`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Load configuration
 			cfg, err := config.Load()
@@ -141,6 +142,7 @@ The server communicates via JSON-RPC 2.0 over stdio and exposes browser tools:
 			if endpoint != "" {
 				opts = append(opts, mcp.WithCDPEndpoint(endpoint))
 			}
+			opts = append(opts, mcp.WithAppConfig(cfg))
 
 			server := mcp.NewServer(browserCfg, opts...)
 			defer server.Close()

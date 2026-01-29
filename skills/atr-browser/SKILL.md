@@ -86,6 +86,7 @@ Once running, use navigation and interaction commands to control the browser.
 | `atr browser url` | Get current URL |
 | `atr browser title` | Get page title |
 | `atr browser eval <script>` | Execute JavaScript |
+| `atr browser ask "<question>"` | Ask a question about the current page |
 
 **Screenshot Note:** Use `--file` to save screenshots to `/tmp/` with a timestamped filename (e.g., `/tmp/atr-screenshot-20240105-103045.png`). No need to specify a file path. Add `--full` for full-page screenshots. Without `--file`, returns base64-encoded image data.
 
@@ -134,6 +135,21 @@ Follow this workflow for browser automation tasks:
    ```bash
    atr browser stop
    ```
+
+## Asking Questions About a Page
+
+Use `atr browser ask` when you need specific information from a page without flooding your context with raw HTML or snapshot data. A lightweight sub-agent inspects the page using multiple tools and returns a concise text answer.
+
+```bash
+atr browser ask "What is the main heading on this page?"
+atr browser ask "How many items are in the navigation menu?"
+atr browser ask "Is there a login form on this page?"
+```
+
+Prefer `ask` over `html` or `snapshot` when:
+- You need a specific fact, not the full page structure
+- You want to keep your context clean for subsequent reasoning
+- The answer can be expressed as a short text response
 
 ## Using JSON Output
 

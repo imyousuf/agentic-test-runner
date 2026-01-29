@@ -11,6 +11,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/imyousuf/agentic-test-runner/internal/agent"
+	"github.com/imyousuf/agentic-test-runner/pkg/llm"
 )
 
 // registerRoutes registers all HTTP routes.
@@ -47,6 +50,9 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("/api/v1/console", s.handleConsole)
 	s.mux.HandleFunc("/api/v1/network", s.handleNetwork)
 	s.mux.HandleFunc("/api/v1/errors", s.handleErrors)
+
+	// AI-powered
+	s.mux.HandleFunc("/api/v1/ask", s.handleAsk)
 }
 
 // handleHealth handles GET /api/v1/health
@@ -601,5 +607,59 @@ func (s *Server) handleErrors(w http.ResponseWriter, r *http.Request) {
 	writeSuccess(w, map[string]interface{}{
 		"failed_requests": failedRequests,
 		"count":           len(failedRequests),
+	})
+}
+
+// handleAsk handles POST /api/v1/ask
+func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	var req struct {
+		Question string `json:"question"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if req.Question == "" {
+		writeError(w, http.StatusBadRequest, "question is required")
+		return
+	}
+
+	if s.appConfig == nil {
+		writeError(w, http.StatusInternalServerError, "LLM not configured: app config not provided to server")
+		return
+	}
+
+	if err := s.appConfig.ValidateForLLM(); err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("LLM configuration error: %v", err))
+		return
+	}
+
+	llmCfg := s.appConfig.GetLLMConfig()
+	llmClient, err := llm.NewClient(r.Context(), llmCfg)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to create LLM client: %v", err))
+		return
+	}
+	defer llmClient.Close()
+
+	askAgent := agent.NewAskAgent(agent.AskConfig{
+		LLMClient: llmClient,
+		Browser:   s.browser,
+	})
+
+	answer, err := askAgent.Ask(r.Context(), req.Question)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("ask failed: %v", err))
+		return
+	}
+
+	writeSuccess(w, map[string]interface{}{
+		"answer": answer,
 	})
 }
