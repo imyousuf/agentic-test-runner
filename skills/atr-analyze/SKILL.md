@@ -1,17 +1,19 @@
 ---
 name: atr-analyze
-description: Run tests with AI-powered analysis and clean summarized output. Use this as the DEFAULT way to run test suites (pytest, jest, go test, make test, npm test, etc.) to keep conversation context clean. ATR analyzes the full output and returns a concise summary of results, highlighting any failures with actionable insights. Also useful for analyzing build failures and debugging command errors.
+description: Run tests, linters, type checkers, and builds with AI-powered analysis. Use this INSTEAD OF running test/lint/build commands directly via Bash. Wraps any command (pytest, jest, go test, make test, npm test, make lint, mypy, tsc, eslint, golangci-lint, cargo clippy, make typecheck, make build, etc.) to produce clean summarized output, keeping conversation context small. When a test or lint fails, ATR analyzes the full output and returns actionable failure insights.
 ---
 
 # ATR Command Analysis Skill
 
-This skill runs commands through ATR (Agentic Test Runner) which provides AI-powered analysis and **clean summarized output**. Use this as your **default way to run test suites** - the AI analyzes the full output and returns a concise summary, keeping your conversation context clean and focused.
+This skill runs commands through ATR (Agentic Test Runner) which provides AI-powered analysis and **clean summarized output**. Use this as your **default way to run tests, linters, type checkers, and builds** - the AI analyzes the full output and returns a concise summary, keeping your conversation context clean and focused.
 
 ## When to Use This Skill vs Direct Commands
 
 **Use ATR analyze (RECOMMENDED DEFAULT) when:**
-- Running test suites (pytest, jest, go test, npm test, make test)
-- Running builds that produce verbose output
+- Running test suites (pytest, jest, go test, npm test, make test, cargo test)
+- Running linters (eslint, golangci-lint, pylint, flake8, make lint, cargo clippy)
+- Running type checkers (mypy, tsc, pyright, make typecheck)
+- Running builds that produce verbose output (make build, npm run build, cargo build)
 - You want clean, summarized results instead of raw output
 - You want automatic failure analysis if something goes wrong
 
@@ -28,10 +30,25 @@ atr run --cmd "<command>"
 
 Examples:
 ```bash
+# Tests
 atr run --cmd "go test ./..."
 atr run --cmd "npm test"
 atr run --cmd "pytest tests/"
+atr run --cmd "make test"
+
+# Linting
+atr run --cmd "make lint"
+atr run --cmd "eslint src/"
+atr run --cmd "golangci-lint run ./..."
+
+# Type checking
+atr run --cmd "make typecheck"
+atr run --cmd "tsc --noEmit"
+atr run --cmd "mypy src/"
+
+# Builds
 atr run --cmd "make build"
+atr run --cmd "npm run build"
 ```
 
 ## Adding Context
