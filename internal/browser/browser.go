@@ -774,18 +774,43 @@ func (b *Browser) SetViewport(width, height int) error {
 }
 
 // Evaluate executes JavaScript in the current page.
+// Scripts are auto-wrapped so bare expressions (e.g. "document.title") work
+// like a browser dev console without needing an explicit function wrapper.
 func (b *Browser) Evaluate(script string) (interface{}, error) {
 	page, err := b.CurrentPage()
 	if err != nil {
 		return nil, err
 	}
 
-	result, err := page.Eval(script)
+	js := wrapJSExpression(script)
+	result, err := page.Eval(js)
 	if err != nil {
 		return nil, fmt.Errorf("script evaluation failed: %w", err)
 	}
 
 	return result.Value.Val(), nil
+}
+
+// wrapJSExpression wraps a script so that bare expressions return their value,
+// mimicking browser dev-console behaviour. If the script is already a function
+// expression or contains a return statement it is left as-is.
+func wrapJSExpression(script string) string {
+	s := strings.TrimSpace(script)
+
+	// Already a function expression — pass through
+	if strings.HasPrefix(s, "function") || strings.HasPrefix(s, "()") ||
+		strings.HasPrefix(s, "(function") || strings.HasPrefix(s, "async") {
+		return script
+	}
+
+	// Contains flow-control / multiple statements — wrap with implicit return
+	// of the last expression is not reliable, so leave as-is if it has return.
+	if strings.Contains(s, "return ") || strings.Contains(s, "return\n") {
+		return script
+	}
+
+	// Bare expression: wrap as arrow function so rod evaluates and returns it
+	return "() => (" + script + ")"
 }
 
 // WaitForText waits for text to appear on the page.
