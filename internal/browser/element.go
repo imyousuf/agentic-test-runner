@@ -3,6 +3,7 @@ package browser
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -324,60 +325,101 @@ func (b *Browser) Snapshot(verbose bool) ([]ElementInfo, error) {
 }
 
 // findElement finds an element using various strategies.
+// tryFind attempts to find an element using the given function with a per-attempt timeout.
+func tryFind(page *rod.Page, timeout time.Duration, fn func(*rod.Page) (*rod.Element, error)) (*rod.Element, error) {
+	return fn(page.Timeout(timeout))
+}
+
 func (b *Browser) findElement(page *rod.Page, target string) (*rod.Element, error) {
-	// Use a short timeout for element finding to avoid long waits
-	page = page.Timeout(3 * time.Second)
+	perAttempt := 500 * time.Millisecond
 
 	// If target starts with special prefixes, use direct selectors
 	if strings.HasPrefix(target, "#") || strings.HasPrefix(target, ".") ||
 		strings.HasPrefix(target, "[") || strings.HasPrefix(target, "//") {
-		return page.Element(target)
+		return tryFind(page, 3*time.Second, func(p *rod.Page) (*rod.Element, error) {
+			return p.Element(target)
+		})
 	}
 
 	// Try by UID (e.g., "e0", "e1")
 	if strings.HasPrefix(target, "e") {
-		elements, err := page.Elements("button, input, select, textarea, a, [role], [aria-label], [data-testid]")
-		if err == nil {
-			// Parse index from UID
+		if el, err := tryFind(page, perAttempt, func(p *rod.Page) (*rod.Element, error) {
+			elements, err := p.Elements("button, input, select, textarea, a, [role], [aria-label], [data-testid]")
+			if err != nil {
+				return nil, err
+			}
 			var idx int
 			if _, err := fmt.Sscanf(target, "e%d", &idx); err == nil && idx >= 0 && idx < len(elements) {
 				return elements[idx], nil
 			}
+			return nil, fmt.Errorf("UID %s not found", target)
+		}); err == nil {
+			return el, nil
 		}
 	}
 
 	// Try by aria-label
-	if el, err := page.Element(fmt.Sprintf(`[aria-label="%s"]`, target)); err == nil {
+	if el, err := tryFind(page, perAttempt, func(p *rod.Page) (*rod.Element, error) {
+		return p.Element(fmt.Sprintf(`[aria-label="%s"]`, target))
+	}); err == nil {
 		return el, nil
 	}
 
 	// Try by data-testid
-	if el, err := page.Element(fmt.Sprintf(`[data-testid="%s"]`, target)); err == nil {
+	if el, err := tryFind(page, perAttempt, func(p *rod.Page) (*rod.Element, error) {
+		return p.Element(fmt.Sprintf(`[data-testid="%s"]`, target))
+	}); err == nil {
 		return el, nil
 	}
 
 	// Try by name attribute
-	if el, err := page.Element(fmt.Sprintf(`[name="%s"]`, target)); err == nil {
+	if el, err := tryFind(page, perAttempt, func(p *rod.Page) (*rod.Element, error) {
+		return p.Element(fmt.Sprintf(`[name="%s"]`, target))
+	}); err == nil {
 		return el, nil
 	}
 
 	// Try by placeholder
-	if el, err := page.Element(fmt.Sprintf(`[placeholder="%s"]`, target)); err == nil {
+	if el, err := tryFind(page, perAttempt, func(p *rod.Page) (*rod.Element, error) {
+		return p.Element(fmt.Sprintf(`[placeholder="%s"]`, target))
+	}); err == nil {
 		return el, nil
 	}
 
-	// Try by text content for buttons and links
-	if el, err := page.ElementR("button, a, [role='button']", target); err == nil {
+	// Try by XPath exact text match — precise, avoids matching containers
+	if el, err := tryFind(page, perAttempt, func(p *rod.Page) (*rod.Element, error) {
+		return p.ElementX(fmt.Sprintf(`//*[normalize-space(text())="%s"]`, target))
+	}); err == nil {
 		return el, nil
 	}
 
-	// Try by label text (for form fields)
-	if el, err := page.Element(fmt.Sprintf(`input[id] + label:has-text("%s"), label:has-text("%s") + input`, target, target)); err == nil {
+	// Try by text content for buttons and links only (not container roles)
+	if el, err := tryFind(page, perAttempt, func(p *rod.Page) (*rod.Element, error) {
+		return p.ElementR("button, a", target)
+	}); err == nil {
 		return el, nil
 	}
 
-	// Final attempt: any element containing the text
-	if el, err := page.ElementR("*", target); err == nil {
+	// Try by label text (for form fields associated via for/id)
+	if el, err := tryFind(page, perAttempt, func(p *rod.Page) (*rod.Element, error) {
+		// Find label with matching text, then get its associated input via "for" attribute
+		label, err := p.ElementR("label", "^"+regexp.QuoteMeta(target)+"$")
+		if err != nil {
+			return nil, err
+		}
+		forAttr, err := label.Attribute("for")
+		if err != nil || forAttr == nil || *forAttr == "" {
+			return nil, fmt.Errorf("label has no for attribute")
+		}
+		return p.Element("#" + *forAttr)
+	}); err == nil {
+		return el, nil
+	}
+
+	// Final attempt: any element containing the text via regex
+	if el, err := tryFind(page, perAttempt, func(p *rod.Page) (*rod.Element, error) {
+		return p.ElementR("*", target)
+	}); err == nil {
 		return el, nil
 	}
 
