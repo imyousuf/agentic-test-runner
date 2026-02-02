@@ -76,17 +76,22 @@ func (t *AskScreenshotTool) Parameters() map[string]any {
 }
 
 func (t *AskScreenshotTool) Execute(ctx context.Context, args map[string]any) (string, bool) {
+	text, _, _, isErr := t.ExecuteWithImage(ctx, args)
+	return text, isErr
+}
+
+func (t *AskScreenshotTool) ExecuteWithImage(ctx context.Context, args map[string]any) (string, []byte, string, bool) {
 	data, err := t.browser.Screenshot(false)
 	if err != nil {
-		return fmt.Sprintf("Screenshot failed: %v", err), true
+		return fmt.Sprintf("Screenshot failed: %v", err), nil, "", true
 	}
 
 	filename := fmt.Sprintf("/tmp/ask-screenshot-%d.png", os.Getpid())
 	if err := os.WriteFile(filename, data, 0644); err != nil {
-		return fmt.Sprintf("Failed to save screenshot: %v", err), true
+		return fmt.Sprintf("Failed to save screenshot: %v", err), nil, "", true
 	}
 
-	return fmt.Sprintf("Screenshot saved to %s", filename), false
+	return fmt.Sprintf("Screenshot saved to %s", filename), data, "image/png", false
 }
 
 // AskRawHTMLTool returns HTML with scripts/styles/event handlers stripped.

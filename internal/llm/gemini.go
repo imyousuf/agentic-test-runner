@@ -130,8 +130,12 @@ func (c *geminiClient) Close() error {
 // convertMessages converts llm.Message to genai.Content.
 func (c *geminiClient) convertMessages(messages []llm.Message) []*genai.Content {
 	var contents []*genai.Content
+	// Collect image data from tool responses; emit as a separate user message
+	// after the entire batch of tool responses so we don't break the Gemini
+	// constraint that function response part count must match function call count.
+	var pendingImages []pendingImage
 
-	for _, msg := range messages {
+	for i, msg := range messages {
 		var role string
 		switch msg.Role {
 		case llm.RoleUser:
@@ -158,6 +162,22 @@ func (c *geminiClient) convertMessages(messages []llm.Message) []*genai.Content 
 					}),
 				},
 			})
+			if len(msg.ImageData) > 0 {
+				pendingImages = append(pendingImages, pendingImage{data: msg.ImageData, mime: msg.ImageMIME})
+			}
+			// Flush pending images when next message is not a tool response
+			if len(pendingImages) > 0 && (i+1 >= len(messages) || messages[i+1].Role != llm.RoleTool) {
+				var parts []*genai.Part
+				parts = append(parts, genai.NewPartFromText("Here are the screenshot images from the tool results above:"))
+				for _, img := range pendingImages {
+					parts = append(parts, genai.NewPartFromBytes(img.data, img.mime))
+				}
+				contents = append(contents, &genai.Content{
+					Role:  "user",
+					Parts: parts,
+				})
+				pendingImages = nil
+			}
 			continue
 		}
 
@@ -180,15 +200,24 @@ func (c *geminiClient) convertMessages(messages []llm.Message) []*genai.Content 
 		}
 
 		// Regular text message
+		parts := []*genai.Part{
+			genai.NewPartFromText(msg.Content),
+		}
+		if len(msg.ImageData) > 0 {
+			parts = append(parts, genai.NewPartFromBytes(msg.ImageData, msg.ImageMIME))
+		}
 		contents = append(contents, &genai.Content{
-			Role: role,
-			Parts: []*genai.Part{
-				genai.NewPartFromText(msg.Content),
-			},
+			Role:  role,
+			Parts: parts,
 		})
 	}
 
 	return contents
+}
+
+type pendingImage struct {
+	data []byte
+	mime string
 }
 
 // convertTools converts llm.Tool to genai.Tool.

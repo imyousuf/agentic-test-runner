@@ -23,6 +23,14 @@ type Tool interface {
 	Execute(ctx context.Context, args map[string]any) (string, bool)
 }
 
+// ImageResultTool is an optional interface for tools that return image data
+// alongside their text result (e.g., screenshot tools).
+type ImageResultTool interface {
+	Tool
+	// ExecuteWithImage runs the tool and returns text, image bytes, MIME type, and error flag.
+	ExecuteWithImage(ctx context.Context, args map[string]any) (string, []byte, string, bool)
+}
+
 // ToLLMTool converts a Tool to an llm.Tool for use with LLM clients.
 func ToLLMTool(t Tool) llm.Tool {
 	return llm.Tool{

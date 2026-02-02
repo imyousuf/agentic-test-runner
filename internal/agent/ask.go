@@ -94,18 +94,23 @@ Rules:
 		})
 
 		for _, tc := range resp.ToolCalls {
-			toolResult, _, execErr := a.registry.Execute(ctx, tc.Name, tc.Arguments)
+			toolResult, imgData, imgMIME, _, execErr := a.registry.ExecuteWithImage(ctx, tc.Name, tc.Arguments)
 			if execErr != nil {
 				toolResult = fmt.Sprintf("Error: %v", execErr)
 			}
 
 			a.verboseLog("Ask tool %s result length: %d", tc.Name, len(toolResult))
 
-			messages = append(messages, llm.Message{
+			msg := llm.Message{
 				Role:       llm.RoleTool,
 				Content:    toolResult,
 				ToolCallID: tc.Name,
-			})
+			}
+			if len(imgData) > 0 {
+				msg.ImageData = imgData
+				msg.ImageMIME = imgMIME
+			}
+			messages = append(messages, msg)
 		}
 	}
 

@@ -241,7 +241,7 @@ func (a *Agent) ExecuteBehaviorTest(ctx context.Context, req *BehaviorRequest) (
 			a.verboseLog("Executing tool: %s", tc.Name)
 			toolStart := time.Now()
 
-			toolResult, isError, err := a.registry.Execute(ctx, tc.Name, tc.Arguments)
+			toolResult, imgData, imgMIME, isError, err := a.registry.ExecuteWithImage(ctx, tc.Name, tc.Arguments)
 			toolDuration := time.Since(toolStart)
 
 			if err != nil {
@@ -254,11 +254,16 @@ func (a *Agent) ExecuteBehaviorTest(ctx context.Context, req *BehaviorRequest) (
 			}
 
 			// Add tool result message
-			messages = append(messages, llm.Message{
+			msg := llm.Message{
 				Role:       llm.RoleTool,
 				Content:    toolResult,
 				ToolCallID: tc.Name,
-			})
+			}
+			if len(imgData) > 0 {
+				msg.ImageData = imgData
+				msg.ImageMIME = imgMIME
+			}
+			messages = append(messages, msg)
 
 			_ = isError
 		}
@@ -471,7 +476,7 @@ func (a *Agent) AnalyzeFailure(ctx context.Context, req *AnalysisRequest) (*resu
 			a.verboseLog("Executing tool: %s", tc.Name)
 			toolStart := time.Now()
 
-			toolResult, isError, err := a.registry.Execute(ctx, tc.Name, tc.Arguments)
+			toolResult, imgData, imgMIME, isError, err := a.registry.ExecuteWithImage(ctx, tc.Name, tc.Arguments)
 			toolDuration := time.Since(toolStart)
 
 			if err != nil {
@@ -484,11 +489,16 @@ func (a *Agent) AnalyzeFailure(ctx context.Context, req *AnalysisRequest) (*resu
 			}
 
 			// Add tool result message
-			messages = append(messages, llm.Message{
+			msg := llm.Message{
 				Role:       llm.RoleTool,
 				Content:    toolResult,
 				ToolCallID: tc.Name, // Use tool name as ID for Gemini
-			})
+			}
+			if len(imgData) > 0 {
+				msg.ImageData = imgData
+				msg.ImageMIME = imgMIME
+			}
+			messages = append(messages, msg)
 
 			_ = isError // Track if needed
 		}

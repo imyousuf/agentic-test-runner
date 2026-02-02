@@ -708,6 +708,11 @@ func (t *BrowserScreenshotTool) Parameters() map[string]any {
 }
 
 func (t *BrowserScreenshotTool) Execute(ctx context.Context, args map[string]any) (string, bool) {
+	text, _, _, isErr := t.ExecuteWithImage(ctx, args)
+	return text, isErr
+}
+
+func (t *BrowserScreenshotTool) ExecuteWithImage(ctx context.Context, args map[string]any) (string, []byte, string, bool) {
 	target, _ := args["target"].(string)
 	fullPage, _ := args["full_page"].(bool)
 
@@ -721,10 +726,10 @@ func (t *BrowserScreenshotTool) Execute(ctx context.Context, args map[string]any
 	}
 
 	if err != nil {
-		return fmt.Sprintf("Screenshot failed: %v", err), true
+		return fmt.Sprintf("Screenshot failed: %v", err), nil, "", true
 	}
 
-	return fmt.Sprintf("Screenshot captured (%d bytes)", len(data)), false
+	return fmt.Sprintf("Screenshot captured (%d bytes)", len(data)), data, "image/png", false
 }
 
 // BrowserEvaluateTool executes JavaScript.

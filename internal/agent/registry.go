@@ -24,6 +24,9 @@ type Registry interface {
 
 	// Execute executes a tool by name with the given arguments.
 	Execute(ctx context.Context, name string, args map[string]any) (string, bool, error)
+
+	// ExecuteWithImage executes a tool and returns image data if the tool supports it.
+	ExecuteWithImage(ctx context.Context, name string, args map[string]any) (string, []byte, string, bool, error)
 }
 
 // toolRegistry is the default implementation of Registry.
@@ -88,6 +91,22 @@ func (r *toolRegistry) Execute(ctx context.Context, name string, args map[string
 
 	result, isError := tool.Execute(ctx, args)
 	return result, isError, nil
+}
+
+// ExecuteWithImage executes a tool and returns image data if the tool implements ImageResultTool.
+func (r *toolRegistry) ExecuteWithImage(ctx context.Context, name string, args map[string]any) (string, []byte, string, bool, error) {
+	tool, ok := r.Get(name)
+	if !ok {
+		return "", nil, "", true, fmt.Errorf("unknown tool: %s", name)
+	}
+
+	if imgTool, ok := tool.(ImageResultTool); ok {
+		text, imgData, mime, isError := imgTool.ExecuteWithImage(ctx, args)
+		return text, imgData, mime, isError, nil
+	}
+
+	result, isError := tool.Execute(ctx, args)
+	return result, nil, "", isError, nil
 }
 
 // DefaultRegistry returns a registry with all default tools registered.

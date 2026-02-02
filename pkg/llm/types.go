@@ -28,6 +28,10 @@ type Message struct {
 	ToolCallID string `json:"tool_call_id,omitempty"`
 	// ToolCalls contains any tool calls made by the assistant.
 	ToolCalls []ToolCall `json:"tool_calls,omitempty"`
+	// ImageData holds optional inline image bytes for multimodal messages (e.g., screenshots).
+	ImageData []byte `json:"image_data,omitempty"`
+	// ImageMIME is the MIME type for ImageData (e.g., "image/png").
+	ImageMIME string `json:"image_mime,omitempty"`
 }
 
 // ToolCall represents a function/tool call made by the LLM.
