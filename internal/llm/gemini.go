@@ -134,6 +134,7 @@ func (c *geminiClient) convertMessages(messages []llm.Message) []*genai.Content 
 	// after the entire batch of tool responses so we don't break the Gemini
 	// constraint that function response part count must match function call count.
 	var pendingImages []pendingImage
+	var funcParts []*genai.Part
 
 	for i, msg := range messages {
 		var role string
@@ -152,31 +153,34 @@ func (c *geminiClient) convertMessages(messages []llm.Message) []*genai.Content 
 			role = "user"
 		}
 
-		// Handle tool responses
+		// Handle tool responses — batch consecutive tool messages into one Content
+		// so the function response part count matches the function call part count.
 		if msg.Role == llm.RoleTool && msg.ToolCallID != "" {
-			contents = append(contents, &genai.Content{
-				Role: role,
-				Parts: []*genai.Part{
-					genai.NewPartFromFunctionResponse(msg.ToolCallID, map[string]any{
-						"result": msg.Content,
-					}),
-				},
-			})
+			funcParts = append(funcParts, genai.NewPartFromFunctionResponse(msg.ToolCallID, map[string]any{
+				"result": msg.Content,
+			}))
 			if len(msg.ImageData) > 0 {
 				pendingImages = append(pendingImages, pendingImage{data: msg.ImageData, mime: msg.ImageMIME})
 			}
-			// Flush pending images when next message is not a tool response
-			if len(pendingImages) > 0 && (i+1 >= len(messages) || messages[i+1].Role != llm.RoleTool) {
-				var parts []*genai.Part
-				parts = append(parts, genai.NewPartFromText("Here are the screenshot images from the tool results above:"))
-				for _, img := range pendingImages {
-					parts = append(parts, genai.NewPartFromBytes(img.data, img.mime))
-				}
+			// Flush when next message is not a tool response
+			if i+1 >= len(messages) || messages[i+1].Role != llm.RoleTool {
 				contents = append(contents, &genai.Content{
-					Role:  "user",
-					Parts: parts,
+					Role:  role,
+					Parts: funcParts,
 				})
-				pendingImages = nil
+				funcParts = nil
+				if len(pendingImages) > 0 {
+					var imgParts []*genai.Part
+					imgParts = append(imgParts, genai.NewPartFromText("Here are the screenshot images from the tool results above:"))
+					for _, img := range pendingImages {
+						imgParts = append(imgParts, genai.NewPartFromBytes(img.data, img.mime))
+					}
+					contents = append(contents, &genai.Content{
+						Role:  "user",
+						Parts: imgParts,
+					})
+					pendingImages = nil
+				}
 			}
 			continue
 		}
