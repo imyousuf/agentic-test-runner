@@ -651,6 +651,7 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 	askAgent := agent.NewAskAgent(agent.AskConfig{
 		LLMClient: llmClient,
 		Browser:   s.browser,
+		Verbose:   true,
 	})
 
 	answer, err := askAgent.Ask(r.Context(), req.Question)

@@ -3,7 +3,9 @@ package llm
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 
 	"google.golang.org/genai"
@@ -98,12 +100,42 @@ func (c *geminiClient) Chat(ctx context.Context, messages []llm.Message, tools [
 		}
 	}
 
+	// Debug: log the contents being sent
+	for ci, content := range contents {
+		log.Printf("[DEBUG gemini] Content[%d] role=%s parts=%d", ci, content.Role, len(content.Parts))
+		for pi, part := range content.Parts {
+			if part.Text != "" {
+				truncated := part.Text
+				if len(truncated) > 200 {
+					truncated = truncated[:200] + "..."
+				}
+				log.Printf("[DEBUG gemini]   Part[%d] text=%q", pi, truncated)
+			}
+			if part.FunctionCall != nil {
+				argsJSON, _ := json.Marshal(part.FunctionCall.Args)
+				log.Printf("[DEBUG gemini]   Part[%d] functionCall=%s args=%s", pi, part.FunctionCall.Name, string(argsJSON))
+			}
+			if part.FunctionResponse != nil {
+				log.Printf("[DEBUG gemini]   Part[%d] functionResponse=%s", pi, part.FunctionResponse.Name)
+			}
+			if part.InlineData != nil {
+				log.Printf("[DEBUG gemini]   Part[%d] inlineData mime=%s len=%d", pi, part.InlineData.MIMEType, len(part.InlineData.Data))
+			}
+		}
+	}
+
 	resp, err := c.client.Models.GenerateContent(ctx, c.model, contents, config)
 	if err != nil {
 		return nil, fmt.Errorf("generate content failed: %w", err)
 	}
 
-	return c.convertResponse(resp), nil
+	llmResp := c.convertResponse(resp)
+	log.Printf("[DEBUG gemini] Response: content=%d chars, toolCalls=%d, finish=%s", len(llmResp.Content), len(llmResp.ToolCalls), llmResp.FinishReason)
+	for i, tc := range llmResp.ToolCalls {
+		log.Printf("[DEBUG gemini]   ToolCall[%d] name=%s id=%s", i, tc.Name, tc.ID)
+	}
+
+	return llmResp, nil
 }
 
 // ChatWithHistory is like Chat but allows providing conversation history.
