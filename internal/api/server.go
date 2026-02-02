@@ -78,9 +78,10 @@ func (s *Server) Start(ctx context.Context, port int) error {
 
 	// Save state
 	state := &BrowserState{
-		PID:       os.Getpid(),
-		Endpoint:  s.endpoint,
-		StartedAt: time.Now(),
+		PID:         os.Getpid(),
+		Endpoint:    s.endpoint,
+		CDPEndpoint: s.browser.CDPEndpoint(),
+		StartedAt:   time.Now(),
 	}
 	if err := SaveState(state); err != nil {
 		s.browser.Close()

@@ -21,6 +21,7 @@ const (
 type BrowserState struct {
 	PID            int       `json:"pid"`
 	Endpoint       string    `json:"endpoint"`
+	CDPEndpoint    string    `json:"cdp_endpoint,omitempty"`
 	StartedAt      time.Time `json:"started_at"`
 	BrowserVersion string    `json:"browser_version,omitempty"`
 }

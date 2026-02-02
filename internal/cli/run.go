@@ -311,24 +311,43 @@ func runBehaviorTest(ctx context.Context, cfg *config.Config, cwd string) error 
 		return fmt.Errorf("failed to create browser: %w", err)
 	}
 
+	// Check if a browser server is already running and reuse it.
+	// This avoids Chrome SingletonLock conflicts when both use the same profile,
+	// and is also the expected behavior when a user explicitly starts a server.
+	reusingServer := false
+	cdpTarget := cdpEndpointFlag
+	if cdpTarget == "" {
+		if serverState, err := api.GetRunningState(); err == nil && serverState != nil && serverState.CDPEndpoint != "" {
+			cdpTarget = serverState.CDPEndpoint
+			reusingServer = true
+		}
+	}
+
 	// Launch or connect to browser
-	if err := b.LaunchOrConnect(ctx, cdpEndpointFlag); err != nil {
+	if err := b.LaunchOrConnect(ctx, cdpTarget); err != nil {
 		return fmt.Errorf("failed to start browser: %w", err)
 	}
 	defer b.Close()
 
-	// Save browser state so MCP server can discover it
-	if cdpEndpoint := b.CDPEndpoint(); cdpEndpoint != "" {
-		state := &api.BrowserState{
-			PID:       os.Getpid(),
-			Endpoint:  cdpEndpoint,
-			StartedAt: time.Now(),
+	// Save browser state so MCP server can discover it.
+	// Skip if reusing a server (it owns the state file) or if a server is running
+	// (avoid overwriting its state even when launching a separate browser).
+	if !reusingServer {
+		if existingState, _ := api.GetRunningState(); existingState == nil {
+			if cdpEndpoint := b.CDPEndpoint(); cdpEndpoint != "" {
+				state := &api.BrowserState{
+					PID:         os.Getpid(),
+					Endpoint:    cdpEndpoint,
+					CDPEndpoint: cdpEndpoint,
+					StartedAt:   time.Now(),
+				}
+				if err := api.SaveState(state); err != nil {
+					// Non-fatal - log warning but continue
+					fmt.Fprintf(os.Stderr, "Warning: failed to save browser state: %v\n", err)
+				}
+				defer api.RemoveState() // Clean up when done
+			}
 		}
-		if err := api.SaveState(state); err != nil {
-			// Non-fatal - log warning but continue
-			fmt.Fprintf(os.Stderr, "Warning: failed to save browser state: %v\n", err)
-		}
-		defer api.RemoveState() // Clean up when done
 	}
 
 	// Create LLM client
@@ -376,8 +395,22 @@ func runBehaviorTest(ctx context.Context, cfg *config.Config, cwd string) error 
 			continue
 		}
 
-		// Navigate to base URL first if specified
-		if baseURL != "" {
+		// When reusing a server, always open a new tab to isolate the test,
+		// then close it afterward to leave the server's tabs untouched.
+		testPageIndex := -1
+		if reusingServer {
+			tabURL := baseURL
+			if tabURL == "" {
+				tabURL = "about:blank"
+			}
+			if err := b.NewPage(ctx, tabURL); err != nil {
+				fmt.Printf("✗ Failed to open test tab: %v\n", err)
+				failedTests = append(failedTests, testFile)
+				continue
+			}
+			testPageIndex = len(b.ListPages()) - 1
+		} else if baseURL != "" {
+			// Not reusing server: navigate to base URL in a new tab
 			if err := b.NewPage(ctx, baseURL); err != nil {
 				fmt.Printf("✗ Failed to open page: %v\n", err)
 				failedTests = append(failedTests, testFile)
@@ -391,6 +424,15 @@ func runBehaviorTest(ctx context.Context, cfg *config.Config, cwd string) error 
 			TestContent: string(content),
 			BaseURL:     baseURL,
 		})
+
+		// Clean up test tab when reusing server
+		if reusingServer && testPageIndex >= 0 && testPageIndex < len(b.ListPages()) {
+			b.ClosePage(testPageIndex)
+			if len(b.ListPages()) > 0 {
+				b.SelectPage(0)
+			}
+		}
+
 		if err != nil {
 			fmt.Printf("✗ Test execution failed: %v\n", err)
 			failedTests = append(failedTests, testFile)

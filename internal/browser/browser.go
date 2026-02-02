@@ -28,7 +28,11 @@ type Browser struct {
 	current    int // index of current page
 	config     config.BrowserConfig
 	controlURL string // CDP WebSocket URL for connecting to this browser
+	connected  bool   // true when connected to an external browser (don't close it)
 	mu         sync.RWMutex
+
+	// Track pages created by this instance (for cleanup when connected)
+	ownedPages map[*rod.Page]bool
 
 	// Event tracking
 	consoleMessages []ConsoleMessage
@@ -70,6 +74,7 @@ func New(cfg config.BrowserConfig) (*Browser, error) {
 		config:          cfg,
 		pages:           make([]*rod.Page, 0),
 		current:         -1,
+		ownedPages:      make(map[*rod.Page]bool),
 		consoleMessages: make([]ConsoleMessage, 0),
 		networkRequests: make([]NetworkRequest, 0),
 		targetIDs:       make(map[proto.TargetTargetID]*rod.Page),
@@ -381,6 +386,7 @@ func (b *Browser) Connect(ctx context.Context, cdpEndpoint string) error {
 	}
 
 	b.browser = browser
+	b.connected = true
 
 	// Sync existing pages from the connected browser
 	b.syncExistingPages()
@@ -400,15 +406,27 @@ func (b *Browser) CDPEndpoint() string {
 }
 
 // Close closes the browser and all pages.
+// When connected to an external browser (e.g., a running server), only pages
+// created by this instance are closed; the browser process is left running.
 func (b *Browser) Close() error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	// The target listener goroutine will naturally stop when browser is closed
-	if b.browser != nil {
-		return b.browser.Close()
+	if b.browser == nil {
+		return nil
 	}
-	return nil
+
+	if b.connected {
+		// Only close pages we created, leave the browser running
+		for page := range b.ownedPages {
+			page.Close()
+		}
+		b.ownedPages = make(map[*rod.Page]bool)
+		return nil
+	}
+
+	// The target listener goroutine will naturally stop when browser is closed
+	return b.browser.Close()
 }
 
 // NewPage creates a new page/tab and navigates to the URL.
@@ -442,6 +460,7 @@ func (b *Browser) NewPage(ctx context.Context, url string) error {
 
 	b.pages = append(b.pages, page)
 	b.current = len(b.pages) - 1
+	b.ownedPages[page] = true
 
 	// Wait for page load
 	if err := page.WaitLoad(); err != nil {
