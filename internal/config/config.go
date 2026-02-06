@@ -366,7 +366,7 @@ func (c *Config) Validate() error {
 			validModels := map[string]bool{
 				"opus": true, "sonnet": true, "haiku": true,
 				"claude-opus": true, "claude-sonnet": true, "claude-haiku": true,
-				"claude-opus-4": true, "claude-sonnet-4": true, "claude-haiku-3": true,
+				"claude-opus-4": true, "claude-sonnet-4": true, "claude-haiku-4": true,
 			}
 			// Also allow full model names like claude-opus-4-20250514
 			if !validModels[strings.ToLower(c.Model)] && !strings.HasPrefix(c.Model, "claude-") {
