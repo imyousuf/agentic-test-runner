@@ -57,21 +57,21 @@ func newClaudeCLIClient(_ context.Context, cfg llm.Config) (llm.Client, error) {
 	}, nil
 }
 
-// normalizeClaudeModel converts model names to Claude CLI aliases.
+// normalizeClaudeModel converts model names to Claude CLI model IDs.
 func normalizeClaudeModel(model string) string {
 	switch strings.ToLower(model) {
 	case "opus", "claude-opus", "claude-opus-4":
-		return "opus"
+		return "claude-opus-4-6"
 	case "sonnet", "claude-sonnet", "claude-sonnet-4":
-		return "sonnet"
-	case "haiku", "claude-haiku", "claude-haiku-3":
-		return "haiku"
+		return "claude-sonnet-4-5"
+	case "haiku", "claude-haiku", "claude-haiku-4":
+		return "claude-haiku-4-5"
 	default:
 		// If it looks like a full model name, pass it through
 		if strings.HasPrefix(model, "claude-") {
 			return model
 		}
-		// Default to sonnet if not specified
+		// Default: let CLI pick its default
 		return ""
 	}
 }
