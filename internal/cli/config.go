@@ -138,6 +138,7 @@ func newConfigInitCmd() *cobra.Command {
 			clis := llm.DetectAvailableCLIs()
 			var detectedBackend string
 			var detectedCLIInfo string
+			var defaultModel string
 
 			if len(clis) > 0 {
 				detectedBackend = string(clis[0].Provider)
@@ -146,9 +147,15 @@ func newConfigInitCmd() *cobra.Command {
 					detectedCLIInfo += fmt.Sprintf(" (%s)", clis[0].Version)
 				}
 				detectedCLIInfo += "\n"
+				if detectedBackend == "claude-cli" {
+					defaultModel = "sonnet"
+				} else {
+					defaultModel = "flash"
+				}
 			} else {
 				detectedBackend = "gemini-api"
 				detectedCLIInfo = "# No CLI backends detected. Using API backend.\n"
+				defaultModel = "flash"
 			}
 
 			defaultConfig := fmt.Sprintf(`# ATR Configuration
@@ -174,9 +181,11 @@ cli:
   auto_detect: true     # Automatically detect available CLIs
   timeout: "5m"         # Timeout for CLI execution
 
-# Model Selection: "flash" (faster, cheaper) or "pro" (more capable)
-# Only used for API backends; CLI backends use their own models
-model: "flash"
+# Model Selection:
+#   API backends: "flash" (faster, cheaper) or "pro" (more capable)
+#   claude-cli: "sonnet", "opus", or "haiku"
+#   gemini-cli: "flash" or "pro"
+model: "%s"
 
 # Model name overrides (optional)
 models:
@@ -236,7 +245,7 @@ server:
 update:
   auto_update_dev: true  # Auto-update dev versions every 2 days
   disabled: false        # Disable all update checking
-`, detectedCLIInfo, detectedBackend)
+`, detectedCLIInfo, detectedBackend, defaultModel)
 
 			if err := os.WriteFile(configPath, []byte(defaultConfig), 0644); err != nil {
 				return fmt.Errorf("failed to write config file: %w", err)
