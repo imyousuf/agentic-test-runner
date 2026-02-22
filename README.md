@@ -1,6 +1,5 @@
 # ATR - Agentic Test Runner
 
-[![CI](https://github.com/imyousuf/agentic-test-runner/actions/workflows/ci.yml/badge.svg)](https://github.com/imyousuf/agentic-test-runner/actions/workflows/ci.yml)
 [![Go Report Card](https://goreportcard.com/badge/github.com/imyousuf/agentic-test-runner)](https://goreportcard.com/report/github.com/imyousuf/agentic-test-runner)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
