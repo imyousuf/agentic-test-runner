@@ -31,6 +31,8 @@ go.work.sum
 .idea/
 .vscode/
 .gemini/
+.CodeEagle/
+.CodeEagle.conf
 
 # build output
 bin/
