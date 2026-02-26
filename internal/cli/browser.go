@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/go-rod/rod/lib/launcher"
 	"github.com/spf13/cobra"
 
 	"github.com/imyousuf/agentic-test-runner/internal/api"
@@ -24,7 +25,8 @@ var (
 	browserDataDir     string
 	browserPersistFlag bool
 	browserHeadless    bool
-	browserSandbox     bool // opt-in to enable sandbox (default: disabled for compatibility)
+	browserSandbox      bool // opt-in to enable sandbox (default: disabled for compatibility)
+	browserSystemChrome bool
 )
 
 func newBrowserCmd() *cobra.Command {
@@ -104,6 +106,8 @@ func newBrowserStartCmd() *cobra.Command {
 		"Run browser in headless mode (no visible window)")
 	cmd.Flags().BoolVar(&browserSandbox, "sandbox", false,
 		"Enable Chrome sandbox (disabled by default for Ubuntu 23.10+ compatibility)")
+	cmd.Flags().BoolVar(&browserSystemChrome, "system-chrome", false,
+		"Use system-installed Google Chrome (falls back to bundled browser if not found)")
 	return cmd
 }
 
@@ -116,6 +120,19 @@ func runBrowserStart(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("failed to set %s: %w", key, err)
 		}
 		return nil
+	}
+
+	// Use system Chrome if requested, with fallback to rod's bundled browser
+	if browserSystemChrome {
+		if chromePath, found := launcher.LookPath(); found {
+			if err := setEnv("ATR_BEHAVIOR_BROWSER_EXECUTABLE", chromePath); err != nil {
+				return err
+			}
+			// Implicitly enable persist so sessions are shared between system and bundled Chrome
+			browserPersistFlag = true
+		} else {
+			fmt.Fprintln(os.Stderr, "Warning: system Chrome not found, falling back to bundled browser")
+		}
 	}
 
 	if browserHeadless {
