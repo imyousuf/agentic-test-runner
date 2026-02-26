@@ -174,6 +174,11 @@ func (b *Browser) Launch(ctx context.Context) error {
 		l = l.Set("ignore-certificate-errors")
 	}
 
+	// In headless mode, set explicit window size since there's no physical window
+	if b.config.Headless && b.config.Viewport.Width > 0 && b.config.Viewport.Height > 0 {
+		l = l.Set("window-size", fmt.Sprintf("%d,%d", b.config.Viewport.Width, b.config.Viewport.Height))
+	}
+
 	// Launch and get control URL
 	controlURL, err := l.Launch()
 	if err != nil {
@@ -195,10 +200,43 @@ func (b *Browser) Launch(ctx context.Context) error {
 
 	b.browser = browser
 
+	// In headed mode, maximize the window via CDP so it fills the screen.
+	// The page will naturally reflow if the user resizes the window.
+	if !b.config.Headless {
+		b.maximizeWindow()
+	}
+
 	// Start listening for new tabs opened manually
 	b.startTargetListener()
 
 	return nil
+}
+
+// maximizeWindow maximizes the browser window via CDP.
+// This is used in headed mode so the page fills the screen naturally.
+func (b *Browser) maximizeWindow() {
+	pages, err := b.browser.Pages()
+	if err != nil || len(pages) == 0 {
+		return
+	}
+
+	// Get the window ID from the first page
+	result, err := proto.BrowserGetWindowForTarget{}.Call(pages[0])
+	if err != nil {
+		return
+	}
+
+	// Maximize the window
+	_ = proto.BrowserSetWindowBounds{
+		WindowID: result.WindowID,
+		Bounds:   &proto.BrowserBounds{WindowState: proto.BrowserWindowStateMaximized},
+	}.Call(b.browser)
+}
+
+// clearViewportOverride clears any EmulationSetDeviceMetricsOverride on a page,
+// restoring the natural window-based viewport.
+func (b *Browser) clearViewportOverride(page *rod.Page) {
+	_ = proto.EmulationClearDeviceMetricsOverride{}.Call(page)
 }
 
 // resolveBrowserVersion resolves and downloads the requested browser version.
@@ -443,12 +481,17 @@ func (b *Browser) NewPage(ctx context.Context, url string) error {
 		return fmt.Errorf("failed to create page: %w", err)
 	}
 
-	// Set viewport
-	if err := page.SetViewport(&proto.EmulationSetDeviceMetricsOverride{
-		Width:  b.config.Viewport.Width,
-		Height: b.config.Viewport.Height,
-	}); err != nil {
-		return fmt.Errorf("failed to set viewport: %w", err)
+	if b.config.Headless {
+		// In headless mode, override the viewport since there's no physical window
+		if err := page.SetViewport(&proto.EmulationSetDeviceMetricsOverride{
+			Width:  b.config.Viewport.Width,
+			Height: b.config.Viewport.Height,
+		}); err != nil {
+			return fmt.Errorf("failed to set viewport: %w", err)
+		}
+	} else {
+		// In headed mode, clear any viewport override so the page uses the real window size
+		b.clearViewportOverride(page)
 	}
 
 	// Set up event listeners
@@ -888,12 +931,17 @@ func (b *Browser) startTargetListener() {
 			// Set up event listeners for the new page
 			b.setupEventListeners(page)
 
-			// Set viewport if configured
-			if b.config.Viewport.Width > 0 && b.config.Viewport.Height > 0 {
-				_ = page.SetViewport(&proto.EmulationSetDeviceMetricsOverride{
-					Width:  b.config.Viewport.Width,
-					Height: b.config.Viewport.Height,
-				})
+			if b.config.Headless {
+				// In headless mode, override viewport since there's no physical window
+				if b.config.Viewport.Width > 0 && b.config.Viewport.Height > 0 {
+					_ = page.SetViewport(&proto.EmulationSetDeviceMetricsOverride{
+						Width:  b.config.Viewport.Width,
+						Height: b.config.Viewport.Height,
+					})
+				}
+			} else {
+				// In headed mode, clear any stale viewport override so the page uses the real window size
+				b.clearViewportOverride(page)
 			}
 
 			// Add to tracked pages
@@ -983,12 +1031,17 @@ func (b *Browser) syncExistingPages() {
 		// Set up event listeners
 		b.setupEventListeners(page)
 
-		// Set viewport
-		if b.config.Viewport.Width > 0 && b.config.Viewport.Height > 0 {
-			_ = page.SetViewport(&proto.EmulationSetDeviceMetricsOverride{
-				Width:  b.config.Viewport.Width,
-				Height: b.config.Viewport.Height,
-			})
+		if b.config.Headless {
+			// In headless mode, override viewport since there's no physical window
+			if b.config.Viewport.Width > 0 && b.config.Viewport.Height > 0 {
+				_ = page.SetViewport(&proto.EmulationSetDeviceMetricsOverride{
+					Width:  b.config.Viewport.Width,
+					Height: b.config.Viewport.Height,
+				})
+			}
+		} else {
+			// In headed mode, clear any stale viewport override so the page uses the real window size
+			b.clearViewportOverride(page)
 		}
 
 		b.pages = append(b.pages, page)
