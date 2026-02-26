@@ -42,6 +42,10 @@ type Browser struct {
 
 	// Target tracking for detecting manually opened tabs
 	targetIDs map[proto.TargetTargetID]*rod.Page
+
+	// Spoofed user agent derived from the actual browser version
+	spoofedUA       string
+	spoofedPlatform string
 }
 
 // ConsoleMessage represents a browser console message.
@@ -200,6 +204,9 @@ func (b *Browser) Launch(ctx context.Context) error {
 
 	b.browser = browser
 
+	// Build a realistic user agent from the actual browser version
+	b.initUserAgent()
+
 	// In headed mode, maximize the window via CDP so it fills the screen.
 	// The page will naturally reflow if the user resizes the window.
 	if !b.config.Headless {
@@ -237,6 +244,55 @@ func (b *Browser) maximizeWindow() {
 // restoring the natural window-based viewport.
 func (b *Browser) clearViewportOverride(page *rod.Page) {
 	_ = proto.EmulationClearDeviceMetricsOverride{}.Call(page)
+}
+
+// initUserAgent queries the browser for its real version and builds a realistic
+// user agent string that matches a normal Chrome installation on the current OS.
+func (b *Browser) initUserAgent() {
+	ver, err := proto.BrowserGetVersion{}.Call(b.browser)
+	if err != nil {
+		return
+	}
+
+	// Extract Chrome version from Product (e.g., "Chrome/114.0.5735.199" or "HeadlessChrome/...")
+	chromeVersion := ""
+	product := ver.Product
+	if idx := strings.Index(product, "/"); idx >= 0 {
+		chromeVersion = product[idx+1:]
+	}
+	if chromeVersion == "" {
+		return
+	}
+
+	// Build a platform-appropriate user agent
+	var platformToken string
+	switch runtime.GOOS {
+	case "darwin":
+		platformToken = "Macintosh; Intel Mac OS X 10_15_7"
+		b.spoofedPlatform = "macOS"
+	case "windows":
+		platformToken = "Windows NT 10.0; Win64; x64"
+		b.spoofedPlatform = "Windows"
+	default:
+		platformToken = "X11; Linux x86_64"
+		b.spoofedPlatform = "Linux"
+	}
+
+	b.spoofedUA = fmt.Sprintf(
+		"Mozilla/5.0 (%s) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/%s Safari/537.36",
+		platformToken, chromeVersion,
+	)
+}
+
+// applyUserAgent sets the spoofed user agent on a page via CDP.
+func (b *Browser) applyUserAgent(page *rod.Page) {
+	if b.spoofedUA == "" {
+		return
+	}
+	_ = proto.NetworkSetUserAgentOverride{
+		UserAgent: b.spoofedUA,
+		Platform:  b.spoofedPlatform,
+	}.Call(page)
 }
 
 // resolveBrowserVersion resolves and downloads the requested browser version.
@@ -426,6 +482,9 @@ func (b *Browser) Connect(ctx context.Context, cdpEndpoint string) error {
 	b.browser = browser
 	b.connected = true
 
+	// Build a realistic user agent from the actual browser version
+	b.initUserAgent()
+
 	// Sync existing pages from the connected browser
 	b.syncExistingPages()
 
@@ -493,6 +552,9 @@ func (b *Browser) NewPage(ctx context.Context, url string) error {
 		// In headed mode, clear any viewport override so the page uses the real window size
 		b.clearViewportOverride(page)
 	}
+
+	// Apply spoofed user agent
+	b.applyUserAgent(page)
 
 	// Set up event listeners
 	b.setupEventListeners(page)
@@ -944,6 +1006,9 @@ func (b *Browser) startTargetListener() {
 				b.clearViewportOverride(page)
 			}
 
+			// Apply spoofed user agent
+			b.applyUserAgent(page)
+
 			// Add to tracked pages
 			b.pages = append(b.pages, page)
 			b.targetIDs[e.TargetInfo.TargetID] = page
@@ -1043,6 +1108,9 @@ func (b *Browser) syncExistingPages() {
 			// In headed mode, clear any stale viewport override so the page uses the real window size
 			b.clearViewportOverride(page)
 		}
+
+		// Apply spoofed user agent
+		b.applyUserAgent(page)
 
 		b.pages = append(b.pages, page)
 		b.targetIDs[targetID] = page
