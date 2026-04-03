@@ -446,9 +446,17 @@ func (s *Server) handleScreenshot(w http.ResponseWriter, r *http.Request) {
 	}
 
 	fullPage := r.URL.Query().Get("full") == "true"
+	selector := r.URL.Query().Get("selector")
 	format := r.URL.Query().Get("format") // "file" or "base64", default base64
 
-	data, err := s.browser.Screenshot(fullPage)
+	var data []byte
+	var err error
+
+	if selector != "" {
+		data, err = s.browser.GetElementScreenshot(selector)
+	} else {
+		data, err = s.browser.Screenshot(fullPage)
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("screenshot failed: %v", err))
 		return

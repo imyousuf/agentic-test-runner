@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"time"
@@ -481,13 +482,20 @@ func newBrowserSnapshotCmd() *cobra.Command {
 func newBrowserScreenshotCmd() *cobra.Command {
 	var fullPage bool
 	var saveToFile bool
+	var selector string
 	cmd := &cobra.Command{
 		Use:   "screenshot",
 		Short: "Capture screenshot",
+		Long: `Capture a screenshot of the current page or a specific element.
+
+Use --selector to screenshot a specific element by CSS selector (e.g., "header",
+"#nav", ".hero", "[data-testid='banner']"). When --selector is used, --full is ignored.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			path := "/screenshot"
 			params := []string{}
-			if fullPage {
+			if selector != "" {
+				params = append(params, "selector="+url.QueryEscape(selector))
+			} else if fullPage {
 				params = append(params, "full=true")
 			}
 			if saveToFile {
@@ -504,6 +512,7 @@ func newBrowserScreenshotCmd() *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&fullPage, "full", false, "Capture full scrollable page")
 	cmd.Flags().BoolVar(&saveToFile, "file", false, "Save to file instead of base64")
+	cmd.Flags().StringVarP(&selector, "selector", "s", "", "CSS selector of element to screenshot (e.g., \"header\", \"#nav\", \".hero\")")
 	return cmd
 }
 
