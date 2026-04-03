@@ -81,14 +81,14 @@ Once running, use navigation and interaction commands to control the browser.
 | Command | Description |
 |---------|-------------|
 | `atr browser snapshot [--verbose]` | Get page elements with UIDs |
-| `atr browser screenshot --file [--full]` | Capture screenshot (saves to /tmp/) |
+| `atr browser screenshot --file [--full] [-s SELECTOR]` | Capture screenshot (saves to /tmp/) |
 | `atr browser html` | Get page HTML |
 | `atr browser url` | Get current URL |
 | `atr browser title` | Get page title |
 | `atr browser eval <script>` | Execute JavaScript |
 | `atr browser ask "<question>"` | Ask a question about the current page |
 
-**Screenshot Note:** Use `--file` to save screenshots to `/tmp/` with a timestamped filename (e.g., `/tmp/atr-screenshot-20240105-103045.png`). No need to specify a file path. Add `--full` for full-page screenshots. Without `--file`, returns base64-encoded image data.
+**Screenshot Note:** Use `--file` to save screenshots to `/tmp/` with a timestamped filename (e.g., `/tmp/atr-screenshot-20240105-103045.png`). No need to specify a file path. Add `--full` for full-page screenshots. Use `--selector` / `-s` to screenshot a specific element by CSS selector (e.g., `-s "header"`, `-s "#nav"`, `-s "main > section:nth-child(2)"`). When `--selector` is used, `--full` is ignored. Without `--file`, returns base64-encoded image data.
 
 ### Debugging Commands
 
@@ -169,7 +169,7 @@ The `<target>` parameter in click, fill, hover, and drag commands accepts:
 2. **Visible text**: `"Sign In"`, `"Submit Form"`
 3. **aria-label**: Elements with matching aria-label attribute
 4. **data-testid**: Elements with matching data-testid attribute
-5. **CSS selector**: `#login-button`, `.nav-link`
+5. **CSS selector**: `#login-button`, `.nav-link`, `header`, `footer`, `nav`, `main > section`, `div.hero`, `li:nth-child(2)`
 
 Best practice: Use `atr browser snapshot` first to see available elements and their UIDs.
 

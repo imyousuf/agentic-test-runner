@@ -142,17 +142,32 @@ Returns the accessibility tree of visible page elements with unique identifiers 
 
 ### screenshot
 ```bash
-atr browser screenshot --file [--full]
+atr browser screenshot --file [--full] [--selector SELECTOR]
 ```
 
-| Flag | Description |
-|------|-------------|
-| `--file` | Save to file instead of base64 |
-| `--full` | Capture full scrollable page |
+| Flag | Short | Description |
+|------|-------|-------------|
+| `--file` | | Save to file instead of base64 |
+| `--full` | | Capture full scrollable page |
+| `--selector` | `-s` | CSS selector of element to screenshot |
 
 With `--file`, screenshots are saved to `/tmp/` with a timestamped filename. No need to specify a file path.
 
 Returns the path to the saved image (e.g., `/tmp/atr-screenshot-20240105-103045.png`).
+
+When `--selector` is used, `--full` is ignored since we're targeting a specific element.
+
+Examples:
+```bash
+atr browser screenshot --file                           # Viewport screenshot
+atr browser screenshot --file --full                    # Full page screenshot
+atr browser screenshot --file -s "header"               # Screenshot header element
+atr browser screenshot --file -s "#nav"                 # Screenshot by ID
+atr browser screenshot --file -s ".hero"                # Screenshot by class
+atr browser screenshot --file -s "main > section"       # Screenshot with combinator
+atr browser screenshot --file -s "li:nth-child(2)"      # Screenshot with pseudo-selector
+atr browser screenshot --file -s "[data-testid='foo']"  # Screenshot by attribute
+```
 
 ### html
 ```bash

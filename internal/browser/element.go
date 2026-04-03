@@ -12,6 +12,86 @@ import (
 	"github.com/go-rod/rod/lib/proto"
 )
 
+// htmlTagNames is the set of standard HTML5 element tag names.
+var htmlTagNames = map[string]bool{
+	"a": true, "abbr": true, "address": true, "area": true, "article": true,
+	"aside": true, "audio": true, "b": true, "base": true, "bdi": true,
+	"bdo": true, "blockquote": true, "body": true, "br": true, "button": true,
+	"canvas": true, "caption": true, "cite": true, "code": true, "col": true,
+	"colgroup": true, "data": true, "datalist": true, "dd": true, "del": true,
+	"details": true, "dfn": true, "dialog": true, "div": true, "dl": true,
+	"dt": true, "em": true, "embed": true, "fieldset": true, "figcaption": true,
+	"figure": true, "footer": true, "form": true, "h1": true, "h2": true,
+	"h3": true, "h4": true, "h5": true, "h6": true, "head": true,
+	"header": true, "hgroup": true, "hr": true, "html": true, "i": true,
+	"iframe": true, "img": true, "input": true, "ins": true, "kbd": true,
+	"label": true, "legend": true, "li": true, "link": true, "main": true,
+	"map": true, "mark": true, "menu": true, "meta": true, "meter": true,
+	"nav": true, "noscript": true, "object": true, "ol": true, "optgroup": true,
+	"option": true, "output": true, "p": true, "picture": true, "pre": true,
+	"progress": true, "q": true, "rp": true, "rt": true, "ruby": true,
+	"s": true, "samp": true, "script": true, "search": true, "section": true,
+	"select": true, "slot": true, "small": true, "source": true, "span": true,
+	"strong": true, "style": true, "sub": true, "summary": true, "sup": true,
+	"table": true, "tbody": true, "td": true, "template": true, "textarea": true,
+	"tfoot": true, "th": true, "thead": true, "time": true, "title": true,
+	"tr": true, "track": true, "u": true, "ul": true, "var": true,
+	"video": true, "wbr": true,
+}
+
+// cssSelectorWithDot matches patterns like "div.class", "input.large".
+var cssSelectorWithDot = regexp.MustCompile(`\w\.\w`)
+
+// isHTMLTagName returns true if s is a standard HTML5 element tag name.
+func isHTMLTagName(s string) bool {
+	_, ok := htmlTagNames[strings.ToLower(s)]
+	return ok
+}
+
+// looksLikeCSSSelector returns true if target appears to be a CSS selector
+// rather than plain text, a UID, or an attribute value. This is called after
+// the caller has already checked for #, ., and [ prefixes.
+func looksLikeCSSSelector(target string) bool {
+	// Contains CSS combinator operators
+	if strings.ContainsAny(target, ">+~") {
+		return true
+	}
+
+	// Contains pseudo-class/pseudo-element syntax
+	if strings.Contains(target, ":") {
+		return true
+	}
+
+	// Contains attribute selector brackets
+	if strings.Contains(target, "[") {
+		return true
+	}
+
+	// Contains universal selector
+	if target == "*" || strings.Contains(target, "* ") || strings.Contains(target, " *") {
+		return true
+	}
+
+	// Contains class selector pattern mid-string (e.g., "div.class")
+	if cssSelectorWithDot.MatchString(target) {
+		return true
+	}
+
+	// Single token: check if it's a known HTML tag name
+	if !strings.Contains(target, " ") {
+		return isHTMLTagName(target)
+	}
+
+	// Multiple space-separated tokens: CSS descendant selector if all tokens are tag names
+	tokens := strings.Fields(target)
+	for _, token := range tokens {
+		if !isHTMLTagName(token) {
+			return false
+		}
+	}
+	return true
+}
+
 // ElementInfo contains information about an element.
 type ElementInfo struct {
 	UID        string            `json:"uid"`
@@ -333,9 +413,16 @@ func tryFind(page *rod.Page, timeout time.Duration, fn func(*rod.Page) (*rod.Ele
 func (b *Browser) findElement(page *rod.Page, target string) (*rod.Element, error) {
 	perAttempt := 500 * time.Millisecond
 
-	// If target starts with special prefixes, use direct selectors
+	// XPath selectors
+	if strings.HasPrefix(target, "//") {
+		return tryFind(page, 3*time.Second, func(p *rod.Page) (*rod.Element, error) {
+			return p.ElementX(target)
+		})
+	}
+
+	// CSS selectors: unambiguous prefixes or structural analysis
 	if strings.HasPrefix(target, "#") || strings.HasPrefix(target, ".") ||
-		strings.HasPrefix(target, "[") || strings.HasPrefix(target, "//") {
+		strings.HasPrefix(target, "[") || looksLikeCSSSelector(target) {
 		return tryFind(page, 3*time.Second, func(p *rod.Page) (*rod.Element, error) {
 			return p.Element(target)
 		})
@@ -434,6 +521,32 @@ func (b *Browser) GetElementScreenshot(target string) ([]byte, error) {
 	}
 
 	el, err := b.findElement(page, target)
+	if err != nil {
+		return nil, err
+	}
+
+	return el.Screenshot(proto.PageCaptureScreenshotFormatPng, 0)
+}
+
+// findElementByCSS finds an element using a CSS selector directly, without
+// the multi-strategy fallback chain. Use this when the caller knows the
+// target is explicitly a CSS selector.
+func (b *Browser) findElementByCSS(page *rod.Page, selector string) (*rod.Element, error) {
+	return tryFind(page, 3*time.Second, func(p *rod.Page) (*rod.Element, error) {
+		return p.Element(selector)
+	})
+}
+
+// GetElementScreenshotByCSS captures a screenshot of a specific element
+// identified by CSS selector. Unlike GetElementScreenshot, this does not
+// attempt fallback strategies (UID, text, aria-label, etc.).
+func (b *Browser) GetElementScreenshotByCSS(selector string) ([]byte, error) {
+	page, err := b.CurrentPage()
+	if err != nil {
+		return nil, err
+	}
+
+	el, err := b.findElementByCSS(page, selector)
 	if err != nil {
 		return nil, err
 	}
