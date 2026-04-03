@@ -20,12 +20,12 @@ import (
 )
 
 var (
-	browserJSONOutput  bool
-	browserEndpoint    string
-	browserPort        int
-	browserDataDir     string
-	browserPersistFlag bool
-	browserHeadless    bool
+	browserJSONOutput   bool
+	browserEndpoint     string
+	browserPort         int
+	browserDataDir      string
+	browserPersistFlag  bool
+	browserHeadless     bool
 	browserSandbox      bool // opt-in to enable sandbox (default: disabled for compatibility)
 	browserSystemChrome bool
 )

@@ -59,17 +59,17 @@ type ConsoleMessage struct {
 
 // NetworkRequest represents a captured network request.
 type NetworkRequest struct {
-	ID          string            `json:"id"`
-	URL         string            `json:"url"`
-	Method      string            `json:"method"`
-	Status      int               `json:"status"`
-	StatusText  string            `json:"status_text"`
-	ResourceType string           `json:"resource_type"`
-	StartTime   time.Time         `json:"start_time"`
-	Duration    time.Duration     `json:"duration,omitempty"`
-	Failed      bool              `json:"failed"`
-	ErrorText   string            `json:"error_text,omitempty"`
-	Headers     map[string]string `json:"headers,omitempty"`
+	ID           string            `json:"id"`
+	URL          string            `json:"url"`
+	Method       string            `json:"method"`
+	Status       int               `json:"status"`
+	StatusText   string            `json:"status_text"`
+	ResourceType string            `json:"resource_type"`
+	StartTime    time.Time         `json:"start_time"`
+	Duration     time.Duration     `json:"duration,omitempty"`
+	Failed       bool              `json:"failed"`
+	ErrorText    string            `json:"error_text,omitempty"`
+	Headers      map[string]string `json:"headers,omitempty"`
 }
 
 // New creates a new browser instance with the given configuration.

@@ -162,4 +162,3 @@ func NewAskTools(b *browser.Browser) []Tool {
 		&AskFullMarkupTool{browser: b},
 	}
 }
-

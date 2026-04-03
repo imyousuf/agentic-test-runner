@@ -441,8 +441,8 @@ func findClaudeCLI() string {
 
 	// System paths
 	systemPaths := []string{
-		"/usr/local/bin/claude",     // Manual installation / Homebrew (Intel)
-		"/opt/homebrew/bin/claude",  // Homebrew (Apple Silicon)
+		"/usr/local/bin/claude",    // Manual installation / Homebrew (Intel)
+		"/opt/homebrew/bin/claude", // Homebrew (Apple Silicon)
 	}
 	for _, p := range systemPaths {
 		if isExecutable(p) {

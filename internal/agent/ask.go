@@ -116,4 +116,3 @@ Rules:
 
 	return "", fmt.Errorf("ask agent reached maximum iterations (%d) without answering", a.maxIterations)
 }
-

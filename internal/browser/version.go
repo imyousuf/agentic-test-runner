@@ -22,22 +22,22 @@ const (
 
 // VersionCache stores the cached browser version info.
 type VersionCache struct {
-	Version   string    `json:"version"`
-	Revision  string    `json:"revision"`
-	Channel   string    `json:"channel"`
-	Platform  string    `json:"platform"`
-	URL       string    `json:"url"`
-	CachedAt  time.Time `json:"cached_at"`
+	Version  string    `json:"version"`
+	Revision string    `json:"revision"`
+	Channel  string    `json:"channel"`
+	Platform string    `json:"platform"`
+	URL      string    `json:"url"`
+	CachedAt time.Time `json:"cached_at"`
 }
 
 // ChromeForTestingResponse represents the API response structure.
 type ChromeForTestingResponse struct {
 	Timestamp string `json:"timestamp"`
 	Channels  struct {
-		Stable  ChannelInfo `json:"Stable"`
-		Beta    ChannelInfo `json:"Beta"`
-		Dev     ChannelInfo `json:"Dev"`
-		Canary  ChannelInfo `json:"Canary"`
+		Stable ChannelInfo `json:"Stable"`
+		Beta   ChannelInfo `json:"Beta"`
+		Dev    ChannelInfo `json:"Dev"`
+		Canary ChannelInfo `json:"Canary"`
 	} `json:"channels"`
 }
 
