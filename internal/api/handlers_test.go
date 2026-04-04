@@ -333,6 +333,45 @@ func TestHandleErrors(t *testing.T) {
 	}
 }
 
+func TestHandleComputedStylesDiff(t *testing.T) {
+	env := newTestEnv(t)
+	navigateFixture(t, env)
+
+	// Open a second page with the same fixture
+	doPost(env.server, "/navigate", map[string]interface{}{
+		"url": env.fixtureURL + "/test_fixture.html",
+	})
+
+	rr := doGet(env.server, "/computed-styles-diff?selector=%23main-heading&against=0&properties=fontSize,fontWeight")
+	if rr.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d (body: %s)", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	resp := parseResponse(t, rr)
+	if !resp.Success {
+		t.Errorf("expected success=true, error: %s", resp.Error)
+	}
+}
+
+func TestHandleComputedStylesDiff_MissingSelector(t *testing.T) {
+	env := newTestEnv(t)
+	navigateFixture(t, env)
+
+	rr := doGet(env.server, "/computed-styles-diff?against=0")
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", rr.Code, http.StatusBadRequest)
+	}
+}
+
+func TestHandleComputedStylesDiff_MissingAgainst(t *testing.T) {
+	env := newTestEnv(t)
+	navigateFixture(t, env)
+
+	rr := doGet(env.server, "/computed-styles-diff?selector=h1")
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", rr.Code, http.StatusBadRequest)
+	}
+}
+
 func TestHandleScreenshot_SelectorAll(t *testing.T) {
 	env := newTestEnv(t)
 	navigateFixture(t, env)

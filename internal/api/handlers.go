@@ -56,6 +56,7 @@ func (s *Server) registerRoutes() {
 
 	// Styles
 	s.mux.HandleFunc("/api/v1/computed-styles", s.handleComputedStyles)
+	s.mux.HandleFunc("/api/v1/computed-styles-diff", s.handleComputedStylesDiff)
 
 	// Scroll
 	s.mux.HandleFunc("/api/v1/scroll", s.handleScroll)
@@ -700,6 +701,53 @@ func (s *Server) handleText(w http.ResponseWriter, r *http.Request) {
 		"mode":     result.Mode,
 		"groups":   result.Groups,
 		"count":    len(result.Groups),
+	})
+}
+
+// handleComputedStylesDiff handles GET /api/v1/computed-styles-diff
+func (s *Server) handleComputedStylesDiff(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	selector := r.URL.Query().Get("selector")
+	if selector == "" {
+		writeError(w, http.StatusBadRequest, "selector is required")
+		return
+	}
+
+	againstStr := r.URL.Query().Get("against")
+	if againstStr == "" {
+		writeError(w, http.StatusBadRequest, "against (page index) is required")
+		return
+	}
+	againstIdx, err := strconv.Atoi(againstStr)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "against must be a page index number")
+		return
+	}
+
+	var properties []string
+	if p := r.URL.Query().Get("properties"); p != "" {
+		properties = strings.Split(p, ",")
+	}
+
+	selectorTarget := r.URL.Query().Get("selector_target")
+
+	result, err := s.browser.GetComputedStylesDiff(selector, againstIdx, properties, selectorTarget)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("style diff failed: %v", err))
+		return
+	}
+
+	writeSuccess(w, map[string]interface{}{
+		"selector":      result.Selector,
+		"matches":       result.Matches,
+		"mismatches":    result.Mismatches,
+		"matchCount":    result.MatchCount,
+		"mismatchCount": result.MismatchCount,
+		"score":         result.Score,
 	})
 }
 

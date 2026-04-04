@@ -309,6 +309,35 @@ func TestBrowserWaitForElementVisible_Invisible(t *testing.T) {
 	}
 }
 
+func TestBrowserGetComputedStylesDiff(t *testing.T) {
+	fixtureURL := serveFixture(t)
+	b := newTestBrowser(t)
+	navigateToFixture(t, b, fixtureURL)
+
+	// Open same fixture in a second tab
+	ctx := context.Background()
+	if err := b.NewPage(ctx, fixtureURL+"/test_fixture.html"); err != nil {
+		t.Fatalf("failed to open second page: %v", err)
+	}
+
+	// Now on page 1 (second tab), compare h1 against page 0 (first tab)
+	result, err := b.GetComputedStylesDiff("#main-heading", 0, []string{"fontSize", "fontWeight", "color"}, "")
+	if err != nil {
+		t.Fatalf("GetComputedStylesDiff error: %v", err)
+	}
+
+	// Same page, same selector — should be 100% match
+	if result.MismatchCount != 0 {
+		t.Errorf("expected 0 mismatches, got %d: %v", result.MismatchCount, result.Mismatches)
+	}
+	if result.Score != 100 {
+		t.Errorf("score = %f, want 100", result.Score)
+	}
+	if result.MatchCount != 3 {
+		t.Errorf("matchCount = %d, want 3", result.MatchCount)
+	}
+}
+
 func TestBrowserGetMultipleElementScreenshots(t *testing.T) {
 	fixtureURL := serveFixture(t)
 	b := newTestBrowser(t)

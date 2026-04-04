@@ -644,6 +644,93 @@ func (b *Browser) ScrollElement(selector string, x, y int, toBottom, toTop bool)
 	}, nil
 }
 
+// StyleDiffEntry represents a single CSS property comparison.
+type StyleDiffEntry struct {
+	Current string `json:"current"`
+	Target  string `json:"target"`
+}
+
+// StyleDiffResult contains the computed style diff between two elements across pages.
+type StyleDiffResult struct {
+	Selector      string                    `json:"selector"`
+	Matches       map[string]string         `json:"matches"`
+	Mismatches    map[string]StyleDiffEntry `json:"mismatches"`
+	MatchCount    int                       `json:"matchCount"`
+	MismatchCount int                       `json:"mismatchCount"`
+	Score         float64                   `json:"score"`
+}
+
+// GetComputedStylesDiff compares computed styles of an element on the current page
+// against an element on another page (identified by page index).
+func (b *Browser) GetComputedStylesDiff(selector string, againstPageIndex int, properties []string, selectorTarget string) (*StyleDiffResult, error) {
+	// Remember current page
+	b.mu.RLock()
+	currentIdx := b.current
+	b.mu.RUnlock()
+
+	// Get styles from current page
+	sourceStyles, err := b.GetComputedStyles(selector, properties)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get source styles: %w", err)
+	}
+
+	// Switch to target page
+	if err := b.SelectPage(againstPageIndex); err != nil {
+		return nil, fmt.Errorf("failed to select target page %d: %w", againstPageIndex, err)
+	}
+
+	// Get styles from target page
+	targetSelector := selector
+	if selectorTarget != "" {
+		targetSelector = selectorTarget
+	}
+	targetStyles, err := b.GetComputedStyles(targetSelector, properties)
+
+	// Always switch back to original page
+	switchBackErr := b.SelectPage(currentIdx)
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to get target styles: %w", err)
+	}
+	if switchBackErr != nil {
+		return nil, fmt.Errorf("failed to switch back to original page: %w", switchBackErr)
+	}
+
+	// Compute diff
+	result := &StyleDiffResult{
+		Selector:   selector,
+		Matches:    make(map[string]string),
+		Mismatches: make(map[string]StyleDiffEntry),
+	}
+
+	allProps := make(map[string]bool)
+	for k := range sourceStyles {
+		allProps[k] = true
+	}
+	for k := range targetStyles {
+		allProps[k] = true
+	}
+
+	for prop := range allProps {
+		src := sourceStyles[prop]
+		tgt := targetStyles[prop]
+		if src == tgt {
+			result.Matches[prop] = src
+			result.MatchCount++
+		} else {
+			result.Mismatches[prop] = StyleDiffEntry{Current: src, Target: tgt}
+			result.MismatchCount++
+		}
+	}
+
+	total := result.MatchCount + result.MismatchCount
+	if total > 0 {
+		result.Score = float64(result.MatchCount) / float64(total) * 100
+	}
+
+	return result, nil
+}
+
 // GetMultipleElementScreenshots captures screenshots of all elements matching a CSS selector.
 func (b *Browser) GetMultipleElementScreenshots(selector string) ([][]byte, error) {
 	page, err := b.CurrentPage()

@@ -68,6 +68,7 @@ to control a browser via shell commands.`,
 
 	// Styles
 	browserCmd.AddCommand(newBrowserComputedStylesCmd())
+	browserCmd.AddCommand(newBrowserComputedStylesDiffCmd())
 
 	// Scroll
 	browserCmd.AddCommand(newBrowserScrollCmd())
@@ -480,6 +481,35 @@ Without --properties, returns a default set of common layout and typography prop
 		},
 	}
 	cmd.Flags().StringVar(&properties, "properties", "", "Comma-separated CSS properties to return (e.g., fontSize,color,fontWeight)")
+	return cmd
+}
+
+func newBrowserComputedStylesDiffCmd() *cobra.Command {
+	var against int
+	var properties string
+	var selectorTarget string
+	cmd := &cobra.Command{
+		Use:   "computed-styles-diff <selector>",
+		Short: "Compare computed styles between two pages",
+		Long: `Compare computed CSS styles of an element on the current page against
+the same (or different) element on another open page. Returns matches,
+mismatches, and a similarity score.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			path := "/computed-styles-diff?selector=" + url.QueryEscape(args[0])
+			path += "&against=" + strconv.Itoa(against)
+			if properties != "" {
+				path += "&properties=" + url.QueryEscape(properties)
+			}
+			if selectorTarget != "" {
+				path += "&selector_target=" + url.QueryEscape(selectorTarget)
+			}
+			return apiGet(path)
+		},
+	}
+	cmd.Flags().IntVar(&against, "against", 0, "Page index to compare against")
+	cmd.Flags().StringVar(&properties, "properties", "", "Comma-separated CSS properties to compare")
+	cmd.Flags().StringVar(&selectorTarget, "selector-target", "", "CSS selector on target page (defaults to source selector)")
 	return cmd
 }
 
