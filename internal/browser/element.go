@@ -840,15 +840,14 @@ func (b *Browser) GetTextContent(selector string, mode string) (*TextResult, err
 		mode = "structured"
 	}
 
-	js := `function() {
-		const mode = "` + mode + `";
-		if (mode === "flat") {
+	result, err := el.Eval(`function(m) {
+		if (m === "flat") {
 			return [{tag: "text", text: this.textContent.trim()}];
-		} else if (mode === "links") {
+		} else if (m === "links") {
 			return Array.from(this.querySelectorAll("a")).map(a => ({
 				tag: "a", text: a.textContent.trim(), href: a.href
 			}));
-		} else if (mode === "headings") {
+		} else if (m === "headings") {
 			return Array.from(this.querySelectorAll("h1,h2,h3,h4,h5,h6")).map(h => ({
 				tag: h.tagName.toLowerCase(), text: h.textContent.trim()
 			}));
@@ -872,9 +871,7 @@ func (b *Browser) GetTextContent(selector string, mode string) (*TextResult, err
 			walk(this);
 			return groups;
 		}
-	}`
-
-	result, err := el.Eval(js)
+	}`, mode)
 	if err != nil {
 		return nil, fmt.Errorf("failed to extract text: %w", err)
 	}
@@ -906,21 +903,15 @@ func (b *Browser) GetComputedStyles(selector string, properties []string) (map[s
 		return nil, err
 	}
 
-	// Use el.Eval which scopes `this` to the element
-	propsArg := "[]"
-	if len(properties) > 0 {
-		parts := make([]string, len(properties))
-		for i, p := range properties {
-			parts[i] = `"` + p + `"`
-		}
-		propsArg = "[" + strings.Join(parts, ",") + "]"
+	// Pass properties as a parameter to avoid JS string injection
+	if properties == nil {
+		properties = []string{}
 	}
 
-	js := `function() {
-		const props = ` + propsArg + `;
+	result, err := el.Eval(`function(props) {
 		const cs = window.getComputedStyle(this);
 		const out = {};
-		if (props.length > 0) {
+		if (props && props.length > 0) {
 			props.forEach(p => {
 				const v = cs[p] || cs.getPropertyValue(p);
 				if (v !== undefined && v !== "") out[p] = v;
@@ -938,9 +929,7 @@ func (b *Browser) GetComputedStyles(selector string, properties []string) (map[s
 			});
 		}
 		return out;
-	}`
-
-	result, err := el.Eval(js)
+	}`, properties)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get computed styles: %w", err)
 	}
