@@ -72,6 +72,9 @@ to control a browser via shell commands.`,
 	// Scroll
 	browserCmd.AddCommand(newBrowserScrollCmd())
 
+	// Text
+	browserCmd.AddCommand(newBrowserTextCmd())
+
 	// Interaction
 	browserCmd.AddCommand(newBrowserClickCmd())
 	browserCmd.AddCommand(newBrowserFillCmd())
@@ -394,6 +397,37 @@ func newBrowserClosePageCmd() *cobra.Command {
 			return apiRequest("DELETE", "/pages/"+args[0], nil)
 		},
 	}
+}
+
+// Text commands
+
+func newBrowserTextCmd() *cobra.Command {
+	var flat, links, headings bool
+	cmd := &cobra.Command{
+		Use:   "text <selector>",
+		Short: "Extract text content from element",
+		Long: `Extract text content from an element, structured by HTML tag hierarchy.
+Use --flat for plain text, --links for anchor elements only, --headings for h1-h6 only.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			mode := "structured"
+			if flat {
+				mode = "flat"
+			}
+			if links {
+				mode = "links"
+			}
+			if headings {
+				mode = "headings"
+			}
+			path := "/text?selector=" + url.QueryEscape(args[0]) + "&mode=" + mode
+			return apiGet(path)
+		},
+	}
+	cmd.Flags().BoolVar(&flat, "flat", false, "Return plain text only")
+	cmd.Flags().BoolVar(&links, "links", false, "Return only link elements with href")
+	cmd.Flags().BoolVar(&headings, "headings", false, "Return only heading elements (h1-h6)")
+	return cmd
 }
 
 // Scroll commands

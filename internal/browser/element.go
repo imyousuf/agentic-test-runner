@@ -644,6 +644,90 @@ func (b *Browser) ScrollElement(selector string, x, y int, toBottom, toTop bool)
 	}, nil
 }
 
+// TextGroup represents a group of text content with its HTML tag context.
+type TextGroup struct {
+	Tag  string `json:"tag"`
+	Text string `json:"text"`
+	Href string `json:"href,omitempty"`
+}
+
+// TextResult contains the extracted text content from an element.
+type TextResult struct {
+	Selector string      `json:"selector"`
+	Mode     string      `json:"mode"`
+	Groups   []TextGroup `json:"groups"`
+}
+
+// GetTextContent extracts structured text content from an element.
+// mode can be: "structured" (default), "flat", "links", "headings"
+func (b *Browser) GetTextContent(selector string, mode string) (*TextResult, error) {
+	page, err := b.CurrentPage()
+	if err != nil {
+		return nil, err
+	}
+
+	el, err := b.findElementByCSS(page, selector)
+	if err != nil {
+		return nil, err
+	}
+
+	if mode == "" {
+		mode = "structured"
+	}
+
+	js := `function() {
+		const mode = "` + mode + `";
+		if (mode === "flat") {
+			return [{tag: "text", text: this.textContent.trim()}];
+		} else if (mode === "links") {
+			return Array.from(this.querySelectorAll("a")).map(a => ({
+				tag: "a", text: a.textContent.trim(), href: a.href
+			}));
+		} else if (mode === "headings") {
+			return Array.from(this.querySelectorAll("h1,h2,h3,h4,h5,h6")).map(h => ({
+				tag: h.tagName.toLowerCase(), text: h.textContent.trim()
+			}));
+		} else {
+			const groups = [];
+			function walk(node) {
+				if (node.nodeType === Node.TEXT_NODE) {
+					const text = node.textContent.trim();
+					if (text) {
+						const parent = node.parentElement;
+						const tag = parent ? parent.tagName.toLowerCase() : "text";
+						const href = (parent && parent.tagName === "A") ? parent.href : undefined;
+						groups.push({tag: tag, text: text, href: href});
+					}
+					return;
+				}
+				if (node.nodeType === Node.ELEMENT_NODE) {
+					for (const child of node.childNodes) walk(child);
+				}
+			}
+			walk(this);
+			return groups;
+		}
+	}`
+
+	result, err := el.Eval(js)
+	if err != nil {
+		return nil, fmt.Errorf("failed to extract text: %w", err)
+	}
+
+	tr := &TextResult{Selector: selector, Mode: mode}
+	for _, item := range result.Value.Arr() {
+		g := TextGroup{
+			Tag:  item.Get("tag").Str(),
+			Text: item.Get("text").Str(),
+		}
+		if href := item.Get("href").Str(); href != "" {
+			g.Href = href
+		}
+		tr.Groups = append(tr.Groups, g)
+	}
+	return tr, nil
+}
+
 // GetComputedStyles returns computed CSS properties for an element identified by CSS selector.
 // If properties is empty, a useful default set of layout/typography properties is returned.
 func (b *Browser) GetComputedStyles(selector string, properties []string) (map[string]string, error) {

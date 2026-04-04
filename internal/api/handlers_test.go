@@ -333,6 +333,30 @@ func TestHandleErrors(t *testing.T) {
 	}
 }
 
+func TestHandleText(t *testing.T) {
+	env := newTestEnv(t)
+	navigateFixture(t, env)
+
+	rr := doGet(env.server, "/text?selector=footer&mode=headings")
+	if rr.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d (body: %s)", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	resp := parseResponse(t, rr)
+	if !resp.Success {
+		t.Errorf("expected success=true, error: %s", resp.Error)
+	}
+}
+
+func TestHandleText_MissingSelector(t *testing.T) {
+	env := newTestEnv(t)
+	navigateFixture(t, env)
+
+	rr := doGet(env.server, "/text")
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", rr.Code, http.StatusBadRequest)
+	}
+}
+
 func TestHandleScroll(t *testing.T) {
 	env := newTestEnv(t)
 	navigateFixture(t, env)

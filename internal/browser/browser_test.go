@@ -309,6 +309,83 @@ func TestBrowserWaitForElementVisible_Invisible(t *testing.T) {
 	}
 }
 
+func TestBrowserGetTextContent_Structured(t *testing.T) {
+	fixtureURL := serveFixture(t)
+	b := newTestBrowser(t)
+	navigateToFixture(t, b, fixtureURL)
+
+	result, err := b.GetTextContent("footer", "structured")
+	if err != nil {
+		t.Fatalf("GetTextContent error: %v", err)
+	}
+	if len(result.Groups) == 0 {
+		t.Error("expected non-empty text groups")
+	}
+	if result.Mode != "structured" {
+		t.Errorf("mode = %q, want 'structured'", result.Mode)
+	}
+}
+
+func TestBrowserGetTextContent_Flat(t *testing.T) {
+	fixtureURL := serveFixture(t)
+	b := newTestBrowser(t)
+	navigateToFixture(t, b, fixtureURL)
+
+	result, err := b.GetTextContent("footer", "flat")
+	if err != nil {
+		t.Fatalf("GetTextContent flat error: %v", err)
+	}
+	if len(result.Groups) != 1 {
+		t.Errorf("flat mode should return 1 group, got %d", len(result.Groups))
+	}
+	if !strings.Contains(result.Groups[0].Text, "Contact") {
+		t.Error("flat text should contain 'Contact'")
+	}
+}
+
+func TestBrowserGetTextContent_Links(t *testing.T) {
+	fixtureURL := serveFixture(t)
+	b := newTestBrowser(t)
+	navigateToFixture(t, b, fixtureURL)
+
+	result, err := b.GetTextContent("footer", "links")
+	if err != nil {
+		t.Fatalf("GetTextContent links error: %v", err)
+	}
+	// Footer has 4 links: test@example.com, Privacy Policy, Terms of Service, Help Center
+	if len(result.Groups) < 3 {
+		t.Errorf("expected at least 3 links, got %d", len(result.Groups))
+	}
+	for _, g := range result.Groups {
+		if g.Tag != "a" {
+			t.Errorf("expected tag 'a', got %q", g.Tag)
+		}
+		if g.Href == "" {
+			t.Error("expected href on link")
+		}
+	}
+}
+
+func TestBrowserGetTextContent_Headings(t *testing.T) {
+	fixtureURL := serveFixture(t)
+	b := newTestBrowser(t)
+	navigateToFixture(t, b, fixtureURL)
+
+	result, err := b.GetTextContent("footer", "headings")
+	if err != nil {
+		t.Fatalf("GetTextContent headings error: %v", err)
+	}
+	// Footer has 2 h4 headings: Contact, Links
+	if len(result.Groups) != 2 {
+		t.Errorf("expected 2 headings, got %d", len(result.Groups))
+	}
+	for _, g := range result.Groups {
+		if g.Tag != "h4" {
+			t.Errorf("expected tag 'h4', got %q", g.Tag)
+		}
+	}
+}
+
 func TestBrowserScrollElement(t *testing.T) {
 	fixtureURL := serveFixture(t)
 	b := newTestBrowser(t)

@@ -60,6 +60,9 @@ func (s *Server) registerRoutes() {
 	// Scroll
 	s.mux.HandleFunc("/api/v1/scroll", s.handleScroll)
 
+	// Text
+	s.mux.HandleFunc("/api/v1/text", s.handleText)
+
 	// AI-powered
 	s.mux.HandleFunc("/api/v1/ask", s.handleAsk)
 }
@@ -624,6 +627,35 @@ func (s *Server) handleErrors(w http.ResponseWriter, r *http.Request) {
 	writeSuccess(w, map[string]interface{}{
 		"failed_requests": failedRequests,
 		"count":           len(failedRequests),
+	})
+}
+
+// handleText handles GET /api/v1/text
+func (s *Server) handleText(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	selector := r.URL.Query().Get("selector")
+	if selector == "" {
+		writeError(w, http.StatusBadRequest, "selector is required")
+		return
+	}
+
+	mode := r.URL.Query().Get("mode")
+
+	result, err := s.browser.GetTextContent(selector, mode)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("text extraction failed: %v", err))
+		return
+	}
+
+	writeSuccess(w, map[string]interface{}{
+		"selector": result.Selector,
+		"mode":     result.Mode,
+		"groups":   result.Groups,
+		"count":    len(result.Groups),
 	})
 }
 
