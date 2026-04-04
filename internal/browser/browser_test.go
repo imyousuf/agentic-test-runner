@@ -69,6 +69,8 @@ func resetFixture(t *testing.T) {
 	if err := testBrowser.Navigate(ctx, testFixtureURL+"/test_fixture.html"); err != nil {
 		t.Fatalf("failed to navigate to fixture: %v", err)
 	}
+	// Reset scroll position — browser may preserve it across navigations
+	testBrowser.Evaluate("window.scrollTo(0,0)")
 }
 
 func TestBrowserCurrentURL(t *testing.T) {
@@ -392,6 +394,39 @@ func TestBrowserGetTextContent_Headings(t *testing.T) {
 		if g.Tag != "h4" {
 			t.Errorf("expected tag 'h4', got %q", g.Tag)
 		}
+	}
+}
+
+func TestBrowserScrollElement_PageLevel(t *testing.T) {
+	resetFixture(t)
+	// Use page.Eval to scroll directly and verify ScrollElement uses window.scrollTo
+	// First ensure we're at top via eval (avoids browser state issues)
+	testBrowser.Evaluate("window.scrollTo(0,0)")
+
+	result, err := testBrowser.ScrollElement("body", 0, 100, false, false)
+	if err != nil {
+		t.Fatalf("ScrollElement('body') error: %v", err)
+	}
+
+	// The returned scrollTop should reflect window.scrollY, not element.scrollTop
+	// Verify by checking that scrollTop matches what we get from window.scrollY
+	scrollY, err := testBrowser.Evaluate("window.scrollY")
+	if err != nil {
+		t.Fatalf("Evaluate error: %v", err)
+	}
+	sy, ok := scrollY.(float64)
+	if !ok {
+		t.Fatalf("window.scrollY is %T, want float64", scrollY)
+	}
+	if int(sy) != result.ScrollTop {
+		t.Errorf("window.scrollY = %d, ScrollElement returned scrollTop = %d (should match)", int(sy), result.ScrollTop)
+	}
+	// Verify page actually scrolled by checking scrollHeight > clientHeight
+	if result.ScrollHeight <= result.ClientHeight {
+		t.Skip("page not tall enough to scroll — skipping scroll assertion")
+	}
+	if result.ScrollTop == 0 && result.ScrollHeight > result.ClientHeight {
+		t.Error("page is scrollable but scrollTop = 0 after scrollTo(0, 100)")
 	}
 }
 

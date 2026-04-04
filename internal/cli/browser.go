@@ -895,6 +895,13 @@ func outputHuman(data interface{}) error {
 			} else {
 				fmt.Printf("%s: %.2f\n", key, v)
 			}
+		case map[string]interface{}:
+			jsonBytes, err := json.MarshalIndent(v, "", "  ")
+			if err != nil {
+				fmt.Printf("%s: %v\n", key, v)
+			} else {
+				fmt.Printf("%s: %s\n", key, string(jsonBytes))
+			}
 		default:
 			fmt.Printf("%s: %v\n", key, v)
 		}

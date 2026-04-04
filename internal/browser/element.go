@@ -599,10 +599,52 @@ type ScrollResult struct {
 }
 
 // ScrollElement scrolls within an element that has overflow scroll/auto.
+// For body/html selectors, delegates to window.scrollTo() since element-level
+// scrollTo() doesn't work for page-level scrolling.
 func (b *Browser) ScrollElement(selector string, x, y int, toBottom, toTop bool) (*ScrollResult, error) {
 	page, err := b.CurrentPage()
 	if err != nil {
 		return nil, err
+	}
+
+	selectorLower := strings.ToLower(strings.TrimSpace(selector))
+	isPageScroll := selectorLower == "body" || selectorLower == "html"
+
+	if isPageScroll {
+		// Use window.scrollTo for page-level scrolling
+		js := fmt.Sprintf(`() => {
+			const doc = document.documentElement;
+			if (%v) {
+				window.scrollTo(0, doc.scrollHeight);
+			} else if (%v) {
+				window.scrollTo(0, 0);
+			} else {
+				window.scrollTo(%d, %d);
+			}
+			return {
+				scrollTop: Math.round(window.scrollY),
+				scrollLeft: Math.round(window.scrollX),
+				scrollHeight: doc.scrollHeight,
+				scrollWidth: doc.scrollWidth,
+				clientHeight: window.innerHeight,
+				clientWidth: window.innerWidth
+			};
+		}`, toBottom, toTop, x, y)
+
+		result, err := page.Eval(js)
+		if err != nil {
+			return nil, fmt.Errorf("scroll failed: %w", err)
+		}
+
+		raw := result.Value.Map()
+		return &ScrollResult{
+			ScrollTop:    int(raw["scrollTop"].Num()),
+			ScrollLeft:   int(raw["scrollLeft"].Num()),
+			ScrollHeight: int(raw["scrollHeight"].Num()),
+			ScrollWidth:  int(raw["scrollWidth"].Num()),
+			ClientHeight: int(raw["clientHeight"].Num()),
+			ClientWidth:  int(raw["clientWidth"].Num()),
+		}, nil
 	}
 
 	el, err := b.findElementByCSS(page, selector)
