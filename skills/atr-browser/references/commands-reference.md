@@ -142,7 +142,7 @@ Returns the accessibility tree of visible page elements with unique identifiers 
 
 ### screenshot
 ```bash
-atr browser screenshot --file [--full] [--selector SELECTOR]
+atr browser screenshot --file [--full] [--selector SELECTOR] [--selector-all SELECTOR] [--output-dir DIR]
 ```
 
 | Flag | Short | Description |
@@ -150,23 +150,124 @@ atr browser screenshot --file [--full] [--selector SELECTOR]
 | `--file` | | Save to file instead of base64 |
 | `--full` | | Capture full scrollable page |
 | `--selector` | `-s` | CSS selector of element to screenshot |
+| `--selector-all` | | CSS selector matching multiple elements |
+| `--output-dir` | | Directory to save screenshots (with --selector-all) |
 
-With `--file`, screenshots are saved to `/tmp/` with a timestamped filename. No need to specify a file path.
+With `--file`, screenshots are saved to `/tmp/` with a timestamped filename.
 
-Returns the path to the saved image (e.g., `/tmp/atr-screenshot-20240105-103045.png`).
+Combine `--selector` with `--full` to capture an element's full scrollable height (useful for modals/dialogs with overflow).
 
-When `--selector` is used, `--full` is ignored since we're targeting a specific element.
+Use `--selector-all` to screenshot every matching element as numbered PNGs (1.png, 2.png, etc.).
 
 Examples:
 ```bash
-atr browser screenshot --file                           # Viewport screenshot
-atr browser screenshot --file --full                    # Full page screenshot
-atr browser screenshot --file -s "header"               # Screenshot header element
-atr browser screenshot --file -s "#nav"                 # Screenshot by ID
-atr browser screenshot --file -s ".hero"                # Screenshot by class
-atr browser screenshot --file -s "main > section"       # Screenshot with combinator
-atr browser screenshot --file -s "li:nth-child(2)"      # Screenshot with pseudo-selector
-atr browser screenshot --file -s "[data-testid='foo']"  # Screenshot by attribute
+atr browser screenshot --file                                      # Viewport screenshot
+atr browser screenshot --file --full                               # Full page screenshot
+atr browser screenshot --file -s "header"                          # Screenshot header element
+atr browser screenshot --file -s "#nav"                            # Screenshot by ID
+atr browser screenshot --file -s "[role=dialog]" --full            # Full-height modal screenshot
+atr browser screenshot --file --selector-all ".card"               # Screenshot all cards
+atr browser screenshot --file --selector-all ".card" --output-dir ./cards/  # Save to dir
+```
+
+### computed-styles
+```bash
+atr browser computed-styles <selector> [--properties "prop1,prop2"]
+```
+
+| Flag | Description |
+|------|-------------|
+| `--properties` | Comma-separated CSS properties to return (default: common layout/typography set) |
+
+Returns computed CSS styles for an element as JSON.
+
+Examples:
+```bash
+atr browser computed-styles "h1"
+atr browser computed-styles "h1" --properties "fontSize,fontWeight,color"
+atr browser computed-styles ".hero-section"
+```
+
+### computed-styles-diff
+```bash
+atr browser computed-styles-diff <selector> --against <page-index> [--properties "..."] [--selector-target "..."]
+```
+
+| Flag | Description |
+|------|-------------|
+| `--against` | Page index to compare against (0-based) |
+| `--properties` | Comma-separated CSS properties to compare |
+| `--selector-target` | Different CSS selector on the target page |
+
+Compares computed styles between current page and another open page. Returns matches, mismatches, and similarity score.
+
+Examples:
+```bash
+atr browser computed-styles-diff "h1" --against 0
+atr browser computed-styles-diff "h1" --against 0 --properties "fontSize,color"
+atr browser computed-styles-diff ".hero" --against 0 --selector-target ".banner"
+```
+
+### text
+```bash
+atr browser text <selector> [--flat] [--links] [--headings]
+```
+
+| Flag | Description |
+|------|-------------|
+| `--flat` | Return plain text only |
+| `--links` | Return only link elements with href |
+| `--headings` | Return only heading elements (h1-h6) |
+
+Extracts text content from an element, structured by HTML tag hierarchy.
+
+Examples:
+```bash
+atr browser text "footer"              # Structured text groups
+atr browser text "footer" --flat       # Plain concatenated text
+atr browser text "footer" --links      # Only <a> elements with hrefs
+atr browser text "footer" --headings   # Only h1-h6 elements
+```
+
+### wait
+```bash
+atr browser wait <selector> [--timeout 5000] [--visible]
+```
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--timeout` | Timeout in milliseconds | 5000 |
+| `--visible` | Wait for element to be visible (not just present) | false |
+
+Waits until an element exists in the DOM. With `--visible`, also waits until the element is rendered and visible.
+
+Examples:
+```bash
+atr browser wait "[role=dialog]"
+atr browser wait "[role=dialog]" --timeout 10000
+atr browser wait ".loading-spinner" --visible
+```
+
+### scroll
+```bash
+atr browser scroll --selector "<selector>" [--y N] [--x N] [--to-bottom] [--to-top]
+```
+
+| Flag | Short | Description |
+|------|-------|-------------|
+| `--selector` | `-s` | CSS selector of scrollable element (required) |
+| `--y` | | Vertical scroll position in pixels |
+| `--x` | | Horizontal scroll position in pixels |
+| `--to-bottom` | | Scroll to bottom of element |
+| `--to-top` | | Scroll to top of element |
+
+Scrolls within an element's scroll container. Returns scroll position and dimensions.
+
+Examples:
+```bash
+atr browser scroll -s "[role=dialog]" --y 800
+atr browser scroll -s "#modal" --to-bottom
+atr browser scroll -s ".carousel" --x 400
 ```
 
 ### html
