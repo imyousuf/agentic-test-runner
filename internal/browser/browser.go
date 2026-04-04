@@ -34,6 +34,10 @@ type Browser struct {
 	// Track pages created by this instance (for cleanup when connected)
 	ownedPages map[*rod.Page]bool
 
+	// pageSwitchMu protects compound operations that switch pages and switch back.
+	// Separate from mu to avoid deadlock since SelectPage/GetComputedStyles acquire mu.
+	pageSwitchMu sync.Mutex
+
 	// Event tracking
 	consoleMessages []ConsoleMessage
 	networkRequests []NetworkRequest

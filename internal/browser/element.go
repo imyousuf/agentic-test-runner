@@ -663,6 +663,10 @@ type StyleDiffResult struct {
 // GetComputedStylesDiff compares computed styles of an element on the current page
 // against an element on another page (identified by page index).
 func (b *Browser) GetComputedStylesDiff(selector string, againstPageIndex int, properties []string, selectorTarget string) (*StyleDiffResult, error) {
+	// Lock page switching for the duration of this compound operation
+	b.pageSwitchMu.Lock()
+	defer b.pageSwitchMu.Unlock()
+
 	// Remember current page
 	b.mu.RLock()
 	currentIdx := b.current
