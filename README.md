@@ -19,6 +19,17 @@
 
 ### Install
 
+**macOS / Linux:**
+```bash
+curl -fsSL https://raw.githubusercontent.com/imyousuf/agentic-test-runner/main/install.sh | sh
+```
+
+**Windows (PowerShell):**
+```powershell
+irm https://raw.githubusercontent.com/imyousuf/agentic-test-runner/main/install.ps1 | iex
+```
+
+**From source:**
 ```bash
 go install github.com/imyousuf/agentic-test-runner/cmd/atr@latest
 ```
