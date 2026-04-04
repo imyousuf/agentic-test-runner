@@ -320,6 +320,18 @@ func TestBrowserGetElementFullHeightScreenshot(t *testing.T) {
 	}
 }
 
+func TestBrowserGetElementFullHeightScreenshot_NonScrollable(t *testing.T) {
+	resetFixture(t)
+	// header has no overflow scroll — full height should still work without timeout
+	data, err := testBrowser.GetElementFullHeightScreenshot("header")
+	if err != nil {
+		t.Fatalf("GetElementFullHeightScreenshot('header') error: %v", err)
+	}
+	if len(data) == 0 {
+		t.Error("expected non-empty screenshot data")
+	}
+}
+
 func TestBrowserGetTextContent_Structured(t *testing.T) {
 	resetFixture(t)
 	result, err := testBrowser.GetTextContent("footer", "structured")

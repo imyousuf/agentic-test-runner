@@ -523,6 +523,49 @@ func TestHandleWait_Visible(t *testing.T) {
 	}
 }
 
+func TestHandleScreenshot_SelectorFullNonScrollable(t *testing.T) {
+	resetPage(t)
+	// header is not scrollable — --selector + --full should not timeout
+	rr := doGet(testServer, "/screenshot?selector=header&full=true")
+	if rr.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d (body: %s)", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	resp := parseResponse(t, rr)
+	if !resp.Success {
+		t.Errorf("expected success=true, error: %s", resp.Error)
+	}
+}
+
+func TestNewRoutesAccessible(t *testing.T) {
+	resetPage(t)
+	// Verify all new endpoints return valid JSON (not 404)
+	routes := []struct {
+		method string
+		path   string
+		body   map[string]any
+	}{
+		{"GET", "/computed-styles?selector=h1", nil},
+		{"GET", "/text?selector=footer", nil},
+		{"POST", "/wait", map[string]any{"selector": "h1", "timeout": 1000}},
+		{"POST", "/scroll", map[string]any{"selector": "body", "y": 0}},
+	}
+	for _, r := range routes {
+		var rr *httptest.ResponseRecorder
+		if r.method == "GET" {
+			rr = doGet(testServer, r.path)
+		} else {
+			rr = doPost(testServer, r.path, r.body)
+		}
+		if rr.Code == http.StatusNotFound {
+			t.Errorf("route %s %s returned 404 — not registered", r.method, r.path)
+		}
+		resp := parseResponse(t, rr)
+		if !resp.Success {
+			t.Errorf("route %s %s failed: %s", r.method, r.path, resp.Error)
+		}
+	}
+}
+
 func TestHandleMethodNotAllowed(t *testing.T) {
 	rr := doGet(testServer, "/navigate")
 	if rr.Code != http.StatusMethodNotAllowed {

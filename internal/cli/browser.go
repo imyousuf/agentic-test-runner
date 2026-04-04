@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-rod/rod/lib/launcher"
@@ -485,7 +486,7 @@ Without --properties, returns a default set of common layout and typography prop
 }
 
 func newBrowserComputedStylesDiffCmd() *cobra.Command {
-	var against int
+	var against string
 	var properties string
 	var selectorTarget string
 	cmd := &cobra.Command{
@@ -493,11 +494,22 @@ func newBrowserComputedStylesDiffCmd() *cobra.Command {
 		Short: "Compare computed styles between two pages",
 		Long: `Compare computed CSS styles of an element on the current page against
 the same (or different) element on another open page. Returns matches,
-mismatches, and a similarity score.`,
+mismatches, and a similarity score.
+
+The --against flag accepts a page index as "page:N" or just "N" (e.g., --against page:0 or --against 0).`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Parse --against: accept both "page:N" and "N"
+			pageIdx := against
+			if strings.HasPrefix(pageIdx, "page:") {
+				pageIdx = strings.TrimPrefix(pageIdx, "page:")
+			}
+			if _, err := strconv.Atoi(pageIdx); err != nil {
+				return fmt.Errorf("--against must be a page index (e.g., 0, 1, or page:0): %w", err)
+			}
+
 			path := "/computed-styles-diff?selector=" + url.QueryEscape(args[0])
-			path += "&against=" + strconv.Itoa(against)
+			path += "&against=" + pageIdx
 			if properties != "" {
 				path += "&properties=" + url.QueryEscape(properties)
 			}
@@ -507,7 +519,7 @@ mismatches, and a similarity score.`,
 			return apiGet(path)
 		},
 	}
-	cmd.Flags().IntVar(&against, "against", 0, "Page index to compare against")
+	cmd.Flags().StringVar(&against, "against", "0", "Page index to compare against (e.g., 0, page:0)")
 	cmd.Flags().StringVar(&properties, "properties", "", "Comma-separated CSS properties to compare")
 	cmd.Flags().StringVar(&selectorTarget, "selector-target", "", "CSS selector on target page (defaults to source selector)")
 	return cmd
