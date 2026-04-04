@@ -476,6 +476,8 @@ func (s *Server) handleScreenshot(w http.ResponseWriter, r *http.Request) {
 		if dir == "" {
 			dir = os.TempDir()
 		} else {
+			// Normalize path to collapse any .. segments
+			dir = filepath.Clean(dir)
 			if err := os.MkdirAll(dir, 0755); err != nil {
 				writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to create output dir: %v", err))
 				return

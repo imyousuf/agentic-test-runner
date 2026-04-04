@@ -235,6 +235,19 @@ func TestHandleScreenshot_SelectorAll(t *testing.T) {
 	}
 }
 
+func TestHandleScreenshot_SelectorAll_WithOutputDir(t *testing.T) {
+	resetPage(t)
+	dir := t.TempDir()
+	rr := doGet(testServer, "/screenshot?selector_all=.card&output_dir="+dir)
+	if rr.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d (body: %s)", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	resp := parseResponse(t, rr)
+	if !resp.Success {
+		t.Errorf("expected success=true, error: %s", resp.Error)
+	}
+}
+
 func TestHandleScreenshot_SelectorWithFull(t *testing.T) {
 	resetPage(t)
 	rr := doGet(testServer, "/screenshot?selector=%23scrollable-modal&full=true")
