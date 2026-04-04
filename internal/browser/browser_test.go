@@ -309,6 +309,29 @@ func TestBrowserWaitForElementVisible_Invisible(t *testing.T) {
 	}
 }
 
+func TestBrowserGetElementFullHeightScreenshot(t *testing.T) {
+	fixtureURL := serveFixture(t)
+	b := newTestBrowser(t)
+	navigateToFixture(t, b, fixtureURL)
+
+	// Normal element screenshot (clipped to visible area)
+	normal, err := b.GetElementScreenshotByCSS("#scrollable-modal")
+	if err != nil {
+		t.Fatalf("GetElementScreenshotByCSS error: %v", err)
+	}
+
+	// Full height screenshot (expanded)
+	fullHeight, err := b.GetElementFullHeightScreenshot("#scrollable-modal")
+	if err != nil {
+		t.Fatalf("GetElementFullHeightScreenshot error: %v", err)
+	}
+
+	// Full height should be larger since the element has 1000px content in 200px container
+	if len(fullHeight) <= len(normal) {
+		t.Errorf("full height screenshot (%d bytes) should be larger than normal (%d bytes)", len(fullHeight), len(normal))
+	}
+}
+
 func TestBrowserGetTextContent_Structured(t *testing.T) {
 	fixtureURL := serveFixture(t)
 	b := newTestBrowser(t)

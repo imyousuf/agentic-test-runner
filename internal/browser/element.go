@@ -644,6 +644,56 @@ func (b *Browser) ScrollElement(selector string, x, y int, toBottom, toTop bool)
 	}, nil
 }
 
+// GetElementFullHeightScreenshot captures a screenshot of an element expanded to its full scroll height.
+// Useful for elements with overflow:scroll/auto that have content beyond the visible area.
+// Temporarily mutates the element's CSS to expand it, takes the screenshot, then restores.
+func (b *Browser) GetElementFullHeightScreenshot(selector string) ([]byte, error) {
+	page, err := b.CurrentPage()
+	if err != nil {
+		return nil, err
+	}
+
+	el, err := b.findElementByCSS(page, selector)
+	if err != nil {
+		return nil, err
+	}
+
+	// Store original styles and expand to full height
+	_, err = el.Eval(`function() {
+		this.__atr_orig_overflow = this.style.overflow;
+		this.__atr_orig_height = this.style.height;
+		this.__atr_orig_maxHeight = this.style.maxHeight;
+		this.style.overflow = 'visible';
+		this.style.height = this.scrollHeight + 'px';
+		this.style.maxHeight = 'none';
+	}`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to expand element: %w", err)
+	}
+
+	// Take screenshot
+	data, screenshotErr := el.Screenshot(proto.PageCaptureScreenshotFormatPng, 0)
+
+	// Always restore original styles
+	_, restoreErr := el.Eval(`function() {
+		this.style.overflow = this.__atr_orig_overflow;
+		this.style.height = this.__atr_orig_height;
+		this.style.maxHeight = this.__atr_orig_maxHeight;
+		delete this.__atr_orig_overflow;
+		delete this.__atr_orig_height;
+		delete this.__atr_orig_maxHeight;
+	}`)
+
+	if screenshotErr != nil {
+		return nil, fmt.Errorf("screenshot failed: %w", screenshotErr)
+	}
+	if restoreErr != nil {
+		return nil, fmt.Errorf("failed to restore element styles: %w", restoreErr)
+	}
+
+	return data, nil
+}
+
 // TextGroup represents a group of text content with its HTML tag context.
 type TextGroup struct {
 	Tag  string `json:"tag"`

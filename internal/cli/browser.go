@@ -609,13 +609,15 @@ func newBrowserScreenshotCmd() *cobra.Command {
 		Long: `Capture a screenshot of the current page or a specific element.
 
 Use --selector to screenshot a specific element by CSS selector (e.g., "header",
-"#nav", ".hero", "[data-testid='banner']"). When --selector is used, --full is ignored.`,
+"#nav", ".hero", "[data-testid='banner']"). Combine --selector with --full to capture
+the element's full scrollable height (useful for modals and dialogs with overflow).`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			path := "/screenshot"
 			params := []string{}
 			if selector != "" {
 				params = append(params, "selector="+url.QueryEscape(selector))
-			} else if fullPage {
+			}
+			if fullPage {
 				params = append(params, "full=true")
 			}
 			if saveToFile {

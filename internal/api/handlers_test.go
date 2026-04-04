@@ -333,6 +333,20 @@ func TestHandleErrors(t *testing.T) {
 	}
 }
 
+func TestHandleScreenshot_SelectorWithFull(t *testing.T) {
+	env := newTestEnv(t)
+	navigateFixture(t, env)
+
+	rr := doGet(env.server, "/screenshot?selector=%23scrollable-modal&full=true")
+	if rr.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d (body: %s)", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	resp := parseResponse(t, rr)
+	if !resp.Success {
+		t.Errorf("expected success=true, error: %s", resp.Error)
+	}
+}
+
 func TestHandleText(t *testing.T) {
 	env := newTestEnv(t)
 	navigateFixture(t, env)

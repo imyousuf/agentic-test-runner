@@ -464,7 +464,9 @@ func (s *Server) handleScreenshot(w http.ResponseWriter, r *http.Request) {
 	var data []byte
 	var err error
 
-	if selector != "" {
+	if selector != "" && fullPage {
+		data, err = s.browser.GetElementFullHeightScreenshot(selector)
+	} else if selector != "" {
 		data, err = s.browser.GetElementScreenshotByCSS(selector)
 	} else {
 		data, err = s.browser.Screenshot(fullPage)
