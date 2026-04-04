@@ -603,6 +603,8 @@ func newBrowserScreenshotCmd() *cobra.Command {
 	var fullPage bool
 	var saveToFile bool
 	var selector string
+	var selectorAll string
+	var outputDir string
 	cmd := &cobra.Command{
 		Use:   "screenshot",
 		Short: "Capture screenshot",
@@ -610,11 +612,19 @@ func newBrowserScreenshotCmd() *cobra.Command {
 
 Use --selector to screenshot a specific element by CSS selector (e.g., "header",
 "#nav", ".hero", "[data-testid='banner']"). Combine --selector with --full to capture
-the element's full scrollable height (useful for modals and dialogs with overflow).`,
+the element's full scrollable height (useful for modals and dialogs with overflow).
+
+Use --selector-all to screenshot every element matching a selector, saving each as
+a numbered PNG file (1.png, 2.png, etc.) in --output-dir or /tmp/.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			path := "/screenshot"
 			params := []string{}
-			if selector != "" {
+			if selectorAll != "" {
+				params = append(params, "selector_all="+url.QueryEscape(selectorAll))
+				if outputDir != "" {
+					params = append(params, "output_dir="+url.QueryEscape(outputDir))
+				}
+			} else if selector != "" {
 				params = append(params, "selector="+url.QueryEscape(selector))
 			}
 			if fullPage {
@@ -634,7 +644,9 @@ the element's full scrollable height (useful for modals and dialogs with overflo
 	}
 	cmd.Flags().BoolVar(&fullPage, "full", false, "Capture full scrollable page")
 	cmd.Flags().BoolVar(&saveToFile, "file", false, "Save to file instead of base64")
-	cmd.Flags().StringVarP(&selector, "selector", "s", "", "CSS selector of element to screenshot (e.g., \"header\", \"#nav\", \".hero\")")
+	cmd.Flags().StringVarP(&selector, "selector", "s", "", "CSS selector of element to screenshot")
+	cmd.Flags().StringVar(&selectorAll, "selector-all", "", "CSS selector matching multiple elements to screenshot")
+	cmd.Flags().StringVar(&outputDir, "output-dir", "", "Directory to save screenshots (used with --selector-all)")
 	return cmd
 }
 

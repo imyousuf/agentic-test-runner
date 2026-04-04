@@ -309,6 +309,36 @@ func TestBrowserWaitForElementVisible_Invisible(t *testing.T) {
 	}
 }
 
+func TestBrowserGetMultipleElementScreenshots(t *testing.T) {
+	fixtureURL := serveFixture(t)
+	b := newTestBrowser(t)
+	navigateToFixture(t, b, fixtureURL)
+
+	screenshots, err := b.GetMultipleElementScreenshots(".card")
+	if err != nil {
+		t.Fatalf("GetMultipleElementScreenshots error: %v", err)
+	}
+	if len(screenshots) != 3 {
+		t.Errorf("expected 3 screenshots, got %d", len(screenshots))
+	}
+	for i, data := range screenshots {
+		if len(data) == 0 {
+			t.Errorf("screenshot %d is empty", i)
+		}
+	}
+}
+
+func TestBrowserGetMultipleElementScreenshots_NotFound(t *testing.T) {
+	fixtureURL := serveFixture(t)
+	b := newTestBrowser(t)
+	navigateToFixture(t, b, fixtureURL)
+
+	_, err := b.GetMultipleElementScreenshots(".nonexistent-class")
+	if err == nil {
+		t.Error("expected error for nonexistent selector")
+	}
+}
+
 func TestBrowserGetElementFullHeightScreenshot(t *testing.T) {
 	fixtureURL := serveFixture(t)
 	b := newTestBrowser(t)

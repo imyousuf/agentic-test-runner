@@ -333,6 +333,28 @@ func TestHandleErrors(t *testing.T) {
 	}
 }
 
+func TestHandleScreenshot_SelectorAll(t *testing.T) {
+	env := newTestEnv(t)
+	navigateFixture(t, env)
+
+	rr := doGet(env.server, "/screenshot?selector_all=.card")
+	if rr.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d (body: %s)", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	resp := parseResponse(t, rr)
+	if !resp.Success {
+		t.Errorf("expected success=true, error: %s", resp.Error)
+	}
+	data, ok := resp.Data.(map[string]interface{})
+	if !ok {
+		t.Fatal("expected data to be a map")
+	}
+	captured, ok := data["captured"].(float64)
+	if !ok || captured != 3 {
+		t.Errorf("captured = %v, want 3", data["captured"])
+	}
+}
+
 func TestHandleScreenshot_SelectorWithFull(t *testing.T) {
 	env := newTestEnv(t)
 	navigateFixture(t, env)

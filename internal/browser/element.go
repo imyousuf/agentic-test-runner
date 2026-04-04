@@ -644,6 +644,34 @@ func (b *Browser) ScrollElement(selector string, x, y int, toBottom, toTop bool)
 	}, nil
 }
 
+// GetMultipleElementScreenshots captures screenshots of all elements matching a CSS selector.
+func (b *Browser) GetMultipleElementScreenshots(selector string) ([][]byte, error) {
+	page, err := b.CurrentPage()
+	if err != nil {
+		return nil, err
+	}
+
+	elements, err := page.Timeout(3 * time.Second).Elements(selector)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find elements: %w", err)
+	}
+
+	if len(elements) == 0 {
+		return nil, fmt.Errorf("no elements found for selector: %s", selector)
+	}
+
+	var screenshots [][]byte
+	for i, el := range elements {
+		data, err := el.Screenshot(proto.PageCaptureScreenshotFormatPng, 0)
+		if err != nil {
+			return nil, fmt.Errorf("screenshot failed for element %d: %w", i, err)
+		}
+		screenshots = append(screenshots, data)
+	}
+
+	return screenshots, nil
+}
+
 // GetElementFullHeightScreenshot captures a screenshot of an element expanded to its full scroll height.
 // Useful for elements with overflow:scroll/auto that have content beyond the visible area.
 // Temporarily mutates the element's CSS to expand it, takes the screenshot, then restores.

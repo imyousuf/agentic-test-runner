@@ -459,7 +459,49 @@ func (s *Server) handleScreenshot(w http.ResponseWriter, r *http.Request) {
 
 	fullPage := r.URL.Query().Get("full") == "true"
 	selector := r.URL.Query().Get("selector")
+	selectorAll := r.URL.Query().Get("selector_all")
+	outputDir := r.URL.Query().Get("output_dir")
 	format := r.URL.Query().Get("format") // "file" or "base64", default base64
+
+	// Multiple element screenshots
+	if selectorAll != "" {
+		screenshots, err := s.browser.GetMultipleElementScreenshots(selectorAll)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, fmt.Sprintf("screenshot failed: %v", err))
+			return
+		}
+
+		dir := outputDir
+		if dir == "" {
+			dir = os.TempDir()
+		} else {
+			if err := os.MkdirAll(dir, 0755); err != nil {
+				writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to create output dir: %v", err))
+				return
+			}
+		}
+
+		var results []map[string]interface{}
+		for i, data := range screenshots {
+			filename := fmt.Sprintf("%d.png", i+1)
+			filePath := filepath.Join(dir, filename)
+			if err := os.WriteFile(filePath, data, 0644); err != nil {
+				writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to save screenshot %d: %v", i+1, err))
+				return
+			}
+			results = append(results, map[string]interface{}{
+				"index": i + 1,
+				"path":  filePath,
+				"size":  len(data),
+			})
+		}
+
+		writeSuccess(w, map[string]interface{}{
+			"captured": len(results),
+			"files":    results,
+		})
+		return
+	}
 
 	var data []byte
 	var err error
