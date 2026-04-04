@@ -2,8 +2,10 @@ package browser
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -11,156 +13,140 @@ import (
 	"github.com/imyousuf/agentic-test-runner/internal/config"
 )
 
-// serveFixture starts an HTTP server serving the testdata/ directory.
-func serveFixture(t *testing.T) string {
-	t.Helper()
+var (
+	testBrowser    *Browser
+	testFixtureURL string
+)
+
+func TestMain(m *testing.M) {
+	// Start fixture server
 	fs := http.FileServer(http.Dir("testdata"))
 	ts := httptest.NewServer(fs)
-	t.Cleanup(ts.Close)
-	return ts.URL
-}
+	testFixtureURL = ts.URL
 
-// newTestBrowser creates a headless browser for testing.
-func newTestBrowser(t *testing.T) *Browser {
-	t.Helper()
+	// Launch shared browser
 	cfg := config.BrowserConfig{
 		Headless:  true,
 		NoSandbox: true,
 	}
 	b, err := New(cfg)
 	if err != nil {
-		t.Fatalf("failed to create browser: %v", err)
+		fmt.Fprintf(os.Stderr, "failed to create browser: %v\n", err)
+		os.Exit(1)
 	}
 	ctx := context.Background()
 	if err := b.Launch(ctx); err != nil {
-		t.Fatalf("failed to launch browser: %v", err)
+		fmt.Fprintf(os.Stderr, "failed to launch browser: %v\n", err)
+		os.Exit(1)
 	}
-	t.Cleanup(func() { b.Close() })
-	return b
+	testBrowser = b
+
+	// Create initial page
+	if err := b.NewPage(ctx, testFixtureURL+"/test_fixture.html"); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to create page: %v\n", err)
+		os.Exit(1)
+	}
+
+	code := m.Run()
+
+	b.Close()
+	ts.Close()
+	os.Exit(code)
 }
 
-// navigateToFixture navigates the browser to the test fixture page.
-// Creates a new page if the browser has none (same pattern as handleNavigate).
-func navigateToFixture(t *testing.T, b *Browser, fixtureURL string) {
+// resetFixture navigates the shared browser to the fixture page,
+// closing any extra tabs opened by previous tests.
+func resetFixture(t *testing.T) {
 	t.Helper()
+	// Close extra pages (keep only the first one)
+	for len(testBrowser.ListPages()) > 1 {
+		testBrowser.ClosePage(len(testBrowser.ListPages()) - 1)
+	}
+	if len(testBrowser.ListPages()) > 0 {
+		testBrowser.SelectPage(0)
+	}
 	ctx := context.Background()
-	url := fixtureURL + "/test_fixture.html"
-	pages := b.ListPages()
-	if len(pages) == 0 {
-		if err := b.NewPage(ctx, url); err != nil {
-			t.Fatalf("failed to create page: %v", err)
-		}
-	} else {
-		if err := b.Navigate(ctx, url); err != nil {
-			t.Fatalf("failed to navigate to fixture: %v", err)
-		}
+	if err := testBrowser.Navigate(ctx, testFixtureURL+"/test_fixture.html"); err != nil {
+		t.Fatalf("failed to navigate to fixture: %v", err)
 	}
 }
 
 func TestBrowserCurrentURL(t *testing.T) {
-	fixtureURL := serveFixture(t)
-	b := newTestBrowser(t)
-	navigateToFixture(t, b, fixtureURL)
-
-	url := b.CurrentURL()
+	resetFixture(t)
+	url := testBrowser.CurrentURL()
 	if !strings.Contains(url, "test_fixture.html") {
 		t.Errorf("CurrentURL() = %q, want to contain 'test_fixture.html'", url)
 	}
 }
 
 func TestBrowserPageTitle(t *testing.T) {
-	fixtureURL := serveFixture(t)
-	b := newTestBrowser(t)
-	navigateToFixture(t, b, fixtureURL)
-
-	title := b.PageTitle()
+	resetFixture(t)
+	title := testBrowser.PageTitle()
 	if title != "ATR Test Fixture" {
 		t.Errorf("PageTitle() = %q, want 'ATR Test Fixture'", title)
 	}
 }
 
 func TestBrowserScreenshot(t *testing.T) {
-	fixtureURL := serveFixture(t)
-	b := newTestBrowser(t)
-	navigateToFixture(t, b, fixtureURL)
-
-	data, err := b.Screenshot(false)
+	resetFixture(t)
+	data, err := testBrowser.Screenshot(false)
 	if err != nil {
 		t.Fatalf("Screenshot() error: %v", err)
 	}
 	if len(data) == 0 {
 		t.Error("Screenshot() returned empty data")
 	}
-	// PNG magic bytes
 	if len(data) < 4 || data[0] != 0x89 || data[1] != 'P' || data[2] != 'N' || data[3] != 'G' {
 		t.Error("Screenshot() did not return PNG data")
 	}
 }
 
 func TestBrowserScreenshotFullPage(t *testing.T) {
-	fixtureURL := serveFixture(t)
-	b := newTestBrowser(t)
-	navigateToFixture(t, b, fixtureURL)
-
-	viewport, err := b.Screenshot(false)
+	resetFixture(t)
+	viewport, err := testBrowser.Screenshot(false)
 	if err != nil {
 		t.Fatalf("Screenshot(false) error: %v", err)
 	}
-
-	fullPage, err := b.Screenshot(true)
+	fullPage, err := testBrowser.Screenshot(true)
 	if err != nil {
 		t.Fatalf("Screenshot(true) error: %v", err)
 	}
-
-	// Full page should be at least as large as viewport
 	if len(fullPage) < len(viewport) {
 		t.Errorf("full page screenshot (%d bytes) smaller than viewport (%d bytes)", len(fullPage), len(viewport))
 	}
 }
 
 func TestBrowserGetElementScreenshotByCSS(t *testing.T) {
-	fixtureURL := serveFixture(t)
-	b := newTestBrowser(t)
-	navigateToFixture(t, b, fixtureURL)
-
-	data, err := b.GetElementScreenshotByCSS("header")
+	resetFixture(t)
+	data, err := testBrowser.GetElementScreenshotByCSS("header")
 	if err != nil {
 		t.Fatalf("GetElementScreenshotByCSS('header') error: %v", err)
 	}
 	if len(data) == 0 {
 		t.Error("GetElementScreenshotByCSS returned empty data")
 	}
-	// PNG magic bytes
 	if len(data) < 4 || data[0] != 0x89 || data[1] != 'P' || data[2] != 'N' || data[3] != 'G' {
 		t.Error("GetElementScreenshotByCSS did not return PNG data")
 	}
 }
 
 func TestBrowserGetElementScreenshotByCSS_NotFound(t *testing.T) {
-	fixtureURL := serveFixture(t)
-	b := newTestBrowser(t)
-	navigateToFixture(t, b, fixtureURL)
-
-	_, err := b.GetElementScreenshotByCSS("#nonexistent-element")
+	resetFixture(t)
+	_, err := testBrowser.GetElementScreenshotByCSS("#nonexistent-element")
 	if err == nil {
 		t.Error("expected error for nonexistent element, got nil")
 	}
 }
 
 func TestBrowserSnapshot(t *testing.T) {
-	fixtureURL := serveFixture(t)
-	b := newTestBrowser(t)
-	navigateToFixture(t, b, fixtureURL)
-
-	elements, err := b.Snapshot(false)
+	resetFixture(t)
+	elements, err := testBrowser.Snapshot(false)
 	if err != nil {
 		t.Fatalf("Snapshot() error: %v", err)
 	}
 	if len(elements) == 0 {
 		t.Error("Snapshot() returned empty elements")
 	}
-
-	// Should find interactive elements like links, buttons, inputs
 	foundButton := false
 	foundInput := false
 	for _, el := range elements {
@@ -180,11 +166,8 @@ func TestBrowserSnapshot(t *testing.T) {
 }
 
 func TestBrowserHTML(t *testing.T) {
-	fixtureURL := serveFixture(t)
-	b := newTestBrowser(t)
-	navigateToFixture(t, b, fixtureURL)
-
-	html, err := b.HTML()
+	resetFixture(t)
+	html, err := testBrowser.HTML()
 	if err != nil {
 		t.Fatalf("HTML() error: %v", err)
 	}
@@ -197,11 +180,8 @@ func TestBrowserHTML(t *testing.T) {
 }
 
 func TestBrowserEvaluate(t *testing.T) {
-	fixtureURL := serveFixture(t)
-	b := newTestBrowser(t)
-	navigateToFixture(t, b, fixtureURL)
-
-	result, err := b.Evaluate("document.title")
+	resetFixture(t)
+	result, err := testBrowser.Evaluate("document.title")
 	if err != nil {
 		t.Fatalf("Evaluate() error: %v", err)
 	}
@@ -215,17 +195,12 @@ func TestBrowserEvaluate(t *testing.T) {
 }
 
 func TestBrowserClick(t *testing.T) {
-	fixtureURL := serveFixture(t)
-	b := newTestBrowser(t)
-	navigateToFixture(t, b, fixtureURL)
-
+	resetFixture(t)
 	ctx := context.Background()
-	if err := b.Click(ctx, "#test-button", false); err != nil {
+	if err := testBrowser.Click(ctx, "#test-button", false); err != nil {
 		t.Fatalf("Click() error: %v", err)
 	}
-
-	// Verify click result appeared
-	result, err := b.Evaluate("document.getElementById('click-result').textContent")
+	result, err := testBrowser.Evaluate("document.getElementById('click-result').textContent")
 	if err != nil {
 		t.Fatalf("Evaluate() error: %v", err)
 	}
@@ -235,16 +210,12 @@ func TestBrowserClick(t *testing.T) {
 }
 
 func TestBrowserFill(t *testing.T) {
-	fixtureURL := serveFixture(t)
-	b := newTestBrowser(t)
-	navigateToFixture(t, b, fixtureURL)
-
+	resetFixture(t)
 	ctx := context.Background()
-	if err := b.Fill(ctx, "#test-input", "hello world"); err != nil {
+	if err := testBrowser.Fill(ctx, "#test-input", "hello world"); err != nil {
 		t.Fatalf("Fill() error: %v", err)
 	}
-
-	result, err := b.Evaluate("document.getElementById('test-input').value")
+	result, err := testBrowser.Evaluate("document.getElementById('test-input').value")
 	if err != nil {
 		t.Fatalf("Evaluate() error: %v", err)
 	}
@@ -254,79 +225,51 @@ func TestBrowserFill(t *testing.T) {
 }
 
 func TestBrowserWaitForElement(t *testing.T) {
-	fixtureURL := serveFixture(t)
-	b := newTestBrowser(t)
-	navigateToFixture(t, b, fixtureURL)
-
+	resetFixture(t)
 	ctx := context.Background()
-
-	// Element that appears after 500ms delay
-	err := b.WaitForElement(ctx, "#delayed-element", 3*time.Second)
+	err := testBrowser.WaitForElement(ctx, "#delayed-element", 3*time.Second)
 	if err != nil {
 		t.Errorf("WaitForElement('#delayed-element') error: %v", err)
 	}
 }
 
 func TestBrowserWaitForElement_Timeout(t *testing.T) {
-	fixtureURL := serveFixture(t)
-	b := newTestBrowser(t)
-	navigateToFixture(t, b, fixtureURL)
-
+	resetFixture(t)
 	ctx := context.Background()
-
-	// Element that doesn't exist — should timeout
-	err := b.WaitForElement(ctx, "#nonexistent", 500*time.Millisecond)
+	err := testBrowser.WaitForElement(ctx, "#nonexistent", 500*time.Millisecond)
 	if err == nil {
 		t.Error("expected timeout error for nonexistent element")
 	}
 }
 
 func TestBrowserWaitForElementVisible(t *testing.T) {
-	fixtureURL := serveFixture(t)
-	b := newTestBrowser(t)
-	navigateToFixture(t, b, fixtureURL)
-
+	resetFixture(t)
 	ctx := context.Background()
-
-	// #delayed-element appears after 500ms and is visible
-	err := b.WaitForElementVisible(ctx, "#delayed-element", 3*time.Second)
+	err := testBrowser.WaitForElementVisible(ctx, "#delayed-element", 3*time.Second)
 	if err != nil {
 		t.Errorf("WaitForElementVisible('#delayed-element') error: %v", err)
 	}
 }
 
 func TestBrowserWaitForElementVisible_Invisible(t *testing.T) {
-	fixtureURL := serveFixture(t)
-	b := newTestBrowser(t)
-	navigateToFixture(t, b, fixtureURL)
-
+	resetFixture(t)
 	ctx := context.Background()
-
-	// #invisible-element exists but is display:none — should fail visibility check
-	err := b.WaitForElementVisible(ctx, "#invisible-element", 2*time.Second)
+	err := testBrowser.WaitForElementVisible(ctx, "#invisible-element", 2*time.Second)
 	if err == nil {
 		t.Error("expected error for invisible element, got nil")
 	}
 }
 
 func TestBrowserGetComputedStylesDiff(t *testing.T) {
-	fixtureURL := serveFixture(t)
-	b := newTestBrowser(t)
-	navigateToFixture(t, b, fixtureURL)
-
-	// Open same fixture in a second tab
+	resetFixture(t)
 	ctx := context.Background()
-	if err := b.NewPage(ctx, fixtureURL+"/test_fixture.html"); err != nil {
+	if err := testBrowser.NewPage(ctx, testFixtureURL+"/test_fixture.html"); err != nil {
 		t.Fatalf("failed to open second page: %v", err)
 	}
-
-	// Now on page 1 (second tab), compare h1 against page 0 (first tab)
-	result, err := b.GetComputedStylesDiff("#main-heading", 0, []string{"fontSize", "fontWeight", "color"}, "")
+	result, err := testBrowser.GetComputedStylesDiff("#main-heading", 0, []string{"fontSize", "fontWeight", "color"}, "")
 	if err != nil {
 		t.Fatalf("GetComputedStylesDiff error: %v", err)
 	}
-
-	// Same page, same selector — should be 100% match
 	if result.MismatchCount != 0 {
 		t.Errorf("expected 0 mismatches, got %d: %v", result.MismatchCount, result.Mismatches)
 	}
@@ -339,11 +282,8 @@ func TestBrowserGetComputedStylesDiff(t *testing.T) {
 }
 
 func TestBrowserGetMultipleElementScreenshots(t *testing.T) {
-	fixtureURL := serveFixture(t)
-	b := newTestBrowser(t)
-	navigateToFixture(t, b, fixtureURL)
-
-	screenshots, err := b.GetMultipleElementScreenshots(".card")
+	resetFixture(t)
+	screenshots, err := testBrowser.GetMultipleElementScreenshots(".card")
 	if err != nil {
 		t.Fatalf("GetMultipleElementScreenshots error: %v", err)
 	}
@@ -358,45 +298,31 @@ func TestBrowserGetMultipleElementScreenshots(t *testing.T) {
 }
 
 func TestBrowserGetMultipleElementScreenshots_NotFound(t *testing.T) {
-	fixtureURL := serveFixture(t)
-	b := newTestBrowser(t)
-	navigateToFixture(t, b, fixtureURL)
-
-	_, err := b.GetMultipleElementScreenshots(".nonexistent-class")
+	resetFixture(t)
+	_, err := testBrowser.GetMultipleElementScreenshots(".nonexistent-class")
 	if err == nil {
 		t.Error("expected error for nonexistent selector")
 	}
 }
 
 func TestBrowserGetElementFullHeightScreenshot(t *testing.T) {
-	fixtureURL := serveFixture(t)
-	b := newTestBrowser(t)
-	navigateToFixture(t, b, fixtureURL)
-
-	// Normal element screenshot (clipped to visible area)
-	normal, err := b.GetElementScreenshotByCSS("#scrollable-modal")
+	resetFixture(t)
+	normal, err := testBrowser.GetElementScreenshotByCSS("#scrollable-modal")
 	if err != nil {
 		t.Fatalf("GetElementScreenshotByCSS error: %v", err)
 	}
-
-	// Full height screenshot (expanded)
-	fullHeight, err := b.GetElementFullHeightScreenshot("#scrollable-modal")
+	fullHeight, err := testBrowser.GetElementFullHeightScreenshot("#scrollable-modal")
 	if err != nil {
 		t.Fatalf("GetElementFullHeightScreenshot error: %v", err)
 	}
-
-	// Full height should be larger since the element has 1000px content in 200px container
 	if len(fullHeight) <= len(normal) {
 		t.Errorf("full height screenshot (%d bytes) should be larger than normal (%d bytes)", len(fullHeight), len(normal))
 	}
 }
 
 func TestBrowserGetTextContent_Structured(t *testing.T) {
-	fixtureURL := serveFixture(t)
-	b := newTestBrowser(t)
-	navigateToFixture(t, b, fixtureURL)
-
-	result, err := b.GetTextContent("footer", "structured")
+	resetFixture(t)
+	result, err := testBrowser.GetTextContent("footer", "structured")
 	if err != nil {
 		t.Fatalf("GetTextContent error: %v", err)
 	}
@@ -409,11 +335,8 @@ func TestBrowserGetTextContent_Structured(t *testing.T) {
 }
 
 func TestBrowserGetTextContent_Flat(t *testing.T) {
-	fixtureURL := serveFixture(t)
-	b := newTestBrowser(t)
-	navigateToFixture(t, b, fixtureURL)
-
-	result, err := b.GetTextContent("footer", "flat")
+	resetFixture(t)
+	result, err := testBrowser.GetTextContent("footer", "flat")
 	if err != nil {
 		t.Fatalf("GetTextContent flat error: %v", err)
 	}
@@ -426,15 +349,11 @@ func TestBrowserGetTextContent_Flat(t *testing.T) {
 }
 
 func TestBrowserGetTextContent_Links(t *testing.T) {
-	fixtureURL := serveFixture(t)
-	b := newTestBrowser(t)
-	navigateToFixture(t, b, fixtureURL)
-
-	result, err := b.GetTextContent("footer", "links")
+	resetFixture(t)
+	result, err := testBrowser.GetTextContent("footer", "links")
 	if err != nil {
 		t.Fatalf("GetTextContent links error: %v", err)
 	}
-	// Footer has 4 links: test@example.com, Privacy Policy, Terms of Service, Help Center
 	if len(result.Groups) < 3 {
 		t.Errorf("expected at least 3 links, got %d", len(result.Groups))
 	}
@@ -449,15 +368,11 @@ func TestBrowserGetTextContent_Links(t *testing.T) {
 }
 
 func TestBrowserGetTextContent_Headings(t *testing.T) {
-	fixtureURL := serveFixture(t)
-	b := newTestBrowser(t)
-	navigateToFixture(t, b, fixtureURL)
-
-	result, err := b.GetTextContent("footer", "headings")
+	resetFixture(t)
+	result, err := testBrowser.GetTextContent("footer", "headings")
 	if err != nil {
 		t.Fatalf("GetTextContent headings error: %v", err)
 	}
-	// Footer has 2 h4 headings: Contact, Links
 	if len(result.Groups) != 2 {
 		t.Errorf("expected 2 headings, got %d", len(result.Groups))
 	}
@@ -469,11 +384,8 @@ func TestBrowserGetTextContent_Headings(t *testing.T) {
 }
 
 func TestBrowserScrollElement(t *testing.T) {
-	fixtureURL := serveFixture(t)
-	b := newTestBrowser(t)
-	navigateToFixture(t, b, fixtureURL)
-
-	result, err := b.ScrollElement("#scrollable-modal", 0, 500, false, false)
+	resetFixture(t)
+	result, err := testBrowser.ScrollElement("#scrollable-modal", 0, 500, false, false)
 	if err != nil {
 		t.Fatalf("ScrollElement error: %v", err)
 	}
@@ -486,11 +398,8 @@ func TestBrowserScrollElement(t *testing.T) {
 }
 
 func TestBrowserScrollElement_ToBottom(t *testing.T) {
-	fixtureURL := serveFixture(t)
-	b := newTestBrowser(t)
-	navigateToFixture(t, b, fixtureURL)
-
-	result, err := b.ScrollElement("#scrollable-modal", 0, 0, true, false)
+	resetFixture(t)
+	result, err := testBrowser.ScrollElement("#scrollable-modal", 0, 0, true, false)
 	if err != nil {
 		t.Fatalf("ScrollElement --to-bottom error: %v", err)
 	}
@@ -501,15 +410,9 @@ func TestBrowserScrollElement_ToBottom(t *testing.T) {
 }
 
 func TestBrowserScrollElement_ToTop(t *testing.T) {
-	fixtureURL := serveFixture(t)
-	b := newTestBrowser(t)
-	navigateToFixture(t, b, fixtureURL)
-
-	// First scroll down
-	b.ScrollElement("#scrollable-modal", 0, 500, false, false)
-
-	// Then scroll to top
-	result, err := b.ScrollElement("#scrollable-modal", 0, 0, false, true)
+	resetFixture(t)
+	testBrowser.ScrollElement("#scrollable-modal", 0, 500, false, false)
+	result, err := testBrowser.ScrollElement("#scrollable-modal", 0, 0, false, true)
 	if err != nil {
 		t.Fatalf("ScrollElement --to-top error: %v", err)
 	}
@@ -519,12 +422,8 @@ func TestBrowserScrollElement_ToTop(t *testing.T) {
 }
 
 func TestBrowserGetComputedStyles(t *testing.T) {
-	fixtureURL := serveFixture(t)
-	b := newTestBrowser(t)
-	navigateToFixture(t, b, fixtureURL)
-
-	// Get default properties for h1 with known inline styles
-	styles, err := b.GetComputedStyles("#main-heading", nil)
+	resetFixture(t)
+	styles, err := testBrowser.GetComputedStyles("#main-heading", nil)
 	if err != nil {
 		t.Fatalf("GetComputedStyles error: %v", err)
 	}
@@ -540,11 +439,8 @@ func TestBrowserGetComputedStyles(t *testing.T) {
 }
 
 func TestBrowserGetComputedStyles_FilterProperties(t *testing.T) {
-	fixtureURL := serveFixture(t)
-	b := newTestBrowser(t)
-	navigateToFixture(t, b, fixtureURL)
-
-	styles, err := b.GetComputedStyles("#main-heading", []string{"fontSize", "color"})
+	resetFixture(t)
+	styles, err := testBrowser.GetComputedStyles("#main-heading", []string{"fontSize", "color"})
 	if err != nil {
 		t.Fatalf("GetComputedStyles error: %v", err)
 	}
@@ -560,23 +456,16 @@ func TestBrowserGetComputedStyles_FilterProperties(t *testing.T) {
 }
 
 func TestBrowserGetComputedStyles_NotFound(t *testing.T) {
-	fixtureURL := serveFixture(t)
-	b := newTestBrowser(t)
-	navigateToFixture(t, b, fixtureURL)
-
-	_, err := b.GetComputedStyles("#nonexistent", nil)
+	resetFixture(t)
+	_, err := testBrowser.GetComputedStyles("#nonexistent", nil)
 	if err == nil {
 		t.Error("expected error for nonexistent selector")
 	}
 }
 
 func TestBrowserFindElementByCSS_TagName(t *testing.T) {
-	fixtureURL := serveFixture(t)
-	b := newTestBrowser(t)
-	navigateToFixture(t, b, fixtureURL)
-
-	// Test that bare tag names now work via looksLikeCSSSelector
-	data, err := b.GetElementScreenshotByCSS("footer")
+	resetFixture(t)
+	data, err := testBrowser.GetElementScreenshotByCSS("footer")
 	if err != nil {
 		t.Fatalf("GetElementScreenshotByCSS('footer') error: %v", err)
 	}
@@ -586,12 +475,8 @@ func TestBrowserFindElementByCSS_TagName(t *testing.T) {
 }
 
 func TestBrowserFindElementByCSS_Combinator(t *testing.T) {
-	fixtureURL := serveFixture(t)
-	b := newTestBrowser(t)
-	navigateToFixture(t, b, fixtureURL)
-
-	// Test complex CSS selector with combinator
-	data, err := b.GetElementScreenshotByCSS("header nav")
+	resetFixture(t)
+	data, err := testBrowser.GetElementScreenshotByCSS("header nav")
 	if err != nil {
 		t.Fatalf("GetElementScreenshotByCSS('header nav') error: %v", err)
 	}
@@ -601,12 +486,8 @@ func TestBrowserFindElementByCSS_Combinator(t *testing.T) {
 }
 
 func TestBrowserFindElementByCSS_PseudoSelector(t *testing.T) {
-	fixtureURL := serveFixture(t)
-	b := newTestBrowser(t)
-	navigateToFixture(t, b, fixtureURL)
-
-	// Test CSS selector with pseudo-selector
-	data, err := b.GetElementScreenshotByCSS(".card:first-child")
+	resetFixture(t)
+	data, err := testBrowser.GetElementScreenshotByCSS(".card:first-child")
 	if err != nil {
 		t.Fatalf("GetElementScreenshotByCSS('.card:first-child') error: %v", err)
 	}
