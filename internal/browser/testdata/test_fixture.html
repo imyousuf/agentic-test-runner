@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=1280, initial-scale=1.0">
+  <title>ATR Test Fixture</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: sans-serif; font-size: 16px; color: rgb(0, 0, 0); background: rgb(255, 255, 255); }
+
+    /* Header */
+    header { background: rgb(240, 240, 240); padding: 10px 20px; }
+    header nav { display: flex; gap: 20px; }
+    header nav a { color: rgb(0, 102, 204); text-decoration: none; font-size: 14px; }
+
+    /* Main heading - deterministic computed styles for testing */
+    h1#main-heading {
+      font-size: 32px;
+      color: rgb(0, 0, 0);
+      font-weight: 700;
+      line-height: 40px;
+      letter-spacing: -0.5px;
+      padding: 20px;
+      margin: 0;
+    }
+
+    /* Cards */
+    .cards { display: flex; gap: 16px; padding: 20px; }
+    .card {
+      width: 200px;
+      height: 150px;
+      background: rgb(255, 255, 255);
+      border: 1px solid rgb(204, 204, 204);
+      border-radius: 8px;
+      padding: 16px;
+      font-size: 14px;
+    }
+    .card h3 { font-size: 18px; margin-bottom: 8px; color: rgb(51, 51, 51); }
+    .card p { color: rgb(102, 102, 102); }
+
+    /* Scrollable modal */
+    #scrollable-modal {
+      width: 400px;
+      height: 200px;
+      overflow: scroll;
+      border: 2px solid rgb(0, 0, 0);
+      margin: 20px;
+      padding: 10px;
+    }
+    #scrollable-modal .content {
+      height: 1000px;
+      position: relative;
+    }
+    #scrollable-modal .content .top-text { position: absolute; top: 0; }
+    #scrollable-modal .content .mid-text { position: absolute; top: 500px; }
+    #scrollable-modal .content .bottom-text { position: absolute; bottom: 0; }
+
+    /* Delayed and invisible elements */
+    #delayed-element { display: none; padding: 10px; background: rgb(200, 255, 200); margin: 20px; }
+    #invisible-element { display: none; padding: 10px; background: rgb(255, 200, 200); margin: 20px; }
+
+    /* Clickable button */
+    #test-button { padding: 10px 20px; margin: 20px; cursor: pointer; }
+    #click-result { padding: 10px; margin: 0 20px; }
+
+    /* Input field */
+    #test-input { padding: 8px; margin: 20px; width: 200px; border: 1px solid rgb(204, 204, 204); }
+
+    /* Footer */
+    footer {
+      background: rgb(245, 245, 245);
+      padding: 20px;
+      font-size: 14px;
+      color: rgb(100, 100, 100);
+    }
+    footer .footer-section { margin-bottom: 16px; }
+    footer h4 { font-size: 16px; color: rgb(51, 51, 51); margin-bottom: 8px; }
+    footer ul { list-style: none; padding: 0; }
+    footer ul li { margin-bottom: 4px; }
+    footer a { color: rgb(0, 102, 204); text-decoration: none; }
+  </style>
+</head>
+<body>
+  <header>
+    <nav>
+      <a href="#home">Home</a>
+      <a href="#about">About</a>
+      <a href="#contact">Contact</a>
+    </nav>
+  </header>
+
+  <h1 id="main-heading">Test Page Heading</h1>
+
+  <main>
+    <section class="cards">
+      <div class="card" data-index="0">
+        <h3>Card One</h3>
+        <p>Description for card one</p>
+      </div>
+      <div class="card" data-index="1">
+        <h3>Card Two</h3>
+        <p>Description for card two</p>
+      </div>
+      <div class="card" data-index="2">
+        <h3>Card Three</h3>
+        <p>Description for card three</p>
+      </div>
+    </section>
+
+    <div id="scrollable-modal">
+      <div class="content">
+        <p class="top-text">Top of scrollable content</p>
+        <p class="mid-text">Middle of scrollable content</p>
+        <p class="bottom-text">Bottom of scrollable content</p>
+      </div>
+    </div>
+
+    <button id="test-button" onclick="document.getElementById('click-result').textContent = 'clicked'">Click Me</button>
+    <div id="click-result"></div>
+
+    <input id="test-input" type="text" placeholder="Enter text here" aria-label="Test Input" />
+
+    <div id="delayed-element">I appeared after a delay!</div>
+    <div id="invisible-element">I am invisible</div>
+  </main>
+
+  <footer>
+    <div class="footer-section">
+      <h4>Contact</h4>
+      <p>Email: <a href="mailto:test@example.com">test@example.com</a></p>
+      <p>Phone: 555-0100</p>
+    </div>
+    <div class="footer-section">
+      <h4>Links</h4>
+      <ul>
+        <li><a href="/privacy">Privacy Policy</a></li>
+        <li><a href="/terms">Terms of Service</a></li>
+        <li><a href="/help">Help Center</a></li>
+      </ul>
+    </div>
+  </footer>
+
+  <script>
+    // Make the delayed element appear after 500ms
+    setTimeout(function() {
+      document.getElementById('delayed-element').style.display = 'block';
+    }, 500);
+    // #invisible-element stays display:none permanently
+  </script>
+</body>
+</html>

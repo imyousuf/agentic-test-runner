@@ -51,6 +51,15 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("/api/v1/network", s.handleNetwork)
 	s.mux.HandleFunc("/api/v1/errors", s.handleErrors)
 
+	// Wait
+	s.mux.HandleFunc("/api/v1/wait", s.handleWait)
+
+	// Styles
+	s.mux.HandleFunc("/api/v1/computed-styles", s.handleComputedStyles)
+
+	// Scroll
+	s.mux.HandleFunc("/api/v1/scroll", s.handleScroll)
+
 	// AI-powered
 	s.mux.HandleFunc("/api/v1/ask", s.handleAsk)
 }
@@ -615,6 +624,125 @@ func (s *Server) handleErrors(w http.ResponseWriter, r *http.Request) {
 	writeSuccess(w, map[string]interface{}{
 		"failed_requests": failedRequests,
 		"count":           len(failedRequests),
+	})
+}
+
+// handleScroll handles POST /api/v1/scroll
+func (s *Server) handleScroll(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	var req struct {
+		Selector string `json:"selector"`
+		X        int    `json:"x"`
+		Y        int    `json:"y"`
+		ToBottom bool   `json:"to_bottom"`
+		ToTop    bool   `json:"to_top"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if req.Selector == "" {
+		writeError(w, http.StatusBadRequest, "selector is required")
+		return
+	}
+
+	result, err := s.browser.ScrollElement(req.Selector, req.X, req.Y, req.ToBottom, req.ToTop)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("scroll failed: %v", err))
+		return
+	}
+
+	writeSuccess(w, map[string]interface{}{
+		"scrolled":     req.Selector,
+		"scrollTop":    result.ScrollTop,
+		"scrollLeft":   result.ScrollLeft,
+		"scrollHeight": result.ScrollHeight,
+		"scrollWidth":  result.ScrollWidth,
+		"clientHeight": result.ClientHeight,
+		"clientWidth":  result.ClientWidth,
+	})
+}
+
+// handleComputedStyles handles GET /api/v1/computed-styles
+func (s *Server) handleComputedStyles(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	selector := r.URL.Query().Get("selector")
+	if selector == "" {
+		writeError(w, http.StatusBadRequest, "selector is required")
+		return
+	}
+
+	var properties []string
+	if p := r.URL.Query().Get("properties"); p != "" {
+		properties = strings.Split(p, ",")
+	}
+
+	styles, err := s.browser.GetComputedStyles(selector, properties)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to get computed styles: %v", err))
+		return
+	}
+
+	writeSuccess(w, map[string]interface{}{
+		"selector": selector,
+		"styles":   styles,
+		"count":    len(styles),
+	})
+}
+
+// handleWait handles POST /api/v1/wait
+func (s *Server) handleWait(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	var req struct {
+		Selector string `json:"selector"`
+		Timeout  int    `json:"timeout"` // milliseconds, default 5000
+		Visible  bool   `json:"visible"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if req.Selector == "" {
+		writeError(w, http.StatusBadRequest, "selector is required")
+		return
+	}
+
+	timeout := 5 * time.Second
+	if req.Timeout > 0 {
+		timeout = time.Duration(req.Timeout) * time.Millisecond
+	}
+
+	ctx := context.Background()
+	var err error
+	if req.Visible {
+		err = s.browser.WaitForElementVisible(ctx, req.Selector, timeout)
+	} else {
+		err = s.browser.WaitForElement(ctx, req.Selector, timeout)
+	}
+
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("wait failed: %v", err))
+		return
+	}
+
+	writeSuccess(w, map[string]interface{}{
+		"found":    true,
+		"selector": req.Selector,
+		"visible":  req.Visible,
 	})
 }
 

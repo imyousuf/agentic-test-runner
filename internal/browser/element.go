@@ -324,6 +324,40 @@ func (b *Browser) WaitForElement(ctx context.Context, target string, timeout tim
 	return err
 }
 
+// WaitForElementVisible waits for an element to appear and be visible.
+// It retries until the element is both present and visible, or the timeout expires.
+func (b *Browser) WaitForElementVisible(ctx context.Context, target string, timeout time.Duration) error {
+	page, err := b.CurrentPage()
+	if err != nil {
+		return err
+	}
+
+	deadline := time.Now().Add(timeout)
+	poll := 200 * time.Millisecond
+
+	for {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return fmt.Errorf("element not visible within timeout: %s", target)
+		}
+		attemptTimeout := poll
+		if attemptTimeout > remaining {
+			attemptTimeout = remaining
+		}
+
+		el, err := tryFind(page, attemptTimeout, func(p *rod.Page) (*rod.Element, error) {
+			return b.findElement(p, target)
+		})
+		if err == nil {
+			visible, vErr := el.Visible()
+			if vErr == nil && visible {
+				return nil
+			}
+		}
+		time.Sleep(poll)
+	}
+}
+
 // Snapshot returns the accessibility tree of the current page.
 func (b *Browser) Snapshot(verbose bool) ([]ElementInfo, error) {
 	page, err := b.CurrentPage()
@@ -552,4 +586,119 @@ func (b *Browser) GetElementScreenshotByCSS(selector string) ([]byte, error) {
 	}
 
 	return el.Screenshot(proto.PageCaptureScreenshotFormatPng, 0)
+}
+
+// ScrollResult contains the scroll state after a scroll operation.
+type ScrollResult struct {
+	ScrollTop    int `json:"scrollTop"`
+	ScrollLeft   int `json:"scrollLeft"`
+	ScrollHeight int `json:"scrollHeight"`
+	ScrollWidth  int `json:"scrollWidth"`
+	ClientHeight int `json:"clientHeight"`
+	ClientWidth  int `json:"clientWidth"`
+}
+
+// ScrollElement scrolls within an element that has overflow scroll/auto.
+func (b *Browser) ScrollElement(selector string, x, y int, toBottom, toTop bool) (*ScrollResult, error) {
+	page, err := b.CurrentPage()
+	if err != nil {
+		return nil, err
+	}
+
+	el, err := b.findElementByCSS(page, selector)
+	if err != nil {
+		return nil, err
+	}
+
+	js := fmt.Sprintf(`function() {
+		if (%v) {
+			this.scrollTo(0, this.scrollHeight);
+		} else if (%v) {
+			this.scrollTo(0, 0);
+		} else {
+			this.scrollTo(%d, %d);
+		}
+		return {
+			scrollTop: Math.round(this.scrollTop),
+			scrollLeft: Math.round(this.scrollLeft),
+			scrollHeight: this.scrollHeight,
+			scrollWidth: this.scrollWidth,
+			clientHeight: this.clientHeight,
+			clientWidth: this.clientWidth
+		};
+	}`, toBottom, toTop, x, y)
+
+	result, err := el.Eval(js)
+	if err != nil {
+		return nil, fmt.Errorf("scroll failed: %w", err)
+	}
+
+	raw := result.Value.Map()
+	return &ScrollResult{
+		ScrollTop:    int(raw["scrollTop"].Num()),
+		ScrollLeft:   int(raw["scrollLeft"].Num()),
+		ScrollHeight: int(raw["scrollHeight"].Num()),
+		ScrollWidth:  int(raw["scrollWidth"].Num()),
+		ClientHeight: int(raw["clientHeight"].Num()),
+		ClientWidth:  int(raw["clientWidth"].Num()),
+	}, nil
+}
+
+// GetComputedStyles returns computed CSS properties for an element identified by CSS selector.
+// If properties is empty, a useful default set of layout/typography properties is returned.
+func (b *Browser) GetComputedStyles(selector string, properties []string) (map[string]string, error) {
+	page, err := b.CurrentPage()
+	if err != nil {
+		return nil, err
+	}
+
+	el, err := b.findElementByCSS(page, selector)
+	if err != nil {
+		return nil, err
+	}
+
+	// Use el.Eval which scopes `this` to the element
+	propsArg := "[]"
+	if len(properties) > 0 {
+		parts := make([]string, len(properties))
+		for i, p := range properties {
+			parts[i] = `"` + p + `"`
+		}
+		propsArg = "[" + strings.Join(parts, ",") + "]"
+	}
+
+	js := `function() {
+		const props = ` + propsArg + `;
+		const cs = window.getComputedStyle(this);
+		const out = {};
+		if (props.length > 0) {
+			props.forEach(p => {
+				const v = cs[p] || cs.getPropertyValue(p);
+				if (v !== undefined && v !== "") out[p] = v;
+			});
+		} else {
+			const defaults = [
+				"fontSize", "fontWeight", "fontFamily", "lineHeight", "letterSpacing",
+				"color", "backgroundColor", "display", "textAlign", "padding", "margin",
+				"borderRadius", "width", "height", "position", "opacity",
+				"textDecoration", "textTransform", "fontStyle"
+			];
+			defaults.forEach(p => {
+				const v = cs[p];
+				if (v !== undefined && v !== "") out[p] = v;
+			});
+		}
+		return out;
+	}`
+
+	result, err := el.Eval(js)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get computed styles: %w", err)
+	}
+
+	styles := make(map[string]string)
+	for k, v := range result.Value.Map() {
+		styles[k] = v.Str()
+	}
+	return styles, nil
 }

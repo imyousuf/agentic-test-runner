@@ -63,6 +63,15 @@ to control a browser via shell commands.`,
 	browserCmd.AddCommand(newBrowserSelectPageCmd())
 	browserCmd.AddCommand(newBrowserClosePageCmd())
 
+	// Wait
+	browserCmd.AddCommand(newBrowserWaitCmd())
+
+	// Styles
+	browserCmd.AddCommand(newBrowserComputedStylesCmd())
+
+	// Scroll
+	browserCmd.AddCommand(newBrowserScrollCmd())
+
 	// Interaction
 	browserCmd.AddCommand(newBrowserClickCmd())
 	browserCmd.AddCommand(newBrowserFillCmd())
@@ -385,6 +394,83 @@ func newBrowserClosePageCmd() *cobra.Command {
 			return apiRequest("DELETE", "/pages/"+args[0], nil)
 		},
 	}
+}
+
+// Scroll commands
+
+func newBrowserScrollCmd() *cobra.Command {
+	var selector string
+	var x, y int
+	var toBottom, toTop bool
+	cmd := &cobra.Command{
+		Use:   "scroll",
+		Short: "Scroll inside an element",
+		Long: `Scroll within a specific element's scroll container.
+Useful for modals, dialogs, and other elements with overflow scroll/auto.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return apiPost("/scroll", map[string]interface{}{
+				"selector":  selector,
+				"x":         x,
+				"y":         y,
+				"to_bottom": toBottom,
+				"to_top":    toTop,
+			})
+		},
+	}
+	cmd.Flags().StringVarP(&selector, "selector", "s", "", "CSS selector of scrollable element (required)")
+	_ = cmd.MarkFlagRequired("selector")
+	cmd.Flags().IntVar(&x, "x", 0, "Horizontal scroll position in pixels")
+	cmd.Flags().IntVar(&y, "y", 0, "Vertical scroll position in pixels")
+	cmd.Flags().BoolVar(&toBottom, "to-bottom", false, "Scroll to bottom of element")
+	cmd.Flags().BoolVar(&toTop, "to-top", false, "Scroll to top of element")
+	return cmd
+}
+
+// Style commands
+
+func newBrowserComputedStylesCmd() *cobra.Command {
+	var properties string
+	cmd := &cobra.Command{
+		Use:   "computed-styles <selector>",
+		Short: "Get computed CSS styles for an element",
+		Long: `Get computed CSS styles for an element identified by CSS selector.
+Returns a JSON object of CSS property names to their computed values.
+Without --properties, returns a default set of common layout and typography properties.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			path := "/computed-styles?selector=" + url.QueryEscape(args[0])
+			if properties != "" {
+				path += "&properties=" + url.QueryEscape(properties)
+			}
+			return apiGet(path)
+		},
+	}
+	cmd.Flags().StringVar(&properties, "properties", "", "Comma-separated CSS properties to return (e.g., fontSize,color,fontWeight)")
+	return cmd
+}
+
+// Wait commands
+
+func newBrowserWaitCmd() *cobra.Command {
+	var timeout int
+	var visible bool
+	cmd := &cobra.Command{
+		Use:   "wait <selector>",
+		Short: "Wait for element to appear",
+		Long: `Wait for an element matching the selector to appear in the DOM.
+Use --visible to also require the element to be visible (not display:none or opacity:0).`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return apiPost("/wait", map[string]interface{}{
+				"selector": args[0],
+				"timeout":  timeout,
+				"visible":  visible,
+			})
+		},
+	}
+	cmd.Flags().IntVar(&timeout, "timeout", 5000, "Timeout in milliseconds")
+	cmd.Flags().BoolVar(&visible, "visible", false, "Wait for element to be visible")
+	return cmd
 }
 
 // Interaction commands
