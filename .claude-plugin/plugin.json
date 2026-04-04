@@ -1,7 +1,7 @@
 {
   "name": "atr-skills",
   "description": "Claude Code skills and MCP server for ATR. Skills: atr-browser (browser control), atr-analyze (run tests with AI analysis - keeps context clean), atr-behavior (natural language browser tests). MCP Server: 15 browser automation tools (navigate, click, fill, screenshot, console, network) via 'atr mcp serve'.",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "author": {
     "name": "imyousuf"
   },

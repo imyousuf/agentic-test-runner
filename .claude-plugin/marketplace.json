@@ -11,7 +11,7 @@
       "name": "atr-skills",
       "source": "./",
       "description": "Skills: browser control (atr-browser), run tests with AI analysis (atr-analyze - keeps context clean), behavior testing (atr-behavior). MCP Server: 15 browser tools (navigate, click, fill, screenshot, etc.) via 'atr mcp serve'",
-      "version": "1.1.0"
+      "version": "1.2.0"
     }
   ]
 }
