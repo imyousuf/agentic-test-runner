@@ -319,6 +319,49 @@ screenshot --file
 	}
 }
 
+func TestDispatchBatchCommand_ViewportPreset(t *testing.T) {
+	method, _, body, _, err := dispatchBatchCommand("viewport --preset mobile")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if method != "POST" {
+		t.Errorf("method = %q, want POST", method)
+	}
+	bodyMap, ok := body.(map[string]interface{})
+	if !ok {
+		t.Fatalf("body is %T, want map", body)
+	}
+	if bodyMap["preset"] != "mobile" {
+		t.Errorf("preset = %v, want mobile", bodyMap["preset"])
+	}
+	// Should NOT have width/height when using preset
+	if _, hasWidth := bodyMap["width"]; hasWidth {
+		t.Error("expected no width when using --preset")
+	}
+}
+
+func TestDispatchBatchCommand_CleanSnapshotFlags(t *testing.T) {
+	method, path, _, _, err := dispatchBatchCommand(`clean-snapshot "footer" --depth 2 --svg-full --json`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if method != "GET" {
+		t.Errorf("method = %q, want GET", method)
+	}
+	if !strings.Contains(path, "selector=footer") {
+		t.Errorf("path missing selector: %s", path)
+	}
+	if !strings.Contains(path, "depth=2") {
+		t.Errorf("path missing depth: %s", path)
+	}
+	if !strings.Contains(path, "svg_full=true") {
+		t.Errorf("path missing svg_full: %s", path)
+	}
+	if !strings.Contains(path, "format=json") {
+		t.Errorf("path missing format=json: %s", path)
+	}
+}
+
 func TestDispatchBatchCommand(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -343,6 +386,15 @@ func TestDispatchBatchCommand(t *testing.T) {
 		{"unknown", "foobar", "", true},
 		{"empty", "", "", true},
 		{"navigate no url", "navigate", "", true},
+		{"clean-snapshot", `clean-snapshot "footer"`, "GET", false},
+		{"clean-snapshot depth", `clean-snapshot "footer" --depth 2`, "GET", false},
+		{"clean-snapshot json", `clean-snapshot "footer" --json`, "GET", false},
+		{"clean-snapshot no selector", "clean-snapshot", "", true},
+		{"viewport preset", "viewport --preset mobile", "POST", false},
+		{"viewport preset tablet", "viewport --preset tablet", "POST", false},
+		{"viewport dimensions", "viewport 375 812", "POST", false},
+		{"viewport no args", "viewport", "GET", false},
+		{"viewport one arg", "viewport 375", "", true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

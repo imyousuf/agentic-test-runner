@@ -522,30 +522,53 @@ func dispatchBatchCommand(cmdLine string) (method, path string, body interface{}
 		}
 		return "POST", "/ask", map[string]interface{}{"question": args[0]}, "answer", nil
 
-	// Viewport (will be added later)
+	// Viewport
 	case "viewport":
-		if len(args) < 2 {
-			if len(args) == 0 {
-				return "GET", "/viewport", nil, "", nil
+		if len(args) == 0 {
+			return "GET", "/viewport", nil, "", nil
+		}
+		reqBody := map[string]interface{}{}
+		if v, ok := getFlagValue(args, "--preset"); ok {
+			reqBody["preset"] = v
+		} else {
+			if len(args) < 2 {
+				return "", "", nil, "", fmt.Errorf("viewport requires width and height, or --preset")
 			}
-			return "", "", nil, "", fmt.Errorf("viewport requires width and height")
+			w, err1 := strconv.Atoi(args[0])
+			h, err2 := strconv.Atoi(args[1])
+			if err1 != nil || err2 != nil {
+				return "", "", nil, "", fmt.Errorf("viewport width and height must be integers")
+			}
+			reqBody["width"] = w
+			reqBody["height"] = h
 		}
-		w, err1 := strconv.Atoi(args[0])
-		h, err2 := strconv.Atoi(args[1])
-		if err1 != nil || err2 != nil {
-			return "", "", nil, "", fmt.Errorf("viewport width and height must be integers")
-		}
-		reqBody := map[string]interface{}{"width": w, "height": h}
 		if v, ok := getFlagValue(args, "--dpr"); ok {
 			dpr, _ := strconv.ParseFloat(v, 64)
 			if dpr > 0 {
 				reqBody["dpr"] = dpr
 			}
 		}
-		if v, ok := getFlagValue(args, "--preset"); ok {
-			reqBody["preset"] = v
-		}
 		return "POST", "/viewport", reqBody, "", nil
+
+	// Clean snapshot
+	case "clean-snapshot":
+		if len(args) < 1 {
+			return "", "", nil, "", fmt.Errorf("clean-snapshot requires a selector")
+		}
+		p := "/clean-snapshot?selector=" + url.QueryEscape(args[0])
+		if v, ok := getFlagValue(args, "--depth"); ok {
+			p += "&depth=" + v
+		}
+		if v, ok := getFlagValue(args, "--max-length"); ok {
+			p += "&max_length=" + v
+		}
+		if containsFlag(args, "--svg-full") {
+			p += "&svg_full=true"
+		}
+		if containsFlag(args, "--json") {
+			p += "&format=json"
+		}
+		return "GET", p, nil, "html", nil
 
 	default:
 		return "", "", nil, "", fmt.Errorf("unknown command: %s", cmd)
