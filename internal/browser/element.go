@@ -2,6 +2,7 @@ package browser
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"regexp"
 	"strings"
@@ -11,6 +12,8 @@ import (
 	"github.com/go-rod/rod/lib/input"
 	"github.com/go-rod/rod/lib/proto"
 )
+
+var base64Std = base64.StdEncoding
 
 // htmlTagNames is the set of standard HTML5 element tag names.
 var htmlTagNames = map[string]bool{
@@ -777,8 +780,17 @@ func (b *Browser) GetComputedStylesDiff(selector string, againstPageIndex int, p
 	return result, nil
 }
 
+// ElementScreenshotResult contains the screenshot data or error for a single element.
+type ElementScreenshotResult struct {
+	Index int    `json:"index"`
+	Data  []byte `json:"-"`
+	Error string `json:"error,omitempty"`
+}
+
 // GetMultipleElementScreenshots captures screenshots of all elements matching a CSS selector.
-func (b *Browser) GetMultipleElementScreenshots(selector string) ([][]byte, error) {
+// It saves each screenshot as it completes, skipping elements that fail or timeout.
+// perElementTimeout of 0 uses a default of 30 seconds per element.
+func (b *Browser) GetMultipleElementScreenshots(selector string, perElementTimeout ...time.Duration) ([]ElementScreenshotResult, error) {
 	page, err := b.CurrentPage()
 	if err != nil {
 		return nil, err
@@ -793,16 +805,41 @@ func (b *Browser) GetMultipleElementScreenshots(selector string) ([][]byte, erro
 		return nil, fmt.Errorf("no elements found for selector: %s", selector)
 	}
 
-	var screenshots [][]byte
-	for i, el := range elements {
-		data, err := el.Screenshot(proto.PageCaptureScreenshotFormatPng, 0)
-		if err != nil {
-			return nil, fmt.Errorf("screenshot failed for element %d: %w", i, err)
-		}
-		screenshots = append(screenshots, data)
+	timeout := 30 * time.Second
+	if len(perElementTimeout) > 0 && perElementTimeout[0] > 0 {
+		timeout = perElementTimeout[0]
 	}
 
-	return screenshots, nil
+	var results []ElementScreenshotResult
+	for i, el := range elements {
+		result := ElementScreenshotResult{Index: i}
+
+		// Use a goroutine with timeout for each element screenshot
+		type screenshotResult struct {
+			data []byte
+			err  error
+		}
+		ch := make(chan screenshotResult, 1)
+		go func(element *rod.Element) {
+			data, err := element.Screenshot(proto.PageCaptureScreenshotFormatPng, 0)
+			ch <- screenshotResult{data, err}
+		}(el)
+
+		select {
+		case sr := <-ch:
+			if sr.err != nil {
+				result.Error = fmt.Sprintf("screenshot failed: %v", sr.err)
+			} else {
+				result.Data = sr.data
+			}
+		case <-time.After(timeout):
+			result.Error = "screenshot timed out"
+		}
+
+		results = append(results, result)
+	}
+
+	return results, nil
 }
 
 // GetElementFullHeightScreenshot captures a screenshot of an element expanded to its full scroll height.
@@ -936,6 +973,324 @@ func (b *Browser) GetTextContent(selector string, mode string) (*TextResult, err
 	return tr, nil
 }
 
+// FontCheckResult contains the result of checking if a font is loaded and rendering.
+type FontCheckResult struct {
+	Family   string `json:"family"`
+	Declared bool   `json:"declared"`
+	Loaded   bool   `json:"loaded"`
+	Status   string `json:"status"`
+	Reason   string `json:"reason,omitempty"`
+	Fallback string `json:"fallback,omitempty"`
+}
+
+// CheckFont checks if a font family is actually loaded and rendering in the browser.
+// Uses the CSS Font Loading API (document.fonts) to determine real load status.
+func (b *Browser) CheckFont(family string) (*FontCheckResult, error) {
+	page, err := b.CurrentPage()
+	if err != nil {
+		return nil, err
+	}
+
+	result, err := page.Eval(`(family) => {
+		const res = {
+			family: family,
+			declared: false,
+			loaded: false,
+			status: "not_found",
+			reason: "",
+			fallback: ""
+		};
+
+		// Check document.fonts for @font-face declarations
+		const fonts = [...document.fonts.values()];
+		const matching = fonts.filter(f => f.family.replace(/['"]/g, '') === family);
+		if (matching.length > 0) {
+			res.declared = true;
+			const statuses = matching.map(f => f.status);
+			if (statuses.includes("loaded")) {
+				res.loaded = true;
+				res.status = "loaded";
+			} else if (statuses.includes("loading")) {
+				res.status = "loading";
+				res.reason = "font is still loading";
+			} else if (statuses.includes("error")) {
+				res.status = "error";
+				res.reason = "font failed to load (check CORS or URL)";
+			} else {
+				res.status = "unloaded";
+				res.reason = "font declared but not yet requested";
+			}
+		} else {
+			// Not in @font-face declarations — check if it's used in the page
+			// and detect via canvas rendering difference
+			const canvas = document.createElement('canvas');
+			const ctx = canvas.getContext('2d');
+			const testStr = 'mmmmmmmmmmlli';
+			ctx.font = '72px monospace';
+			const monoWidth = ctx.measureText(testStr).width;
+			ctx.font = '72px "' + family + '", monospace';
+			const testWidth = ctx.measureText(testStr).width;
+			if (testWidth !== monoWidth) {
+				// The font rendered differently from fallback — it's available
+				res.declared = true;
+				res.loaded = true;
+				res.status = "loaded";
+				res.reason = "system font or already cached";
+			}
+		}
+
+		// Find fallback: look for elements using this font family
+		if (!res.loaded) {
+			const allEls = document.querySelectorAll('*');
+			for (const el of allEls) {
+				const cs = window.getComputedStyle(el);
+				if (cs.fontFamily.includes(family)) {
+					const families = cs.fontFamily.split(',').map(f => f.trim().replace(/['"]/g, ''));
+					const idx = families.findIndex(f => f === family);
+					if (idx >= 0 && idx < families.length - 1) {
+						res.fallback = families.slice(idx + 1).join(', ');
+					}
+					break;
+				}
+			}
+		}
+
+		return res;
+	}`, family)
+	if err != nil {
+		return nil, fmt.Errorf("font check failed: %w", err)
+	}
+
+	raw := result.Value.Map()
+	return &FontCheckResult{
+		Family:   raw["family"].Str(),
+		Declared: raw["declared"].Bool(),
+		Loaded:   raw["loaded"].Bool(),
+		Status:   raw["status"].Str(),
+		Reason:   raw["reason"].Str(),
+		Fallback: raw["fallback"].Str(),
+	}, nil
+}
+
+// DownloadedImage contains info about a downloaded or screenshotted image.
+type DownloadedImage struct {
+	Index  int    `json:"index"`
+	Source string `json:"source,omitempty"` // img src URL
+	Method string `json:"method"`           // "download" or "screenshot"
+	Data   []byte `json:"-"`
+	Error  string `json:"error,omitempty"`
+}
+
+// DownloadImages downloads images found within elements matching a CSS selector.
+// It finds all <img> elements within scope and fetches their src via the browser.
+// If fallbackScreenshot is true and no <img> tags are found, it screenshots each matching element.
+func (b *Browser) DownloadImages(selector string, fallbackScreenshot bool) ([]DownloadedImage, error) {
+	page, err := b.CurrentPage()
+	if err != nil {
+		return nil, err
+	}
+
+	// First, try to find <img> elements within the selector scope
+	imgResult, err := page.Eval(`(sel) => {
+		const container = document.querySelector(sel);
+		if (!container) return { error: "selector not found" };
+		const imgs = container.querySelectorAll('img');
+		const results = [];
+		for (const img of imgs) {
+			if (img.src) {
+				results.push({ src: img.src, alt: img.alt || '' });
+			}
+		}
+		return { imgs: results, containerCount: container.querySelectorAll(sel === container.tagName.toLowerCase() ? '*' : sel).length };
+	}`, selector)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find images: %w", err)
+	}
+
+	raw := imgResult.Value.Map()
+	if errVal := raw["error"]; errVal.Val() != nil {
+		return nil, fmt.Errorf("%s: %s", errVal.Str(), selector)
+	}
+
+	imgs := raw["imgs"].Arr()
+
+	if len(imgs) > 0 {
+		// Download each image via browser fetch (avoids CORS issues)
+		var results []DownloadedImage
+		for i, img := range imgs {
+			src := img.Get("src").Str()
+			result := DownloadedImage{
+				Index:  i,
+				Source: src,
+				Method: "download",
+			}
+
+			// Fetch via browser to bypass CORS
+			fetchResult, err := page.Eval(`async (url) => {
+				try {
+					const resp = await fetch(url);
+					if (!resp.ok) return { error: resp.status + ' ' + resp.statusText };
+					const blob = await resp.blob();
+					const reader = new FileReader();
+					return new Promise((resolve) => {
+						reader.onload = () => resolve({ data: reader.result });
+						reader.onerror = () => resolve({ error: 'read failed' });
+						reader.readAsDataURL(blob);
+					});
+				} catch(e) {
+					return { error: e.message };
+				}
+			}`, src)
+			if err != nil {
+				result.Error = fmt.Sprintf("fetch failed: %v", err)
+				results = append(results, result)
+				continue
+			}
+
+			fetchMap := fetchResult.Value.Map()
+			if errVal := fetchMap["error"]; errVal.Val() != nil {
+				errStr := errVal.Str()
+				result.Error = errStr
+				results = append(results, result)
+				continue
+			}
+
+			// Parse data URL to raw bytes
+			dataURL := fetchMap["data"].Str()
+			if commaIdx := strings.Index(dataURL, ","); commaIdx >= 0 {
+				import64 := dataURL[commaIdx+1:]
+				// Decode base64
+				decoded, err := decodeBase64(import64)
+				if err != nil {
+					result.Error = fmt.Sprintf("decode failed: %v", err)
+				} else {
+					result.Data = decoded
+				}
+			} else {
+				result.Error = "invalid data URL"
+			}
+
+			results = append(results, result)
+		}
+		return results, nil
+	}
+
+	// No <img> tags found
+	if !fallbackScreenshot {
+		return nil, fmt.Errorf("no <img> elements found within selector: %s", selector)
+	}
+
+	// Fallback: screenshot matching elements
+	elements, err := page.Timeout(3 * time.Second).Elements(selector)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find elements for screenshot fallback: %w", err)
+	}
+
+	if len(elements) == 0 {
+		return nil, fmt.Errorf("no elements found for selector: %s", selector)
+	}
+
+	var results []DownloadedImage
+	for i, el := range elements {
+		result := DownloadedImage{
+			Index:  i,
+			Method: "screenshot",
+		}
+		data, err := el.Screenshot(proto.PageCaptureScreenshotFormatPng, 0)
+		if err != nil {
+			result.Error = fmt.Sprintf("screenshot failed: %v", err)
+		} else {
+			result.Data = data
+		}
+		results = append(results, result)
+	}
+	return results, nil
+}
+
+// decodeBase64 decodes a base64-encoded string (standard or URL-safe encoding).
+func decodeBase64(s string) ([]byte, error) {
+	return base64Std.DecodeString(s)
+}
+
+// ComputedStylesEntry contains computed styles for a single element in a multi-element query.
+type ComputedStylesEntry struct {
+	Index  int               `json:"index"`
+	Text   string            `json:"text"`
+	Styles map[string]string `json:"styles"`
+}
+
+// GetMultipleComputedStyles returns computed styles for all elements matching a CSS selector.
+func (b *Browser) GetMultipleComputedStyles(selector string, properties []string) ([]ComputedStylesEntry, error) {
+	page, err := b.CurrentPage()
+	if err != nil {
+		return nil, err
+	}
+
+	elements, err := page.Timeout(3 * time.Second).Elements(selector)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find elements: %w", err)
+	}
+
+	if len(elements) == 0 {
+		return nil, fmt.Errorf("no elements found for selector: %s", selector)
+	}
+
+	if properties == nil {
+		properties = []string{}
+	}
+
+	var results []ComputedStylesEntry
+	for i, el := range elements {
+		entry := ComputedStylesEntry{Index: i}
+
+		// Get text content
+		if text, err := el.Text(); err == nil {
+			t := strings.TrimSpace(text)
+			if len(t) > 100 {
+				t = t[:100] + "..."
+			}
+			entry.Text = t
+		}
+
+		result, err := el.Eval(`function(props) {
+			const cs = window.getComputedStyle(this);
+			const out = {};
+			if (props && props.length > 0) {
+				props.forEach(p => {
+					const v = cs[p] || cs.getPropertyValue(p);
+					if (v !== undefined && v !== "") out[p] = v;
+				});
+			} else {
+				const defaults = [
+					"fontSize", "fontWeight", "fontFamily", "lineHeight", "letterSpacing",
+					"color", "backgroundColor", "display", "textAlign", "padding", "margin",
+					"borderRadius", "width", "height", "position", "opacity",
+					"textDecoration", "textTransform", "fontStyle",
+					"fontFeatureSettings", "textRendering", "webkitFontSmoothing", "fontKerning"
+				];
+				defaults.forEach(p => {
+					const v = cs[p];
+					if (v !== undefined && v !== "") out[p] = v;
+				});
+			}
+			return out;
+		}`, properties)
+		if err != nil {
+			entry.Styles = map[string]string{"error": err.Error()}
+			results = append(results, entry)
+			continue
+		}
+
+		entry.Styles = make(map[string]string)
+		for k, v := range result.Value.Map() {
+			entry.Styles[k] = v.Str()
+		}
+		results = append(results, entry)
+	}
+
+	return results, nil
+}
+
 // GetComputedStyles returns computed CSS properties for an element identified by CSS selector.
 // If properties is empty, a useful default set of layout/typography properties is returned.
 func (b *Browser) GetComputedStyles(selector string, properties []string) (map[string]string, error) {
@@ -967,7 +1322,8 @@ func (b *Browser) GetComputedStyles(selector string, properties []string) (map[s
 				"fontSize", "fontWeight", "fontFamily", "lineHeight", "letterSpacing",
 				"color", "backgroundColor", "display", "textAlign", "padding", "margin",
 				"borderRadius", "width", "height", "position", "opacity",
-				"textDecoration", "textTransform", "fontStyle"
+				"textDecoration", "textTransform", "fontStyle",
+				"fontFeatureSettings", "textRendering", "webkitFontSmoothing", "fontKerning"
 			];
 			defaults.forEach(p => {
 				const v = cs[p];

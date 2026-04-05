@@ -285,17 +285,38 @@ func TestBrowserGetComputedStylesDiff(t *testing.T) {
 
 func TestBrowserGetMultipleElementScreenshots(t *testing.T) {
 	resetFixture(t)
-	screenshots, err := testBrowser.GetMultipleElementScreenshots(".card")
+	results, err := testBrowser.GetMultipleElementScreenshots(".card")
 	if err != nil {
 		t.Fatalf("GetMultipleElementScreenshots error: %v", err)
 	}
-	if len(screenshots) != 3 {
-		t.Errorf("expected 3 screenshots, got %d", len(screenshots))
+	if len(results) != 3 {
+		t.Errorf("expected 3 results, got %d", len(results))
 	}
-	for i, data := range screenshots {
-		if len(data) == 0 {
-			t.Errorf("screenshot %d is empty", i)
+	for _, r := range results {
+		if r.Error != "" {
+			t.Errorf("screenshot %d failed: %s", r.Index, r.Error)
 		}
+		if len(r.Data) == 0 {
+			t.Errorf("screenshot %d is empty", r.Index)
+		}
+	}
+}
+
+func TestBrowserGetMultipleElementScreenshots_WithTimeout(t *testing.T) {
+	resetFixture(t)
+	// Use a generous timeout — all 3 cards should succeed
+	results, err := testBrowser.GetMultipleElementScreenshots(".card", 30*time.Second)
+	if err != nil {
+		t.Fatalf("GetMultipleElementScreenshots error: %v", err)
+	}
+	succeeded := 0
+	for _, r := range results {
+		if r.Error == "" {
+			succeeded++
+		}
+	}
+	if succeeded != 3 {
+		t.Errorf("expected 3 successful screenshots, got %d", succeeded)
 	}
 }
 
@@ -468,6 +489,96 @@ func TestBrowserScrollElement_ToTop(t *testing.T) {
 	}
 }
 
+func TestBrowserDownloadImages_WithImgs(t *testing.T) {
+	resetFixture(t)
+	results, err := testBrowser.DownloadImages("#image-section", false)
+	if err != nil {
+		t.Fatalf("DownloadImages error: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected 2 images, got %d", len(results))
+	}
+	for _, r := range results {
+		if r.Error != "" {
+			t.Errorf("image %d error: %s", r.Index, r.Error)
+		}
+		if r.Method != "download" {
+			t.Errorf("image %d method = %q, want 'download'", r.Index, r.Method)
+		}
+		if len(r.Data) == 0 {
+			t.Errorf("image %d has empty data", r.Index)
+		}
+	}
+}
+
+func TestBrowserDownloadImages_FallbackScreenshot(t *testing.T) {
+	resetFixture(t)
+	results, err := testBrowser.DownloadImages("#no-images-section .visual-card", true)
+	if err != nil {
+		t.Fatalf("DownloadImages fallback error: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected 2 screenshots, got %d", len(results))
+	}
+	for _, r := range results {
+		if r.Error != "" {
+			t.Errorf("screenshot %d error: %s", r.Index, r.Error)
+		}
+		if r.Method != "screenshot" {
+			t.Errorf("screenshot %d method = %q, want 'screenshot'", r.Index, r.Method)
+		}
+	}
+}
+
+func TestBrowserDownloadImages_NoImgsNoFallback(t *testing.T) {
+	resetFixture(t)
+	_, err := testBrowser.DownloadImages("#no-images-section .visual-card", false)
+	if err == nil {
+		t.Error("expected error when no <img> tags and no fallback")
+	}
+}
+
+func TestBrowserDownloadImages_NotFound(t *testing.T) {
+	resetFixture(t)
+	_, err := testBrowser.DownloadImages("#nonexistent-section", false)
+	if err == nil {
+		t.Error("expected error for nonexistent selector")
+	}
+}
+
+func TestBrowserCheckFont_NotFound(t *testing.T) {
+	resetFixture(t)
+	result, err := testBrowser.CheckFont("NonExistentFontXYZ")
+	if err != nil {
+		t.Fatalf("CheckFont error: %v", err)
+	}
+	if result.Family != "NonExistentFontXYZ" {
+		t.Errorf("family = %q, want 'NonExistentFontXYZ'", result.Family)
+	}
+	if result.Loaded {
+		t.Error("expected loaded=false for nonexistent font")
+	}
+	if result.Status == "loaded" {
+		t.Error("expected status != 'loaded' for nonexistent font")
+	}
+}
+
+func TestBrowserCheckFont_SystemFont(t *testing.T) {
+	resetFixture(t)
+	// sans-serif is always available as a generic family
+	result, err := testBrowser.CheckFont("sans-serif")
+	if err != nil {
+		t.Fatalf("CheckFont error: %v", err)
+	}
+	if result.Family != "sans-serif" {
+		t.Errorf("family = %q, want 'sans-serif'", result.Family)
+	}
+	// sans-serif should pass document.fonts.check
+	if !result.Loaded {
+		t.Log("sans-serif reported as not loaded — document.fonts.check behavior may vary")
+	}
+}
+
 func TestBrowserGetComputedStyles(t *testing.T) {
 	resetFixture(t)
 	styles, err := testBrowser.GetComputedStyles("#main-heading", nil)
@@ -482,6 +593,63 @@ func TestBrowserGetComputedStyles(t *testing.T) {
 	}
 	if fw, ok := styles["fontWeight"]; !ok || fw != "700" {
 		t.Errorf("fontWeight = %q, want '700'", fw)
+	}
+}
+
+func TestBrowserGetComputedStyles_FontRenderingDefaults(t *testing.T) {
+	resetFixture(t)
+	styles, err := testBrowser.GetComputedStyles("#main-heading", nil)
+	if err != nil {
+		t.Fatalf("GetComputedStyles error: %v", err)
+	}
+	for _, prop := range []string{"fontFeatureSettings", "textRendering", "fontKerning"} {
+		if _, ok := styles[prop]; !ok {
+			t.Errorf("expected %q in default computed styles", prop)
+		}
+	}
+}
+
+func TestBrowserGetMultipleComputedStyles(t *testing.T) {
+	resetFixture(t)
+	entries, err := testBrowser.GetMultipleComputedStyles(".card h3", nil)
+	if err != nil {
+		t.Fatalf("GetMultipleComputedStyles error: %v", err)
+	}
+	if len(entries) != 3 {
+		t.Fatalf("expected 3 entries, got %d", len(entries))
+	}
+	for _, e := range entries {
+		if len(e.Styles) == 0 {
+			t.Errorf("entry %d has empty styles", e.Index)
+		}
+		if _, ok := e.Styles["fontSize"]; !ok {
+			t.Errorf("entry %d missing fontSize", e.Index)
+		}
+	}
+	// Verify text is populated
+	if entries[0].Text == "" {
+		t.Error("expected non-empty text on first entry")
+	}
+}
+
+func TestBrowserGetMultipleComputedStyles_WithProperties(t *testing.T) {
+	resetFixture(t)
+	entries, err := testBrowser.GetMultipleComputedStyles(".card h3", []string{"fontSize", "color"})
+	if err != nil {
+		t.Fatalf("GetMultipleComputedStyles error: %v", err)
+	}
+	for _, e := range entries {
+		if len(e.Styles) != 2 {
+			t.Errorf("entry %d expected 2 properties, got %d", e.Index, len(e.Styles))
+		}
+	}
+}
+
+func TestBrowserGetMultipleComputedStyles_NotFound(t *testing.T) {
+	resetFixture(t)
+	_, err := testBrowser.GetMultipleComputedStyles(".nonexistent", nil)
+	if err == nil {
+		t.Error("expected error for nonexistent selector")
 	}
 }
 

@@ -64,6 +64,12 @@ func (s *Server) registerRoutes() {
 	// Text
 	s.mux.HandleFunc("/api/v1/text", s.handleText)
 
+	// Font check
+	s.mux.HandleFunc("/api/v1/font-check", s.handleFontCheck)
+
+	// Download images
+	s.mux.HandleFunc("/api/v1/download-images", s.handleDownloadImages)
+
 	// AI-powered
 	s.mux.HandleFunc("/api/v1/ask", s.handleAsk)
 }
@@ -466,7 +472,14 @@ func (s *Server) handleScreenshot(w http.ResponseWriter, r *http.Request) {
 
 	// Multiple element screenshots
 	if selectorAll != "" {
-		screenshots, err := s.browser.GetMultipleElementScreenshots(selectorAll)
+		timeoutMs := 30000
+		if t := r.URL.Query().Get("timeout"); t != "" {
+			if n, err := strconv.Atoi(t); err == nil && n > 0 {
+				timeoutMs = n
+			}
+		}
+
+		results, err := s.browser.GetMultipleElementScreenshots(selectorAll, time.Duration(timeoutMs)*time.Millisecond)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, fmt.Sprintf("screenshot failed: %v", err))
 			return
@@ -476,7 +489,6 @@ func (s *Server) handleScreenshot(w http.ResponseWriter, r *http.Request) {
 		if dir == "" {
 			dir = os.TempDir()
 		} else {
-			// Normalize path to collapse any .. segments
 			dir = filepath.Clean(dir)
 			if err := os.MkdirAll(dir, 0755); err != nil {
 				writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to create output dir: %v", err))
@@ -484,25 +496,42 @@ func (s *Server) handleScreenshot(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		var results []map[string]interface{}
-		for i, data := range screenshots {
-			filename := fmt.Sprintf("%d.png", i+1)
-			filePath := filepath.Join(dir, filename)
-			if err := os.WriteFile(filePath, data, 0644); err != nil {
-				writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to save screenshot %d: %v", i+1, err))
-				return
+		var files []map[string]interface{}
+		var skipped []map[string]interface{}
+		for _, sr := range results {
+			if sr.Error != "" {
+				skipped = append(skipped, map[string]interface{}{
+					"index": sr.Index + 1,
+					"error": sr.Error,
+				})
+				continue
 			}
-			results = append(results, map[string]interface{}{
-				"index": i + 1,
+			filename := fmt.Sprintf("%d.png", sr.Index+1)
+			filePath := filepath.Join(dir, filename)
+			if err := os.WriteFile(filePath, sr.Data, 0644); err != nil {
+				skipped = append(skipped, map[string]interface{}{
+					"index": sr.Index + 1,
+					"error": fmt.Sprintf("failed to save: %v", err),
+				})
+				continue
+			}
+			files = append(files, map[string]interface{}{
+				"index": sr.Index + 1,
 				"path":  filePath,
-				"size":  len(data),
+				"size":  len(sr.Data),
 			})
 		}
 
-		writeSuccess(w, map[string]interface{}{
-			"captured": len(results),
-			"files":    results,
-		})
+		resp := map[string]interface{}{
+			"captured": len(files),
+			"total":    len(results),
+			"files":    files,
+		}
+		if len(skipped) > 0 {
+			resp["skipped"] = skipped
+		}
+
+		writeSuccess(w, resp)
 		return
 	}
 
@@ -706,6 +735,141 @@ func (s *Server) handleText(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleFontCheck handles GET /api/v1/font-check
+func (s *Server) handleFontCheck(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	family := r.URL.Query().Get("family")
+	if family == "" {
+		writeError(w, http.StatusBadRequest, "family is required")
+		return
+	}
+
+	result, err := s.browser.CheckFont(family)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("font check failed: %v", err))
+		return
+	}
+
+	resp := map[string]interface{}{
+		"family":   result.Family,
+		"declared": result.Declared,
+		"loaded":   result.Loaded,
+		"status":   result.Status,
+	}
+	if result.Reason != "" {
+		resp["reason"] = result.Reason
+	}
+	if result.Fallback != "" {
+		resp["fallback"] = result.Fallback
+	}
+
+	writeSuccess(w, resp)
+}
+
+// handleDownloadImages handles POST /api/v1/download-images
+func (s *Server) handleDownloadImages(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	var req struct {
+		Selector           string `json:"selector"`
+		OutputDir          string `json:"output_dir"`
+		FallbackScreenshot bool   `json:"fallback_screenshot"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if req.Selector == "" {
+		writeError(w, http.StatusBadRequest, "selector is required")
+		return
+	}
+
+	dir := req.OutputDir
+	if dir == "" {
+		dir = os.TempDir()
+	} else {
+		dir = filepath.Clean(dir)
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to create output dir: %v", err))
+			return
+		}
+	}
+
+	images, err := s.browser.DownloadImages(req.Selector, req.FallbackScreenshot)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("download images failed: %v", err))
+		return
+	}
+
+	var files []map[string]interface{}
+	var skipped []map[string]interface{}
+	for _, img := range images {
+		if img.Error != "" {
+			skipped = append(skipped, map[string]interface{}{
+				"index":  img.Index + 1,
+				"error":  img.Error,
+				"method": img.Method,
+				"source": img.Source,
+			})
+			continue
+		}
+
+		ext := ".png"
+		if img.Method == "download" && img.Source != "" {
+			// Detect extension from source URL
+			if strings.HasSuffix(strings.ToLower(img.Source), ".jpg") || strings.HasSuffix(strings.ToLower(img.Source), ".jpeg") {
+				ext = ".jpg"
+			} else if strings.HasSuffix(strings.ToLower(img.Source), ".svg") {
+				ext = ".svg"
+			} else if strings.HasSuffix(strings.ToLower(img.Source), ".webp") {
+				ext = ".webp"
+			} else if strings.HasSuffix(strings.ToLower(img.Source), ".gif") {
+				ext = ".gif"
+			}
+		}
+
+		filename := fmt.Sprintf("%d%s", img.Index+1, ext)
+		filePath := filepath.Join(dir, filename)
+		if err := os.WriteFile(filePath, img.Data, 0644); err != nil {
+			skipped = append(skipped, map[string]interface{}{
+				"index": img.Index + 1,
+				"error": fmt.Sprintf("failed to save: %v", err),
+			})
+			continue
+		}
+
+		entry := map[string]interface{}{
+			"index":  img.Index + 1,
+			"path":   filePath,
+			"size":   len(img.Data),
+			"method": img.Method,
+		}
+		if img.Source != "" {
+			entry["source"] = img.Source
+		}
+		files = append(files, entry)
+	}
+
+	resp := map[string]interface{}{
+		"captured": len(files),
+		"total":    len(images),
+		"files":    files,
+	}
+	if len(skipped) > 0 {
+		resp["skipped"] = skipped
+	}
+
+	writeSuccess(w, resp)
+}
+
 // handleComputedStylesDiff handles GET /api/v1/computed-styles-diff
 func (s *Server) handleComputedStylesDiff(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -802,8 +966,10 @@ func (s *Server) handleComputedStyles(w http.ResponseWriter, r *http.Request) {
 	}
 
 	selector := r.URL.Query().Get("selector")
-	if selector == "" {
-		writeError(w, http.StatusBadRequest, "selector is required")
+	selectorAll := r.URL.Query().Get("selector_all")
+
+	if selector == "" && selectorAll == "" {
+		writeError(w, http.StatusBadRequest, "selector or selector_all is required")
 		return
 	}
 
@@ -812,6 +978,23 @@ func (s *Server) handleComputedStyles(w http.ResponseWriter, r *http.Request) {
 		properties = strings.Split(p, ",")
 	}
 
+	// Multiple elements mode
+	if selectorAll != "" {
+		entries, err := s.browser.GetMultipleComputedStyles(selectorAll, properties)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to get computed styles: %v", err))
+			return
+		}
+
+		writeSuccess(w, map[string]interface{}{
+			"selector": selectorAll,
+			"count":    len(entries),
+			"elements": entries,
+		})
+		return
+	}
+
+	// Single element mode
 	styles, err := s.browser.GetComputedStyles(selector, properties)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to get computed styles: %v", err))

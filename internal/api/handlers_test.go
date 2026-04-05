@@ -235,6 +235,30 @@ func TestHandleScreenshot_SelectorAll(t *testing.T) {
 	}
 }
 
+func TestHandleScreenshot_SelectorAll_WithTimeout(t *testing.T) {
+	resetPage(t)
+	rr := doGet(testServer, "/screenshot?selector_all=.card&timeout=30000")
+	if rr.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d (body: %s)", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	resp := parseResponse(t, rr)
+	if !resp.Success {
+		t.Errorf("expected success=true, error: %s", resp.Error)
+	}
+	data, ok := resp.Data.(map[string]any)
+	if !ok {
+		t.Fatal("expected data to be a map")
+	}
+	total, _ := data["total"].(float64)
+	captured, _ := data["captured"].(float64)
+	if total != 3 {
+		t.Errorf("total = %v, want 3", total)
+	}
+	if captured != 3 {
+		t.Errorf("captured = %v, want 3", captured)
+	}
+}
+
 func TestHandleScreenshot_SelectorAll_WithOutputDir(t *testing.T) {
 	resetPage(t)
 	dir := t.TempDir()
@@ -393,10 +417,123 @@ func TestHandleComputedStyles_WithProperties(t *testing.T) {
 	}
 }
 
+func TestHandleComputedStyles_SelectorAll(t *testing.T) {
+	resetPage(t)
+	rr := doGet(testServer, "/computed-styles?selector_all=.card+h3")
+	if rr.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d (body: %s)", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	resp := parseResponse(t, rr)
+	if !resp.Success {
+		t.Errorf("expected success=true, error: %s", resp.Error)
+	}
+	data, ok := resp.Data.(map[string]any)
+	if !ok {
+		t.Fatal("expected data to be a map")
+	}
+	count, _ := data["count"].(float64)
+	if count != 3 {
+		t.Errorf("count = %v, want 3", count)
+	}
+	elements, ok := data["elements"].([]any)
+	if !ok || len(elements) != 3 {
+		t.Errorf("expected 3 elements, got %v", data["elements"])
+	}
+}
+
 func TestHandleComputedStyles_MissingSelector(t *testing.T) {
 	rr := doGet(testServer, "/computed-styles")
 	if rr.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want %d", rr.Code, http.StatusBadRequest)
+	}
+}
+
+func TestHandleDownloadImages(t *testing.T) {
+	resetPage(t)
+	rr := doPost(testServer, "/download-images", map[string]any{
+		"selector": "#image-section",
+	})
+	if rr.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d (body: %s)", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	resp := parseResponse(t, rr)
+	if !resp.Success {
+		t.Errorf("expected success=true, error: %s", resp.Error)
+	}
+	data, ok := resp.Data.(map[string]any)
+	if !ok {
+		t.Fatal("expected data to be a map")
+	}
+	captured, _ := data["captured"].(float64)
+	if captured != 2 {
+		t.Errorf("captured = %v, want 2", captured)
+	}
+}
+
+func TestHandleDownloadImages_FallbackScreenshot(t *testing.T) {
+	resetPage(t)
+	rr := doPost(testServer, "/download-images", map[string]any{
+		"selector":            "#no-images-section .visual-card",
+		"fallback_screenshot": true,
+	})
+	if rr.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d (body: %s)", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	resp := parseResponse(t, rr)
+	if !resp.Success {
+		t.Errorf("expected success=true, error: %s", resp.Error)
+	}
+}
+
+func TestHandleDownloadImages_MissingSelector(t *testing.T) {
+	rr := doPost(testServer, "/download-images", map[string]any{})
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", rr.Code, http.StatusBadRequest)
+	}
+}
+
+func TestHandleFontCheck(t *testing.T) {
+	resetPage(t)
+	rr := doGet(testServer, "/font-check?family=sans-serif")
+	if rr.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d (body: %s)", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	resp := parseResponse(t, rr)
+	if !resp.Success {
+		t.Errorf("expected success=true, error: %s", resp.Error)
+	}
+	data, ok := resp.Data.(map[string]any)
+	if !ok {
+		t.Fatal("expected data to be a map")
+	}
+	if data["family"] != "sans-serif" {
+		t.Errorf("family = %v, want 'sans-serif'", data["family"])
+	}
+}
+
+func TestHandleFontCheck_MissingFamily(t *testing.T) {
+	rr := doGet(testServer, "/font-check")
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", rr.Code, http.StatusBadRequest)
+	}
+}
+
+func TestHandleFontCheck_NotFound(t *testing.T) {
+	resetPage(t)
+	rr := doGet(testServer, "/font-check?family=NonExistentFontXYZ")
+	if rr.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+	resp := parseResponse(t, rr)
+	if !resp.Success {
+		t.Errorf("expected success=true, error: %s", resp.Error)
+	}
+	data, ok := resp.Data.(map[string]any)
+	if !ok {
+		t.Fatal("expected data to be a map")
+	}
+	if data["loaded"] != false {
+		t.Error("expected loaded=false for nonexistent font")
 	}
 }
 

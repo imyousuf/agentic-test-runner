@@ -142,7 +142,7 @@ Returns the accessibility tree of visible page elements with unique identifiers 
 
 ### screenshot
 ```bash
-atr browser screenshot --file [--full] [--selector SELECTOR] [--selector-all SELECTOR] [--output-dir DIR]
+atr browser screenshot --file [--full] [--selector SELECTOR] [--selector-all SELECTOR] [--output-dir DIR] [--timeout MS]
 ```
 
 | Flag | Short | Description |
@@ -152,12 +152,13 @@ atr browser screenshot --file [--full] [--selector SELECTOR] [--selector-all SEL
 | `--selector` | `-s` | CSS selector of element to screenshot |
 | `--selector-all` | | CSS selector matching multiple elements |
 | `--output-dir` | | Directory to save screenshots (with --selector-all) |
+| `--timeout` | | Per-element timeout in ms (with --selector-all, default: 30000) |
 
 With `--file`, screenshots are saved to `/tmp/` with a timestamped filename.
 
 Combine `--selector` with `--full` to capture an element's full scrollable height (useful for modals/dialogs with overflow).
 
-Use `--selector-all` to screenshot every matching element as numbered PNGs (1.png, 2.png, etc.).
+Use `--selector-all` to screenshot every matching element as numbered PNGs (1.png, 2.png, etc.). Elements that fail or timeout are skipped and reported separately — successful screenshots are always saved.
 
 Examples:
 ```bash
@@ -172,20 +173,23 @@ atr browser screenshot --file --selector-all ".card" --output-dir ./cards/  # Sa
 
 ### computed-styles
 ```bash
-atr browser computed-styles <selector> [--properties "prop1,prop2"]
+atr browser computed-styles <selector> [--properties "prop1,prop2"] [--selector-all SELECTOR]
 ```
 
 | Flag | Description |
 |------|-------------|
-| `--properties` | Comma-separated CSS properties to return (default: common layout/typography set) |
+| `--properties` | Comma-separated CSS properties to return (default: common layout/typography/font-rendering set) |
+| `--selector-all` | CSS selector matching multiple elements — returns styles for each in an array |
 
-Returns computed CSS styles for an element as JSON.
+Returns computed CSS styles for an element as JSON. The default property set includes font rendering properties (`fontFeatureSettings`, `textRendering`, `webkitFontSmoothing`, `fontKerning`) alongside layout and typography properties.
 
 Examples:
 ```bash
 atr browser computed-styles "h1"
 atr browser computed-styles "h1" --properties "fontSize,fontWeight,color"
 atr browser computed-styles ".hero-section"
+atr browser computed-styles --selector-all "footer a" --json    # Styles for all footer links
+atr browser computed-styles --selector-all ".card h3"           # Styles for all card headings
 ```
 
 ### computed-styles-diff
@@ -268,6 +272,49 @@ Examples:
 atr browser scroll -s "[role=dialog]" --y 800
 atr browser scroll -s "#modal" --to-bottom
 atr browser scroll -s ".carousel" --x 400
+```
+
+### font-check
+```bash
+atr browser font-check <font-family>
+```
+
+Checks if a font family is actually loaded and rendering in the browser using the CSS Font Loading API. Unlike `computed-styles` which reports the declared `@font-face` family, `font-check` detects whether the font was actually downloaded and can render.
+
+Returns:
+- `family` — the queried font name
+- `declared` — whether a `@font-face` declaration exists
+- `loaded` — whether the font is actually loaded
+- `status` — `loaded`, `loading`, `error`, `unloaded`, or `not_found`
+- `reason` — explanation for non-loaded status
+- `fallback` — the fallback fonts from the CSS stack
+
+Examples:
+```bash
+atr browser font-check "sohne-var"
+atr browser font-check "Inter"
+atr browser font-check "Arial"
+```
+
+### download-images
+```bash
+atr browser download-images <selector> [--output-dir DIR] [--fallback-screenshot]
+```
+
+| Flag | Description |
+|------|-------------|
+| `--output-dir` | Directory to save images (default: /tmp/) |
+| `--fallback-screenshot` | Screenshot elements when no `<img>` tags found |
+
+Downloads images found within elements matching a CSS selector. Finds all `<img>` elements within scope and fetches their `src` URLs via the browser (bypassing CORS). With `--fallback-screenshot`, falls back to screenshotting each matching element when no `<img>` tags are found.
+
+Files are saved as numbered images (1.png, 2.jpg, etc.).
+
+Examples:
+```bash
+atr browser download-images "section:nth-of-type(2)" --output-dir ./images/
+atr browser download-images ".bento-card" --fallback-screenshot --output-dir ./cards/
+atr browser download-images "#gallery" --output-dir /tmp/gallery/
 ```
 
 ### html

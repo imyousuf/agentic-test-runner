@@ -19,12 +19,15 @@ CLI/API commands that have no MCP tool equivalent yet.
 | CLI Command | API Endpoint | Priority |
 |-------------|-------------|----------|
 | `computed-styles` | `GET /api/v1/computed-styles` | High — most frequent operation in style pipelines |
+| `computed-styles --selector-all` | `GET /api/v1/computed-styles?selector_all=` | High — bulk style verification |
 | `computed-styles-diff` | `GET /api/v1/computed-styles-diff` | High — cross-page style comparison |
 | `text` | `GET /api/v1/text` | High — structured text extraction |
 | `wait` | `POST /api/v1/wait` | High — element readiness check |
 | `scroll` | `POST /api/v1/scroll` | Medium — modal/dialog scrolling |
 | `screenshot --selector-all` | `GET /api/v1/screenshot?selector_all=` | Medium — batch element screenshots |
 | `screenshot --selector --full` | `GET /api/v1/screenshot?selector=&full=true` | Medium — full-height element capture |
+| `font-check` | `GET /api/v1/font-check` | High — verifies actual font load status |
+| `download-images` | `POST /api/v1/download-images` | Medium — download/screenshot images within elements |
 
 ## MCP Tools That Already Exist
 

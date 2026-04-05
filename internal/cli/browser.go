@@ -97,6 +97,12 @@ to control a browser via shell commands.`,
 	browserCmd.AddCommand(newBrowserNetworkCmd())
 	browserCmd.AddCommand(newBrowserErrorsCmd())
 
+	// Font
+	browserCmd.AddCommand(newBrowserFontCheckCmd())
+
+	// Download images
+	browserCmd.AddCommand(newBrowserDownloadImagesCmd())
+
 	// AI-powered
 	browserCmd.AddCommand(newBrowserAskCmd())
 
@@ -466,15 +472,25 @@ Useful for modals, dialogs, and other elements with overflow scroll/auto.`,
 
 func newBrowserComputedStylesCmd() *cobra.Command {
 	var properties string
+	var selectorAll string
 	cmd := &cobra.Command{
-		Use:   "computed-styles <selector>",
+		Use:   "computed-styles [selector]",
 		Short: "Get computed CSS styles for an element",
 		Long: `Get computed CSS styles for an element identified by CSS selector.
 Returns a JSON object of CSS property names to their computed values.
-Without --properties, returns a default set of common layout and typography properties.`,
-		Args: cobra.ExactArgs(1),
+Without --properties, returns a default set of common layout and typography properties.
+
+Use --selector-all to return computed styles for every matching element in an array.`,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			path := "/computed-styles?selector=" + url.QueryEscape(args[0])
+			path := "/computed-styles?"
+			if selectorAll != "" {
+				path += "selector_all=" + url.QueryEscape(selectorAll)
+			} else if len(args) > 0 {
+				path += "selector=" + url.QueryEscape(args[0])
+			} else {
+				return fmt.Errorf("selector argument or --selector-all flag is required")
+			}
 			if properties != "" {
 				path += "&properties=" + url.QueryEscape(properties)
 			}
@@ -482,6 +498,7 @@ Without --properties, returns a default set of common layout and typography prop
 		},
 	}
 	cmd.Flags().StringVar(&properties, "properties", "", "Comma-separated CSS properties to return (e.g., fontSize,color,fontWeight)")
+	cmd.Flags().StringVar(&selectorAll, "selector-all", "", "CSS selector matching multiple elements to get styles for")
 	return cmd
 }
 
@@ -647,6 +664,7 @@ func newBrowserScreenshotCmd() *cobra.Command {
 	var selector string
 	var selectorAll string
 	var outputDir string
+	var timeout int
 	cmd := &cobra.Command{
 		Use:   "screenshot",
 		Short: "Capture screenshot",
@@ -657,7 +675,9 @@ Use --selector to screenshot a specific element by CSS selector (e.g., "header",
 the element's full scrollable height (useful for modals and dialogs with overflow).
 
 Use --selector-all to screenshot every element matching a selector, saving each as
-a numbered PNG file (1.png, 2.png, etc.) in --output-dir or /tmp/.`,
+a numbered PNG file (1.png, 2.png, etc.) in --output-dir or /tmp/. Elements that
+timeout or fail are skipped and reported separately. Use --timeout to set per-element
+timeout in milliseconds (default 30000).`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			path := "/screenshot"
 			params := []string{}
@@ -665,6 +685,9 @@ a numbered PNG file (1.png, 2.png, etc.) in --output-dir or /tmp/.`,
 				params = append(params, "selector_all="+url.QueryEscape(selectorAll))
 				if outputDir != "" {
 					params = append(params, "output_dir="+url.QueryEscape(outputDir))
+				}
+				if timeout != 30000 {
+					params = append(params, "timeout="+strconv.Itoa(timeout))
 				}
 			} else if selector != "" {
 				params = append(params, "selector="+url.QueryEscape(selector))
@@ -689,6 +712,7 @@ a numbered PNG file (1.png, 2.png, etc.) in --output-dir or /tmp/.`,
 	cmd.Flags().StringVarP(&selector, "selector", "s", "", "CSS selector of element to screenshot")
 	cmd.Flags().StringVar(&selectorAll, "selector-all", "", "CSS selector matching multiple elements to screenshot")
 	cmd.Flags().StringVar(&outputDir, "output-dir", "", "Directory to save screenshots (used with --selector-all)")
+	cmd.Flags().IntVar(&timeout, "timeout", 30000, "Per-element timeout in milliseconds (used with --selector-all)")
 	return cmd
 }
 
@@ -760,6 +784,52 @@ func newBrowserErrorsCmd() *cobra.Command {
 		Use:   "errors",
 		Short: "Get failed requests",
 		RunE:  func(cmd *cobra.Command, args []string) error { return apiGet("/errors") },
+	}
+}
+
+// Download images command
+
+func newBrowserDownloadImagesCmd() *cobra.Command {
+	var outputDir string
+	var fallbackScreenshot bool
+	cmd := &cobra.Command{
+		Use:   "download-images <selector>",
+		Short: "Download images found within matching elements",
+		Long: `Download images found within elements matching a CSS selector.
+
+Finds all <img> elements within the selector scope and downloads their src URLs
+via the browser (bypassing CORS). If --fallback-screenshot is set and no <img>
+tags are found, screenshots each matching element instead.
+
+Files are saved as numbered images (1.png, 2.jpg, etc.) in --output-dir or /tmp/.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return apiPost("/download-images", map[string]interface{}{
+				"selector":            args[0],
+				"output_dir":          outputDir,
+				"fallback_screenshot": fallbackScreenshot,
+			})
+		},
+	}
+	cmd.Flags().StringVar(&outputDir, "output-dir", "", "Directory to save images (default: /tmp/)")
+	cmd.Flags().BoolVar(&fallbackScreenshot, "fallback-screenshot", false, "Screenshot elements when no <img> tags found")
+	return cmd
+}
+
+// Font commands
+
+func newBrowserFontCheckCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "font-check <font-family>",
+		Short: "Check if a font is loaded and rendering",
+		Long: `Check if a font family is actually loaded and rendering in the browser.
+Uses the CSS Font Loading API to verify the font's real status rather than
+just the declared @font-face family name. Useful for detecting CORS-blocked
+fonts or failed downloads that computed-styles won't reveal.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return apiGet("/font-check?family=" + url.QueryEscape(args[0]))
+		},
 	}
 }
 

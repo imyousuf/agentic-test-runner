@@ -77,6 +77,7 @@ Once running, use navigation and interaction commands to control the browser.
 | `atr browser drag <from> <to>` | Drag element |
 | `atr browser wait <selector> [--timeout] [--visible]` | Wait for element to appear |
 | `atr browser scroll --selector "<sel>" [--y N] [--to-bottom]` | Scroll inside an element |
+| `atr browser download-images "<sel>" [--output-dir] [--fallback-screenshot]` | Download/screenshot images within elements |
 
 ### Inspection Commands
 
@@ -85,16 +86,18 @@ Once running, use navigation and interaction commands to control the browser.
 | `atr browser snapshot [--verbose]` | Get page elements with UIDs |
 | `atr browser screenshot --file [--full] [-s SELECTOR]` | Capture screenshot (saves to /tmp/) |
 | `atr browser screenshot --file --selector-all "<sel>"` | Screenshot all matching elements |
-| `atr browser computed-styles "<selector>" [--properties]` | Get computed CSS styles |
+| `atr browser computed-styles "<selector>" [--properties]` | Get computed CSS styles for single element |
+| `atr browser computed-styles --selector-all "<sel>"` | Get computed CSS styles for all matching elements |
 | `atr browser computed-styles-diff "<sel>" --against N` | Compare styles between pages |
 | `atr browser text "<selector>" [--flat\|--links\|--headings]` | Extract text content |
+| `atr browser font-check "<font-family>"` | Check if font is loaded and rendering |
 | `atr browser html` | Get page HTML |
 | `atr browser url` | Get current URL |
 | `atr browser title` | Get page title |
 | `atr browser eval <script>` | Execute JavaScript |
 | `atr browser ask "<question>"` | Ask a question about the current page |
 
-**Screenshot Note:** Use `--file` to save screenshots to `/tmp/` with a timestamped filename (e.g., `/tmp/atr-screenshot-20240105-103045.png`). Add `--full` for full-page screenshots. Use `--selector` / `-s` to screenshot a specific element by CSS selector (e.g., `-s "header"`, `-s "#nav"`, `-s "main > section:nth-child(2)"`). Combine `--selector` with `--full` to capture an element's full scrollable height. Use `--selector-all` to screenshot every matching element as numbered PNGs. Without `--file`, returns base64-encoded image data.
+**Screenshot Note:** Use `--file` to save screenshots to `/tmp/` with a timestamped filename (e.g., `/tmp/atr-screenshot-20240105-103045.png`). Add `--full` for full-page screenshots. Use `--selector` / `-s` to screenshot a specific element by CSS selector (e.g., `-s "header"`, `-s "#nav"`, `-s "main > section:nth-child(2)"`). Combine `--selector` with `--full` to capture an element's full scrollable height. Use `--selector-all` to screenshot every matching element as numbered PNGs — elements that fail or timeout are skipped (use `--timeout <ms>` to control per-element timeout, default 30s). Without `--file`, returns base64-encoded image data.
 
 ### Debugging Commands
 
