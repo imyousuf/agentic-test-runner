@@ -173,6 +173,93 @@ func TestHandleLet(t *testing.T) {
 	}
 }
 
+func TestBuildLetContext(t *testing.T) {
+	// Simulate an eval command result: rawData has "result", Output has the normalized value
+	r := batchResult{
+		Index:   0,
+		Command: `eval "document.querySelectorAll('section').length"`,
+		Status:  "ok",
+		Output:  float64(8), // eval output is the "result" field from API
+		rawData: map[string]interface{}{
+			"result": float64(8),
+		},
+	}
+
+	ctx := buildLetContext(r)
+	ctxMap, ok := ctx.(map[string]interface{})
+	if !ok {
+		t.Fatalf("buildLetContext returned %T, want map", ctx)
+	}
+
+	// $.output should be the normalized output
+	if ctxMap["output"] != float64(8) {
+		t.Errorf("$.output = %v, want 8", ctxMap["output"])
+	}
+
+	// $.result should still work (raw API field)
+	if ctxMap["result"] != float64(8) {
+		t.Errorf("$.result = %v, want 8", ctxMap["result"])
+	}
+
+	// Test let extraction with $.output
+	vars := make(map[string]string)
+	err := handleLet("let count = $.output", ctx, vars)
+	if err != nil {
+		t.Errorf("handleLet $.output: %v", err)
+	}
+	if vars["count"] != "8" {
+		t.Errorf("vars[count] = %q, want '8'", vars["count"])
+	}
+
+	// Test let extraction with $.result (raw API path)
+	err = handleLet("let count2 = $.result", ctx, vars)
+	if err != nil {
+		t.Errorf("handleLet $.result: %v", err)
+	}
+	if vars["count2"] != "8" {
+		t.Errorf("vars[count2] = %q, want '8'", vars["count2"])
+	}
+}
+
+func TestBuildLetContext_NestedOutput(t *testing.T) {
+	// Simulate computed-styles: output is a map of styles
+	r := batchResult{
+		Output: map[string]interface{}{
+			"fontSize":   "32px",
+			"fontWeight": "700",
+		},
+		rawData: map[string]interface{}{
+			"selector": "h1",
+			"styles": map[string]interface{}{
+				"fontSize":   "32px",
+				"fontWeight": "700",
+			},
+			"count": float64(2),
+		},
+	}
+
+	ctx := buildLetContext(r)
+	vars := make(map[string]string)
+
+	// $.output.fontSize should work
+	err := handleLet("let size = $.output.fontSize", ctx, vars)
+	if err != nil {
+		t.Errorf("handleLet $.output.fontSize: %v", err)
+	}
+	if vars["size"] != "32px" {
+		t.Errorf("vars[size] = %q, want '32px'", vars["size"])
+	}
+
+	// $.styles.fontWeight should also work (raw path)
+	err = handleLet("let weight = $.styles.fontWeight", ctx, vars)
+	if err != nil {
+		t.Errorf("handleLet $.styles.fontWeight: %v", err)
+	}
+	if vars["weight"] != "700" {
+		t.Errorf("vars[weight] = %q, want '700'", vars["weight"])
+	}
+}
+
 func TestContainsFlag(t *testing.T) {
 	args := []string{"#modal", "--timeout", "5000", "--visible"}
 	if !containsFlag(args, "--visible") {

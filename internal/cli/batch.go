@@ -173,7 +173,9 @@ func executeBatch(lines []string, onError string, timeout time.Duration) ([]batc
 			}
 		}
 
-		lastData = result.rawData
+		// Build the $ context for let statements: merge raw API data with
+		// normalized "output" field so both $.output and $.rawField work.
+		lastData = buildLetContext(result)
 		results = append(results, result)
 
 		if result.Status == "error" {
@@ -548,6 +550,25 @@ func dispatchBatchCommand(cmdLine string) (method, path string, body interface{}
 	default:
 		return "", "", nil, "", fmt.Errorf("unknown command: %s", cmd)
 	}
+}
+
+// buildLetContext creates the $ context for let extraction from a batch result.
+// It merges the raw API response data with a normalized "output" field so that
+// both $.output and $.rawField (e.g., $.result, $.styles) work.
+func buildLetContext(r batchResult) interface{} {
+	ctx := make(map[string]interface{})
+
+	// Copy raw API response fields into the context
+	if rawMap, ok := r.rawData.(map[string]interface{}); ok {
+		for k, v := range rawMap {
+			ctx[k] = v
+		}
+	}
+
+	// Set "output" to the normalized primary value
+	ctx["output"] = r.Output
+
+	return ctx
 }
 
 // handleLet processes a "let name = $.path" statement.
