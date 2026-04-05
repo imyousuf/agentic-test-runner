@@ -1291,6 +1291,460 @@ func (b *Browser) GetMultipleComputedStyles(selector string, properties []string
 	return results, nil
 }
 
+// BatchStyleResult contains the result for a single selector in a batch query.
+type BatchStyleResult struct {
+	Selector string            `json:"selector"`
+	Matched  bool              `json:"matched"`
+	Element  string            `json:"element,omitempty"`
+	Styles   map[string]string `json:"styles"`
+}
+
+// GetBatchComputedStyles returns computed styles for each selector independently.
+// If a selector matches nothing, Matched is false (no error).
+func (b *Browser) GetBatchComputedStyles(selectors []string, properties []string) ([]BatchStyleResult, error) {
+	page, err := b.CurrentPage()
+	if err != nil {
+		return nil, err
+	}
+
+	if properties == nil {
+		properties = []string{}
+	}
+
+	var results []BatchStyleResult
+	for _, sel := range selectors {
+		result := BatchStyleResult{Selector: sel}
+
+		el, err := b.findElementByCSS(page, sel)
+		if err != nil {
+			result.Matched = false
+			results = append(results, result)
+			continue
+		}
+
+		result.Matched = true
+
+		// Get element description
+		if desc, err := el.Eval(`function() { return '<' + this.tagName.toLowerCase() + (this.className ? ' class="' + this.className + '"' : '') + '>'; }`); err == nil {
+			result.Element = desc.Value.Str()
+		}
+
+		styleResult, err := el.Eval(`function(props) {
+			const cs = window.getComputedStyle(this);
+			const out = {};
+			if (props && props.length > 0) {
+				props.forEach(p => {
+					const v = cs[p] || cs.getPropertyValue(p);
+					if (v !== undefined && v !== "") out[p] = v;
+				});
+			} else {
+				const defaults = [
+					"fontSize", "fontWeight", "fontFamily", "lineHeight", "letterSpacing",
+					"color", "backgroundColor", "display", "textAlign", "padding", "margin",
+					"borderRadius", "width", "height", "position", "opacity",
+					"textDecoration", "textTransform", "fontStyle",
+					"fontFeatureSettings", "textRendering", "webkitFontSmoothing", "fontKerning"
+				];
+				defaults.forEach(p => {
+					const v = cs[p];
+					if (v !== undefined && v !== "") out[p] = v;
+				});
+			}
+			return out;
+		}`, properties)
+		if err != nil {
+			result.Matched = true
+			result.Styles = map[string]string{"error": err.Error()}
+			results = append(results, result)
+			continue
+		}
+
+		result.Styles = make(map[string]string)
+		for k, v := range styleResult.Value.Map() {
+			result.Styles[k] = v.Str()
+		}
+		results = append(results, result)
+	}
+
+	return results, nil
+}
+
+// BatchDiffDetail represents a single mismatched property in a batch diff.
+type BatchDiffDetail struct {
+	Property string `json:"property"`
+	Expected string `json:"expected"`
+	Actual   string `json:"actual"`
+}
+
+// BatchDiffResult contains the diff result for a single selector in a batch diff.
+type BatchDiffResult struct {
+	Selector   string            `json:"selector"`
+	Matched    bool              `json:"matched"`
+	Score      float64           `json:"score"`
+	Matches    int               `json:"matches"`
+	Mismatches int               `json:"mismatches"`
+	Details    []BatchDiffDetail `json:"details"`
+}
+
+// BatchDiffOutput contains all batch diff results with an overall score.
+type BatchDiffOutput struct {
+	Results      []BatchDiffResult `json:"results"`
+	OverallScore float64           `json:"overall_score"`
+}
+
+// GetBatchComputedStylesDiff compares styles for multiple selectors between current and target page.
+func (b *Browser) GetBatchComputedStylesDiff(selectors []string, againstPageIndex int, properties []string, selectorTarget string) (*BatchDiffOutput, error) {
+	b.pageSwitchMu.Lock()
+	defer b.pageSwitchMu.Unlock()
+
+	b.mu.RLock()
+	currentIdx := b.current
+	b.mu.RUnlock()
+
+	output := &BatchDiffOutput{}
+	totalScore := 0.0
+	matchedCount := 0
+
+	for _, sel := range selectors {
+		result := BatchDiffResult{Selector: sel}
+
+		// Get source styles
+		sourceStyles, err := b.GetComputedStyles(sel, properties)
+		if err != nil {
+			result.Matched = false
+			output.Results = append(output.Results, result)
+			continue
+		}
+
+		// Switch to target page
+		if err := b.SelectPage(againstPageIndex); err != nil {
+			result.Matched = false
+			result.Details = []BatchDiffDetail{{Property: "error", Expected: "", Actual: err.Error()}}
+			output.Results = append(output.Results, result)
+			continue
+		}
+
+		// Get target styles
+		targetSel := sel
+		if selectorTarget != "" {
+			targetSel = selectorTarget
+		}
+		targetStyles, err := b.GetComputedStyles(targetSel, properties)
+
+		// Switch back
+		b.SelectPage(currentIdx)
+
+		if err != nil {
+			result.Matched = false
+			output.Results = append(output.Results, result)
+			continue
+		}
+
+		result.Matched = true
+
+		// Compute diff
+		allProps := make(map[string]bool)
+		for k := range sourceStyles {
+			allProps[k] = true
+		}
+		for k := range targetStyles {
+			allProps[k] = true
+		}
+
+		for prop := range allProps {
+			src := sourceStyles[prop]
+			tgt := targetStyles[prop]
+			if src == tgt {
+				result.Matches++
+			} else {
+				result.Mismatches++
+				result.Details = append(result.Details, BatchDiffDetail{
+					Property: prop,
+					Expected: src,
+					Actual:   tgt,
+				})
+			}
+		}
+
+		total := result.Matches + result.Mismatches
+		if total > 0 {
+			result.Score = float64(result.Matches) / float64(total) * 100
+		}
+
+		totalScore += result.Score
+		matchedCount++
+		output.Results = append(output.Results, result)
+	}
+
+	if matchedCount > 0 {
+		output.OverallScore = totalScore / float64(matchedCount)
+	}
+
+	return output, nil
+}
+
+// CleanSnapshotOptions controls the clean DOM snapshot output.
+type CleanSnapshotOptions struct {
+	Depth     int  // max tree depth (0 = unlimited)
+	SVGFull   bool // include full SVG content
+	MaxLength int  // max output chars (0 = 5000)
+}
+
+// CleanDOMNode represents a node in the clean JSON DOM tree.
+type CleanDOMNode struct {
+	Tag      string            `json:"tag"`
+	ID       string            `json:"id,omitempty"`
+	Classes  []string          `json:"classes,omitempty"`
+	Attrs    map[string]string `json:"attrs,omitempty"`
+	Text     string            `json:"text,omitempty"`
+	Children []CleanDOMNode    `json:"children,omitempty"`
+}
+
+// GetCleanSnapshot returns a cleaned, indented DOM subtree for the given selector.
+func (b *Browser) GetCleanSnapshot(selector string, opts CleanSnapshotOptions) (string, *CleanDOMNode, error) {
+	page, err := b.CurrentPage()
+	if err != nil {
+		return "", nil, err
+	}
+
+	el, err := b.findElementByCSS(page, selector)
+	if err != nil {
+		return "", nil, fmt.Errorf("no element found for selector: %q", selector)
+	}
+
+	maxDepth := opts.Depth
+	if maxDepth <= 0 {
+		maxDepth = 999
+	}
+	maxLen := opts.MaxLength
+	if maxLen <= 0 {
+		maxLen = 5000
+	}
+
+	result, err := el.Eval(`function(maxDepth, svgFull) {
+		const KEEP_ATTRS = new Set(['class','id','href','src','alt','role','type','width','height','action','method','for','name','value','placeholder']);
+		const KEEP_DATA = new Set(['data-theme','data-variant','data-state']);
+		const SKIP_TAGS = new Set(['script','style','noscript','link']);
+		const IMG_SKIP = new Set(['srcset','sizes','loading','decoding','fetchpriority']);
+
+		function isHidden(el) {
+			if (!el.offsetParent && el.tagName !== 'HTML' && el.tagName !== 'BODY') {
+				const cs = window.getComputedStyle(el);
+				if (cs.display === 'none' || cs.visibility === 'hidden') return true;
+			}
+			return false;
+		}
+
+		function isEmptyWrapper(el) {
+			if (el.tagName !== 'DIV' && el.tagName !== 'SPAN') return false;
+			if (el.id || el.className || el.getAttribute('style')) return false;
+			const children = Array.from(el.children);
+			return children.length === 1;
+		}
+
+		function cleanNode(el, depth) {
+			if (el.nodeType === Node.TEXT_NODE) {
+				let text = el.textContent.trim();
+				if (!text) return null;
+				if (text.length > 80) text = text.substring(0, 77) + '…';
+				return {tag: '#text', text: text};
+			}
+			if (el.nodeType !== Node.ELEMENT_NODE) return null;
+
+			const tag = el.tagName.toLowerCase();
+			if (SKIP_TAGS.has(tag)) return null;
+			if (isHidden(el)) return null;
+
+			// SVG collapse
+			if (tag === 'svg' && !svgFull) {
+				const w = el.getAttribute('width') || '';
+				const h = el.getAttribute('height') || '';
+				return {tag:'svg', attrs:{width:w, height:h}};
+			}
+
+			// Flatten empty wrappers
+			if (isEmptyWrapper(el) && depth < maxDepth) {
+				const child = el.children[0];
+				return cleanNode(child, depth);
+			}
+
+			const node = {tag: tag};
+
+			// Collect attributes
+			const attrs = {};
+			if (el.id) node.id = el.id;
+			if (el.className && typeof el.className === 'string') {
+				const classes = el.className.trim().split(/\s+/).filter(c => c);
+				if (classes.length > 0) node.classes = classes;
+			}
+
+			for (const attr of el.attributes) {
+				const name = attr.name;
+				if (name === 'class' || name === 'id') continue;
+				if (name.startsWith('aria-')) continue;
+				if (name.startsWith('data-') && !KEEP_DATA.has(name)) continue;
+				if (tag === 'img' && IMG_SKIP.has(name)) continue;
+				if (KEEP_ATTRS.has(name) || KEEP_DATA.has(name)) {
+					attrs[name] = attr.value;
+				}
+			}
+			if (Object.keys(attrs).length > 0) node.attrs = attrs;
+
+			// Children
+			if (depth >= maxDepth) {
+				const childCount = el.children.length;
+				if (childCount > 0) {
+					node.text = '<!-- ' + childCount + ' children -->';
+				}
+				return node;
+			}
+
+			const children = [];
+			for (const child of el.childNodes) {
+				const cleaned = cleanNode(child, depth + 1);
+				if (cleaned) children.push(cleaned);
+			}
+			if (children.length > 0) node.children = children;
+
+			return node;
+		}
+
+		return cleanNode(this, 0);
+	}`, maxDepth, opts.SVGFull)
+	if err != nil {
+		return "", nil, fmt.Errorf("clean snapshot failed: %w", err)
+	}
+
+	// Convert gson to plain map
+	rawData := result.Value.Val()
+	dataMap, ok := rawData.(map[string]interface{})
+	if !ok {
+		return "", nil, fmt.Errorf("unexpected result type from clean snapshot")
+	}
+
+	// Build the JSON tree
+	jsonTree := parseCleanNode(dataMap)
+
+	// Build HTML string
+	html := renderCleanHTML(dataMap, 0)
+
+	// Truncate if needed
+	if len(html) > maxLen {
+		html = html[:maxLen] + "\n<!-- output truncated -->"
+	}
+
+	return html, jsonTree, nil
+}
+
+func parseCleanNode(m map[string]interface{}) *CleanDOMNode {
+	if m == nil {
+		return nil
+	}
+	node := &CleanDOMNode{}
+	if tag, ok := m["tag"].(string); ok {
+		node.Tag = tag
+	}
+	if id, ok := m["id"].(string); ok {
+		node.ID = id
+	}
+	if text, ok := m["text"].(string); ok {
+		node.Text = text
+	}
+	if classes, ok := m["classes"].([]interface{}); ok {
+		for _, c := range classes {
+			if s, ok := c.(string); ok {
+				node.Classes = append(node.Classes, s)
+			}
+		}
+	}
+	if attrs, ok := m["attrs"].(map[string]interface{}); ok {
+		node.Attrs = make(map[string]string)
+		for k, v := range attrs {
+			if s, ok := v.(string); ok {
+				node.Attrs[k] = s
+			}
+		}
+	}
+	if children, ok := m["children"].([]interface{}); ok {
+		for _, child := range children {
+			if cm, ok := child.(map[string]interface{}); ok {
+				if cn := parseCleanNode(cm); cn != nil {
+					node.Children = append(node.Children, *cn)
+				}
+			}
+		}
+	}
+	return node
+}
+
+func renderCleanHTML(m map[string]interface{}, indent int) string {
+	if m == nil {
+		return ""
+	}
+	prefix := strings.Repeat("  ", indent)
+	tag, _ := m["tag"].(string)
+
+	if tag == "#text" {
+		text, _ := m["text"].(string)
+		return prefix + text + "\n"
+	}
+
+	// Build opening tag
+	var sb strings.Builder
+	sb.WriteString(prefix + "<" + tag)
+	if id, ok := m["id"].(string); ok && id != "" {
+		sb.WriteString(` id="` + id + `"`)
+	}
+	if classes, ok := m["classes"].([]interface{}); ok && len(classes) > 0 {
+		var classNames []string
+		for _, c := range classes {
+			if s, ok := c.(string); ok {
+				classNames = append(classNames, s)
+			}
+		}
+		sb.WriteString(` class="` + strings.Join(classNames, " ") + `"`)
+	}
+	if attrs, ok := m["attrs"].(map[string]interface{}); ok {
+		for k, v := range attrs {
+			if s, ok := v.(string); ok && s != "" {
+				sb.WriteString(` ` + k + `="` + s + `"`)
+			}
+		}
+	}
+
+	// Self-closing tags
+	children, hasChildren := m["children"].([]interface{})
+	text, _ := m["text"].(string)
+
+	if !hasChildren && text == "" {
+		sb.WriteString(" />\n")
+		return sb.String()
+	}
+
+	sb.WriteString(">")
+
+	// Inline text for leaf elements
+	if !hasChildren && text != "" {
+		sb.WriteString(text + "</" + tag + ">\n")
+		return sb.String()
+	}
+
+	// Text as placeholder (e.g., "<!-- N children -->")
+	if text != "" && !hasChildren {
+		sb.WriteString(text + "</" + tag + ">\n")
+		return sb.String()
+	}
+
+	sb.WriteString("\n")
+	for _, child := range children {
+		if cm, ok := child.(map[string]interface{}); ok {
+			sb.WriteString(renderCleanHTML(cm, indent+1))
+		}
+	}
+	sb.WriteString(prefix + "</" + tag + ">\n")
+	return sb.String()
+}
+
 // GetComputedStyles returns computed CSS properties for an element identified by CSS selector.
 // If properties is empty, a useful default set of layout/typography properties is returned.
 func (b *Browser) GetComputedStyles(selector string, properties []string) (map[string]string, error) {

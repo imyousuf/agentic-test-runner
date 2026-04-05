@@ -352,6 +352,97 @@ atr browser eval "window.localStorage.getItem('token')"
 atr browser eval "document.title"
 ```
 
+### clean-snapshot
+```bash
+atr browser clean-snapshot <selector> [--depth N] [--max-length N] [--svg-full]
+```
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--depth` | Maximum tree depth (0 = unlimited) | 0 |
+| `--max-length` | Maximum output characters | 5000 |
+| `--svg-full` | Include full SVG path data | false |
+
+Returns a cleaned, indented DOM subtree for the element. Removes tracking attributes (data-analytics-*, data-segment-*), aria-* attributes, inline scripts/styles, hidden elements, and empty wrapper divs. Collapses SVGs, truncates text to 80 characters.
+
+With `--json`, returns a structured JSON tree instead of HTML.
+
+Examples:
+```bash
+atr browser clean-snapshot "section.hero"
+atr browser clean-snapshot "section.hero" --depth 2
+atr browser clean-snapshot "footer" --json
+atr browser clean-snapshot "main" --max-length 10000
+```
+
+### viewport
+```bash
+atr browser viewport [width height] [--preset NAME] [--dpr N]
+```
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--preset` | Named preset: mobile (375x812), tablet (768x1024), desktop (1440x900), wide (1920x1080) | |
+| `--dpr` | Device pixel ratio | 1 |
+
+Without arguments, returns the current viewport size. With width and height, resizes the viewport. Changes trigger CSS media query re-evaluation without page reload.
+
+Min: 320x480. Max: 3840x2160.
+
+Examples:
+```bash
+atr browser viewport                        # Query current size
+atr browser viewport 375 812               # Set to iPhone size
+atr browser viewport --preset mobile       # Same as above
+atr browser viewport 1440 900 --dpr 2      # Retina desktop
+```
+
+### batch
+```bash
+atr browser batch [--file FILE] [--on-error MODE] [--timeout SECS]
+```
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--file` | Read commands from file instead of stdin | |
+| `--on-error` | Error handling: stop, continue, retry:N | stop |
+| `--timeout` | Total batch timeout in seconds | 60 |
+
+Execute multiple commands sequentially from stdin or file. Supports variable extraction with `let` and interpolation with `[[name]]`. Maximum 100 commands per batch.
+
+Input format: one command per line (without `atr browser` prefix). Lines starting with `#` are comments.
+
+Variable extraction:
+```
+eval "[...document.querySelectorAll('.card')].length"
+let count = $.result
+eval "'Found [[count]] cards'"
+```
+
+Error handling:
+```bash
+# Stop on first error (default)
+atr browser batch <<'EOF'
+navigate "https://example.com"
+wait "h1" --timeout 5000
+screenshot --file
+EOF
+
+# Continue past failures
+atr browser batch --on-error continue <<'EOF'
+computed-styles "h1"
+computed-styles ".missing"
+computed-styles "footer"
+EOF
+
+# Retry up to 3 times
+atr browser batch --on-error retry:3 <<'EOF'
+navigate "https://example.com"
+wait ".content" --timeout 5000
+screenshot --file --full
+EOF
+```
+
 ## Debugging Commands
 
 ### console

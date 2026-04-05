@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/imyousuf/agentic-test-runner/internal/browser"
+
 	"github.com/imyousuf/agentic-test-runner/internal/agent"
 	"github.com/imyousuf/agentic-test-runner/pkg/llm"
 )
@@ -69,6 +71,12 @@ func (s *Server) registerRoutes() {
 
 	// Download images
 	s.mux.HandleFunc("/api/v1/download-images", s.handleDownloadImages)
+
+	// Clean snapshot
+	s.mux.HandleFunc("/api/v1/clean-snapshot", s.handleCleanSnapshot)
+
+	// Viewport
+	s.mux.HandleFunc("/api/v1/viewport", s.handleViewport)
 
 	// AI-powered
 	s.mux.HandleFunc("/api/v1/ask", s.handleAsk)
@@ -877,12 +885,6 @@ func (s *Server) handleComputedStylesDiff(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	selector := r.URL.Query().Get("selector")
-	if selector == "" {
-		writeError(w, http.StatusBadRequest, "selector is required")
-		return
-	}
-
 	againstStr := r.URL.Query().Get("against")
 	if againstStr == "" {
 		writeError(w, http.StatusBadRequest, "against (page index) is required")
@@ -900,6 +902,33 @@ func (s *Server) handleComputedStylesDiff(w http.ResponseWriter, r *http.Request
 	}
 
 	selectorTarget := r.URL.Query().Get("selector_target")
+
+	// Batch selectors mode
+	selectors := r.URL.Query().Get("selectors")
+	if selectors != "" {
+		selectorList := strings.Split(selectors, ",")
+		for i := range selectorList {
+			selectorList[i] = strings.TrimSpace(selectorList[i])
+		}
+		result, err := s.browser.GetBatchComputedStylesDiff(selectorList, againstIdx, properties, selectorTarget)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, fmt.Sprintf("batch diff failed: %v", err))
+			return
+		}
+
+		writeSuccess(w, map[string]interface{}{
+			"results":       result.Results,
+			"overall_score": result.OverallScore,
+		})
+		return
+	}
+
+	// Single selector mode
+	selector := r.URL.Query().Get("selector")
+	if selector == "" {
+		writeError(w, http.StatusBadRequest, "selector or selectors is required")
+		return
+	}
 
 	result, err := s.browser.GetComputedStylesDiff(selector, againstIdx, properties, selectorTarget)
 	if err != nil {
@@ -965,17 +994,35 @@ func (s *Server) handleComputedStyles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	selector := r.URL.Query().Get("selector")
-	selectorAll := r.URL.Query().Get("selector_all")
-
-	if selector == "" && selectorAll == "" {
-		writeError(w, http.StatusBadRequest, "selector or selector_all is required")
-		return
-	}
-
 	var properties []string
 	if p := r.URL.Query().Get("properties"); p != "" {
 		properties = strings.Split(p, ",")
+	}
+
+	// Batch selectors mode (repeated selectors, comma-separated)
+	selectors := r.URL.Query().Get("selectors")
+	selector := r.URL.Query().Get("selector")
+	selectorAll := r.URL.Query().Get("selector_all")
+
+	if selector == "" && selectorAll == "" && selectors == "" {
+		writeError(w, http.StatusBadRequest, "selector, selector_all, or selectors is required")
+		return
+	}
+	if selectors != "" {
+		selectorList := strings.Split(selectors, ",")
+		for i := range selectorList {
+			selectorList[i] = strings.TrimSpace(selectorList[i])
+		}
+		results, err := s.browser.GetBatchComputedStyles(selectorList, properties)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, fmt.Sprintf("batch styles failed: %v", err))
+			return
+		}
+
+		writeSuccess(w, map[string]interface{}{
+			"results": results,
+		})
+		return
 	}
 
 	// Multiple elements mode
@@ -1052,6 +1099,127 @@ func (s *Server) handleWait(w http.ResponseWriter, r *http.Request) {
 		"found":    true,
 		"selector": req.Selector,
 		"visible":  req.Visible,
+	})
+}
+
+// handleCleanSnapshot handles GET /api/v1/clean-snapshot
+func (s *Server) handleCleanSnapshot(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	selector := r.URL.Query().Get("selector")
+	if selector == "" {
+		writeError(w, http.StatusBadRequest, "selector is required")
+		return
+	}
+
+	depth := 0
+	if d := r.URL.Query().Get("depth"); d != "" {
+		if n, err := strconv.Atoi(d); err == nil {
+			depth = n
+		}
+	}
+
+	maxLength := 0
+	if m := r.URL.Query().Get("max_length"); m != "" {
+		if n, err := strconv.Atoi(m); err == nil {
+			maxLength = n
+		}
+	}
+
+	svgFull := r.URL.Query().Get("svg_full") == "true"
+	jsonOutput := r.URL.Query().Get("format") == "json"
+
+	html, tree, err := s.browser.GetCleanSnapshot(selector, browser.CleanSnapshotOptions{
+		Depth:     depth,
+		SVGFull:   svgFull,
+		MaxLength: maxLength,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("clean snapshot failed: %v", err))
+		return
+	}
+
+	if jsonOutput {
+		writeSuccess(w, map[string]interface{}{
+			"selector": selector,
+			"tree":     tree,
+		})
+	} else {
+		writeSuccess(w, map[string]interface{}{
+			"selector": selector,
+			"html":     html,
+		})
+	}
+}
+
+// handleViewport handles GET/POST /api/v1/viewport
+func (s *Server) handleViewport(w http.ResponseWriter, r *http.Request) {
+	// GET: query current viewport
+	if r.Method == http.MethodGet {
+		vp, err := s.browser.GetViewport()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to get viewport: %v", err))
+			return
+		}
+		writeSuccess(w, map[string]interface{}{
+			"width":             vp.Width,
+			"height":            vp.Height,
+			"deviceScaleFactor": vp.DeviceScaleFactor,
+		})
+		return
+	}
+
+	// POST: set viewport
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	var req struct {
+		Width  int     `json:"width"`
+		Height int     `json:"height"`
+		DPR    float64 `json:"dpr"`
+		Preset string  `json:"preset"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	// Apply preset if specified
+	if req.Preset != "" {
+		switch req.Preset {
+		case "mobile":
+			req.Width, req.Height = 375, 812
+		case "tablet":
+			req.Width, req.Height = 768, 1024
+		case "desktop":
+			req.Width, req.Height = 1440, 900
+		case "wide":
+			req.Width, req.Height = 1920, 1080
+		default:
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("unknown preset: %s (use mobile, tablet, desktop, or wide)", req.Preset))
+			return
+		}
+	}
+
+	if req.Width == 0 || req.Height == 0 {
+		writeError(w, http.StatusBadRequest, "width and height are required")
+		return
+	}
+
+	prev, current, err := s.browser.SetViewport(req.Width, req.Height, req.DPR)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("viewport resize failed: %v", err))
+		return
+	}
+
+	writeSuccess(w, map[string]interface{}{
+		"previous": prev,
+		"current":  current,
 	})
 }
 

@@ -546,6 +546,124 @@ func TestBrowserDownloadImages_NotFound(t *testing.T) {
 	}
 }
 
+func TestBrowserGetCleanSnapshot(t *testing.T) {
+	resetFixture(t)
+	html, tree, err := testBrowser.GetCleanSnapshot("footer", CleanSnapshotOptions{})
+	if err != nil {
+		t.Fatalf("GetCleanSnapshot error: %v", err)
+	}
+	if html == "" {
+		t.Error("expected non-empty HTML output")
+	}
+	if tree == nil {
+		t.Fatal("expected non-nil tree")
+	}
+	if tree.Tag != "footer" {
+		t.Errorf("tree tag = %q, want 'footer'", tree.Tag)
+	}
+	if !strings.Contains(html, "<footer") {
+		t.Error("HTML should contain <footer")
+	}
+	if !strings.Contains(html, "Contact") {
+		t.Error("HTML should contain 'Contact' text")
+	}
+	// Should NOT contain script tags
+	if strings.Contains(html, "<script") {
+		t.Error("HTML should not contain script tags")
+	}
+}
+
+func TestBrowserGetCleanSnapshot_WithDepth(t *testing.T) {
+	resetFixture(t)
+	html, _, err := testBrowser.GetCleanSnapshot("footer", CleanSnapshotOptions{Depth: 1})
+	if err != nil {
+		t.Fatalf("GetCleanSnapshot depth error: %v", err)
+	}
+	if !strings.Contains(html, "children") {
+		t.Error("depth-limited output should contain 'children' placeholder")
+	}
+}
+
+func TestBrowserGetCleanSnapshot_NotFound(t *testing.T) {
+	resetFixture(t)
+	_, _, err := testBrowser.GetCleanSnapshot("#nonexistent-thing", CleanSnapshotOptions{})
+	if err == nil {
+		t.Error("expected error for nonexistent selector")
+	}
+}
+
+func TestBrowserGetCleanSnapshot_JSON(t *testing.T) {
+	resetFixture(t)
+	_, tree, err := testBrowser.GetCleanSnapshot("header", CleanSnapshotOptions{})
+	if err != nil {
+		t.Fatalf("GetCleanSnapshot error: %v", err)
+	}
+	if tree.Tag != "header" {
+		t.Errorf("tree tag = %q, want 'header'", tree.Tag)
+	}
+	// Header should have children (nav with links)
+	if len(tree.Children) == 0 {
+		t.Error("expected header to have children")
+	}
+}
+
+func TestBrowserGetViewport(t *testing.T) {
+	resetFixture(t)
+	vp, err := testBrowser.GetViewport()
+	if err != nil {
+		t.Fatalf("GetViewport error: %v", err)
+	}
+	if vp.Width == 0 || vp.Height == 0 {
+		t.Errorf("viewport dimensions should be non-zero: %dx%d", vp.Width, vp.Height)
+	}
+}
+
+func TestBrowserSetViewport(t *testing.T) {
+	resetFixture(t)
+	prev, current, err := testBrowser.SetViewport(800, 600)
+	if err != nil {
+		t.Fatalf("SetViewport error: %v", err)
+	}
+	if prev == nil {
+		t.Error("expected previous viewport")
+	}
+	if current.Width != 800 || current.Height != 600 {
+		t.Errorf("current = %dx%d, want 800x600", current.Width, current.Height)
+	}
+
+	// Verify via GetViewport
+	vp, err := testBrowser.GetViewport()
+	if err != nil {
+		t.Fatalf("GetViewport error: %v", err)
+	}
+	if vp.Width != 800 {
+		t.Errorf("GetViewport width = %d, want 800", vp.Width)
+	}
+}
+
+func TestBrowserSetViewport_WithDPR(t *testing.T) {
+	resetFixture(t)
+	_, current, err := testBrowser.SetViewport(375, 812, 2.0)
+	if err != nil {
+		t.Fatalf("SetViewport error: %v", err)
+	}
+	if current.DeviceScaleFactor != 2.0 {
+		t.Errorf("dpr = %f, want 2.0", current.DeviceScaleFactor)
+	}
+}
+
+func TestBrowserSetViewport_OutOfRange(t *testing.T) {
+	resetFixture(t)
+	_, _, err := testBrowser.SetViewport(100, 600)
+	if err == nil {
+		t.Error("expected error for width < 320")
+	}
+	_, _, err = testBrowser.SetViewport(800, 100)
+	if err == nil {
+		t.Error("expected error for height < 480")
+	}
+}
+
 func TestBrowserCheckFont_NotFound(t *testing.T) {
 	resetFixture(t)
 	result, err := testBrowser.CheckFont("NonExistentFontXYZ")
@@ -606,6 +724,93 @@ func TestBrowserGetComputedStyles_FontRenderingDefaults(t *testing.T) {
 		if _, ok := styles[prop]; !ok {
 			t.Errorf("expected %q in default computed styles", prop)
 		}
+	}
+}
+
+func TestBrowserGetBatchComputedStyles(t *testing.T) {
+	resetFixture(t)
+	results, err := testBrowser.GetBatchComputedStyles(
+		[]string{"h1", ".card h3", "#nonexistent"},
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("GetBatchComputedStyles error: %v", err)
+	}
+	if len(results) != 3 {
+		t.Fatalf("expected 3 results, got %d", len(results))
+	}
+	// h1 should match
+	if !results[0].Matched {
+		t.Error("h1 should be matched")
+	}
+	if _, ok := results[0].Styles["fontSize"]; !ok {
+		t.Error("h1 should have fontSize")
+	}
+	if results[0].Element == "" {
+		t.Error("h1 should have element description")
+	}
+	// .card h3 should match
+	if !results[1].Matched {
+		t.Error(".card h3 should be matched")
+	}
+	// #nonexistent should NOT match
+	if results[2].Matched {
+		t.Error("#nonexistent should not be matched")
+	}
+}
+
+func TestBrowserGetBatchComputedStyles_WithProperties(t *testing.T) {
+	resetFixture(t)
+	results, err := testBrowser.GetBatchComputedStyles(
+		[]string{"h1", "footer"},
+		[]string{"fontSize", "color"},
+	)
+	if err != nil {
+		t.Fatalf("GetBatchComputedStyles error: %v", err)
+	}
+	for _, r := range results {
+		if r.Matched && len(r.Styles) != 2 {
+			t.Errorf("selector %q: expected 2 properties, got %d", r.Selector, len(r.Styles))
+		}
+	}
+}
+
+func TestBrowserGetBatchComputedStylesDiff(t *testing.T) {
+	resetFixture(t)
+	ctx := context.Background()
+	if err := testBrowser.NewPage(ctx, testFixtureURL+"/test_fixture.html"); err != nil {
+		t.Fatalf("failed to open second page: %v", err)
+	}
+	result, err := testBrowser.GetBatchComputedStylesDiff(
+		[]string{"h1", "#nonexistent", "footer"},
+		0,
+		[]string{"fontSize", "fontWeight"},
+		"",
+	)
+	if err != nil {
+		t.Fatalf("GetBatchComputedStylesDiff error: %v", err)
+	}
+	if len(result.Results) != 3 {
+		t.Fatalf("expected 3 results, got %d", len(result.Results))
+	}
+	// h1 should match with 100% score (same page fixture)
+	if !result.Results[0].Matched {
+		t.Error("h1 should be matched")
+	}
+	if result.Results[0].Score != 100 {
+		t.Errorf("h1 score = %f, want 100", result.Results[0].Score)
+	}
+	// #nonexistent should not match
+	if result.Results[1].Matched {
+		t.Error("#nonexistent should not be matched")
+	}
+	// footer should match
+	if !result.Results[2].Matched {
+		t.Error("footer should be matched")
+	}
+	// Overall score should be average of matched selectors
+	if result.OverallScore != 100 {
+		t.Errorf("overall score = %f, want 100", result.OverallScore)
 	}
 }
 

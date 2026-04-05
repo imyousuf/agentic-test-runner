@@ -964,7 +964,8 @@ func (t *BrowserResizeTool) Execute(ctx context.Context, args map[string]any) (s
 		return "Missing required parameters: width and height", true
 	}
 
-	if err := t.browser.SetViewport(int(width), int(height)); err != nil {
+	_, _, err := t.browser.SetViewport(int(width), int(height))
+	if err != nil {
 		return fmt.Sprintf("Resize failed: %v", err), true
 	}
 

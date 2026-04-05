@@ -103,6 +103,15 @@ to control a browser via shell commands.`,
 	// Download images
 	browserCmd.AddCommand(newBrowserDownloadImagesCmd())
 
+	// Clean snapshot
+	browserCmd.AddCommand(newBrowserCleanSnapshotCmd())
+
+	// Viewport
+	browserCmd.AddCommand(newBrowserViewportCmd())
+
+	// Batch
+	browserCmd.AddCommand(newBrowserBatchCmd())
+
 	// AI-powered
 	browserCmd.AddCommand(newBrowserAskCmd())
 
@@ -473,6 +482,7 @@ Useful for modals, dialogs, and other elements with overflow scroll/auto.`,
 func newBrowserComputedStylesCmd() *cobra.Command {
 	var properties string
 	var selectorAll string
+	var selectors []string
 	cmd := &cobra.Command{
 		Use:   "computed-styles [selector]",
 		Short: "Get computed CSS styles for an element",
@@ -480,16 +490,29 @@ func newBrowserComputedStylesCmd() *cobra.Command {
 Returns a JSON object of CSS property names to their computed values.
 Without --properties, returns a default set of common layout and typography properties.
 
-Use --selector-all to return computed styles for every matching element in an array.`,
+Use --selector-all to return computed styles for every matching element in an array.
+Use repeated --selector flags to batch-query multiple selectors in one call.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Batch mode: repeated --selector flags
+			if len(selectors) > 0 {
+				if len(args) > 0 {
+					return fmt.Errorf("cannot use both positional selector and --selector flags")
+				}
+				path := "/computed-styles?selectors=" + url.QueryEscape(strings.Join(selectors, ","))
+				if properties != "" {
+					path += "&properties=" + url.QueryEscape(properties)
+				}
+				return apiGet(path)
+			}
+
 			path := "/computed-styles?"
 			if selectorAll != "" {
 				path += "selector_all=" + url.QueryEscape(selectorAll)
 			} else if len(args) > 0 {
 				path += "selector=" + url.QueryEscape(args[0])
 			} else {
-				return fmt.Errorf("selector argument or --selector-all flag is required")
+				return fmt.Errorf("selector argument, --selector, or --selector-all flag is required")
 			}
 			if properties != "" {
 				path += "&properties=" + url.QueryEscape(properties)
@@ -499,6 +522,7 @@ Use --selector-all to return computed styles for every matching element in an ar
 	}
 	cmd.Flags().StringVar(&properties, "properties", "", "Comma-separated CSS properties to return (e.g., fontSize,color,fontWeight)")
 	cmd.Flags().StringVar(&selectorAll, "selector-all", "", "CSS selector matching multiple elements to get styles for")
+	cmd.Flags().StringArrayVar(&selectors, "selector", nil, "CSS selector (repeatable for batch mode)")
 	return cmd
 }
 
@@ -506,23 +530,44 @@ func newBrowserComputedStylesDiffCmd() *cobra.Command {
 	var against string
 	var properties string
 	var selectorTarget string
+	var selectors []string
 	cmd := &cobra.Command{
-		Use:   "computed-styles-diff <selector>",
+		Use:   "computed-styles-diff [selector]",
 		Short: "Compare computed styles between two pages",
 		Long: `Compare computed CSS styles of an element on the current page against
 the same (or different) element on another open page. Returns matches,
 mismatches, and a similarity score.
 
-The --against flag accepts a page index as "page:N" or just "N" (e.g., --against page:0 or --against 0).`,
-		Args: cobra.ExactArgs(1),
+The --against flag accepts a page index as "page:N" or just "N" (e.g., --against page:0 or --against 0).
+Use repeated --selector flags to batch-diff multiple selectors with an overall score.`,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Parse --against: accept both "page:N" and "N"
 			pageIdx := against
 			if strings.HasPrefix(pageIdx, "page:") {
 				pageIdx = strings.TrimPrefix(pageIdx, "page:")
 			}
 			if _, err := strconv.Atoi(pageIdx); err != nil {
 				return fmt.Errorf("--against must be a page index (e.g., 0, 1, or page:0): %w", err)
+			}
+
+			// Batch mode
+			if len(selectors) > 0 {
+				if len(args) > 0 {
+					return fmt.Errorf("cannot use both positional selector and --selector flags")
+				}
+				path := "/computed-styles-diff?selectors=" + url.QueryEscape(strings.Join(selectors, ","))
+				path += "&against=" + pageIdx
+				if properties != "" {
+					path += "&properties=" + url.QueryEscape(properties)
+				}
+				if selectorTarget != "" {
+					path += "&selector_target=" + url.QueryEscape(selectorTarget)
+				}
+				return apiGet(path)
+			}
+
+			if len(args) < 1 {
+				return fmt.Errorf("selector argument or --selector flags required")
 			}
 
 			path := "/computed-styles-diff?selector=" + url.QueryEscape(args[0])
@@ -539,6 +584,7 @@ The --against flag accepts a page index as "page:N" or just "N" (e.g., --against
 	cmd.Flags().StringVar(&against, "against", "0", "Page index to compare against (e.g., 0, page:0)")
 	cmd.Flags().StringVar(&properties, "properties", "", "Comma-separated CSS properties to compare")
 	cmd.Flags().StringVar(&selectorTarget, "selector-target", "", "CSS selector on target page (defaults to source selector)")
+	cmd.Flags().StringArrayVar(&selectors, "selector", nil, "CSS selector (repeatable for batch mode)")
 	return cmd
 }
 
@@ -787,6 +833,101 @@ func newBrowserErrorsCmd() *cobra.Command {
 	}
 }
 
+// Clean snapshot command
+
+func newBrowserCleanSnapshotCmd() *cobra.Command {
+	var depth int
+	var maxLength int
+	var svgFull bool
+	cmd := &cobra.Command{
+		Use:   "clean-snapshot <selector>",
+		Short: "Get cleaned DOM subtree for an element",
+		Long: `Get a cleaned, indented DOM subtree for the element matching the selector.
+
+Cleaning rules:
+- Removes data-*/aria-* attributes (except data-theme, data-variant, data-state)
+- Removes inline scripts, styles, and hidden elements
+- Flattens empty wrapper divs
+- Collapses SVGs to tag-only (use --svg-full to include paths)
+- Truncates text content to 80 characters
+- Indents with 2 spaces
+
+Use --json for a structured JSON tree instead of HTML.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			path := "/clean-snapshot?selector=" + url.QueryEscape(args[0])
+			if depth > 0 {
+				path += "&depth=" + strconv.Itoa(depth)
+			}
+			if maxLength > 0 {
+				path += "&max_length=" + strconv.Itoa(maxLength)
+			}
+			if svgFull {
+				path += "&svg_full=true"
+			}
+			if browserJSONOutput {
+				path += "&format=json"
+			}
+			return apiGet(path)
+		},
+	}
+	cmd.Flags().IntVar(&depth, "depth", 0, "Maximum tree depth (0 = unlimited)")
+	cmd.Flags().IntVar(&maxLength, "max-length", 5000, "Maximum output characters")
+	cmd.Flags().BoolVar(&svgFull, "svg-full", false, "Include full SVG path data")
+	return cmd
+}
+
+// Viewport command
+
+func newBrowserViewportCmd() *cobra.Command {
+	var preset string
+	var dpr float64
+	cmd := &cobra.Command{
+		Use:   "viewport [width height]",
+		Short: "Get or set browser viewport size",
+		Long: `Get or set the browser viewport dimensions.
+
+Without arguments, returns the current viewport size.
+With width and height, resizes the viewport.
+
+Presets: mobile (375x812), tablet (768x1024), desktop (1440x900), wide (1920x1080).`,
+		Args: cobra.MaximumNArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			// Query mode
+			if len(args) == 0 && preset == "" {
+				return apiGet("/viewport")
+			}
+
+			body := map[string]interface{}{}
+			if preset != "" {
+				body["preset"] = preset
+			} else if len(args) == 2 {
+				w, err := strconv.Atoi(args[0])
+				if err != nil {
+					return fmt.Errorf("width must be an integer: %w", err)
+				}
+				h, err := strconv.Atoi(args[1])
+				if err != nil {
+					return fmt.Errorf("height must be an integer: %w", err)
+				}
+				body["width"] = w
+				body["height"] = h
+			} else {
+				return fmt.Errorf("viewport requires both width and height, or --preset")
+			}
+
+			if dpr > 0 {
+				body["dpr"] = dpr
+			}
+
+			return apiPost("/viewport", body)
+		},
+	}
+	cmd.Flags().StringVar(&preset, "preset", "", "Named preset: mobile, tablet, desktop, wide")
+	cmd.Flags().Float64Var(&dpr, "dpr", 0, "Device pixel ratio (default: 1)")
+	return cmd
+}
+
 // Download images command
 
 func newBrowserDownloadImagesCmd() *cobra.Command {
@@ -873,26 +1014,27 @@ func apiPost(path string, body interface{}) error {
 	return apiRequest("POST", path, body)
 }
 
-func apiRequest(method, path string, body interface{}) error {
+// apiRequestRaw executes an API request and returns the parsed response.
+func apiRequestRaw(method, path string, body interface{}) (*api.APIResponse, error) {
 	endpoint, err := getEndpoint()
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	url := endpoint + "/api/v1" + path
+	apiURL := endpoint + "/api/v1" + path
 
 	var reqBody io.Reader
 	if body != nil {
 		data, err := json.Marshal(body)
 		if err != nil {
-			return fmt.Errorf("failed to marshal request: %w", err)
+			return nil, fmt.Errorf("failed to marshal request: %w", err)
 		}
 		reqBody = bytes.NewReader(data)
 	}
 
-	req, err := http.NewRequest(method, url, reqBody)
+	req, err := http.NewRequest(method, apiURL, reqBody)
 	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
+		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
 	if body != nil {
@@ -902,18 +1044,27 @@ func apiRequest(method, path string, body interface{}) error {
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("request failed: %w", err)
+		return nil, fmt.Errorf("request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return fmt.Errorf("failed to read response: %w", err)
+		return nil, fmt.Errorf("failed to read response: %w", err)
 	}
 
 	var result api.APIResponse
 	if err := json.Unmarshal(respBody, &result); err != nil {
-		return fmt.Errorf("failed to parse response: %w", err)
+		return nil, fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	return &result, nil
+}
+
+func apiRequest(method, path string, body interface{}) error {
+	result, err := apiRequestRaw(method, path, body)
+	if err != nil {
+		return err
 	}
 
 	if !result.Success {

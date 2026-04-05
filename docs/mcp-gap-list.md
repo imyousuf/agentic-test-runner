@@ -28,6 +28,11 @@ CLI/API commands that have no MCP tool equivalent yet.
 | `screenshot --selector --full` | `GET /api/v1/screenshot?selector=&full=true` | Medium — full-height element capture |
 | `font-check` | `GET /api/v1/font-check` | High — verifies actual font load status |
 | `download-images` | `POST /api/v1/download-images` | Medium — download/screenshot images within elements |
+| `viewport` | `GET/POST /api/v1/viewport` | Medium — responsive testing viewport control |
+| `clean-snapshot` | `GET /api/v1/clean-snapshot` | Medium — cleaned DOM subtree extraction |
+| `batch` | N/A (CLI-only) | Low — CLI pipeline mode (no server equivalent) |
+| `computed-styles --selector` (batch) | `GET /api/v1/computed-styles?selectors=` | High — batch style extraction |
+| `computed-styles-diff --selector` (batch) | `GET /api/v1/computed-styles-diff?selectors=` | High — batch style comparison |
 
 ## MCP Tools That Already Exist
 

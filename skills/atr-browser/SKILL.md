@@ -78,6 +78,8 @@ Once running, use navigation and interaction commands to control the browser.
 | `atr browser wait <selector> [--timeout] [--visible]` | Wait for element to appear |
 | `atr browser scroll --selector "<sel>" [--y N] [--to-bottom]` | Scroll inside an element |
 | `atr browser download-images "<sel>" [--output-dir] [--fallback-screenshot]` | Download/screenshot images within elements |
+| `atr browser viewport [W H] [--preset mobile\|tablet\|desktop\|wide]` | Get or set viewport size |
+| `atr browser batch [--file F] [--on-error stop\|continue\|retry:N]` | Execute multiple commands from stdin/file |
 
 ### Inspection Commands
 
@@ -91,6 +93,9 @@ Once running, use navigation and interaction commands to control the browser.
 | `atr browser computed-styles-diff "<sel>" --against N` | Compare styles between pages |
 | `atr browser text "<selector>" [--flat\|--links\|--headings]` | Extract text content |
 | `atr browser font-check "<font-family>"` | Check if font is loaded and rendering |
+| `atr browser clean-snapshot "<selector>" [--depth N] [--max-length N]` | Get cleaned DOM subtree (no noise/tracking attrs) |
+| `atr browser computed-styles --selector "h1" --selector "p"` | Batch computed styles for multiple selectors |
+| `atr browser computed-styles-diff --selector "h1" --selector "p" --against 0` | Batch style diff with overall score |
 | `atr browser html` | Get page HTML |
 | `atr browser url` | Get current URL |
 | `atr browser title` | Get page title |

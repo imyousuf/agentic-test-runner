@@ -889,16 +889,78 @@ func (b *Browser) ClearEvents() {
 }
 
 // SetViewport sets the viewport dimensions.
-func (b *Browser) SetViewport(width, height int) error {
+// ViewportSize represents the browser viewport dimensions.
+type ViewportSize struct {
+	Width             int     `json:"width"`
+	Height            int     `json:"height"`
+	DeviceScaleFactor float64 `json:"deviceScaleFactor"`
+}
+
+// GetViewport returns the current viewport dimensions.
+func (b *Browser) GetViewport() (*ViewportSize, error) {
 	page, err := b.CurrentPage()
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	return page.SetViewport(&proto.EmulationSetDeviceMetricsOverride{
-		Width:  width,
-		Height: height,
+	result, err := page.Eval(`() => ({
+		width: window.innerWidth,
+		height: window.innerHeight,
+		deviceScaleFactor: window.devicePixelRatio
+	})`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get viewport: %w", err)
+	}
+
+	raw := result.Value.Map()
+	return &ViewportSize{
+		Width:             int(raw["width"].Num()),
+		Height:            int(raw["height"].Num()),
+		DeviceScaleFactor: raw["deviceScaleFactor"].Num(),
+	}, nil
+}
+
+// SetViewport resizes the browser viewport and returns previous and new sizes.
+func (b *Browser) SetViewport(width, height int, dpr ...float64) (*ViewportSize, *ViewportSize, error) {
+	if width < 320 || width > 3840 {
+		return nil, nil, fmt.Errorf("width must be between 320 and 3840, got %d", width)
+	}
+	if height < 480 || height > 2160 {
+		return nil, nil, fmt.Errorf("height must be between 480 and 2160, got %d", height)
+	}
+
+	scaleFactor := 1.0
+	if len(dpr) > 0 && dpr[0] > 0 {
+		scaleFactor = dpr[0]
+	}
+
+	page, err := b.CurrentPage()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	prev, _ := b.GetViewport()
+	if prev == nil {
+		prev = &ViewportSize{}
+	}
+
+	err = page.SetViewport(&proto.EmulationSetDeviceMetricsOverride{
+		Width:             width,
+		Height:            height,
+		DeviceScaleFactor: scaleFactor,
+		Mobile:            width < 768,
 	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to set viewport: %w", err)
+	}
+
+	current := &ViewportSize{
+		Width:             width,
+		Height:            height,
+		DeviceScaleFactor: scaleFactor,
+	}
+
+	return prev, current, nil
 }
 
 // Evaluate executes JavaScript in the current page.

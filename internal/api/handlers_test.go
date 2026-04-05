@@ -417,6 +417,65 @@ func TestHandleComputedStyles_WithProperties(t *testing.T) {
 	}
 }
 
+func TestHandleComputedStyles_BatchSelectors(t *testing.T) {
+	resetPage(t)
+	rr := doGet(testServer, "/computed-styles?selectors=h1,.card+h3,%23nonexistent")
+	if rr.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d (body: %s)", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	resp := parseResponse(t, rr)
+	if !resp.Success {
+		t.Errorf("expected success=true, error: %s", resp.Error)
+	}
+	data, ok := resp.Data.(map[string]any)
+	if !ok {
+		t.Fatal("expected data to be a map")
+	}
+	results, ok := data["results"].([]any)
+	if !ok {
+		t.Fatal("expected results to be an array")
+	}
+	if len(results) != 3 {
+		t.Errorf("expected 3 results, got %d", len(results))
+	}
+	// First result (h1) should be matched
+	if r, ok := results[0].(map[string]any); ok {
+		if r["matched"] != true {
+			t.Error("h1 should be matched")
+		}
+	}
+	// Third result (#nonexistent) should not be matched
+	if r, ok := results[2].(map[string]any); ok {
+		if r["matched"] != false {
+			t.Error("#nonexistent should not be matched")
+		}
+	}
+}
+
+func TestHandleComputedStylesDiff_BatchSelectors(t *testing.T) {
+	resetPage(t)
+	// Open second page
+	doPost(testServer, "/navigate", map[string]any{
+		"url": testFixtureURL + "/test_fixture.html",
+	})
+	rr := doGet(testServer, "/computed-styles-diff?selectors=h1,footer&against=0&properties=fontSize,fontWeight")
+	if rr.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d (body: %s)", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	resp := parseResponse(t, rr)
+	if !resp.Success {
+		t.Errorf("expected success=true, error: %s", resp.Error)
+	}
+	data, ok := resp.Data.(map[string]any)
+	if !ok {
+		t.Fatal("expected data to be a map")
+	}
+	overallScore, _ := data["overall_score"].(float64)
+	if overallScore != 100 {
+		t.Errorf("overall_score = %f, want 100", overallScore)
+	}
+}
+
 func TestHandleComputedStyles_SelectorAll(t *testing.T) {
 	resetPage(t)
 	rr := doGet(testServer, "/computed-styles?selector_all=.card+h3")
@@ -443,6 +502,109 @@ func TestHandleComputedStyles_SelectorAll(t *testing.T) {
 
 func TestHandleComputedStyles_MissingSelector(t *testing.T) {
 	rr := doGet(testServer, "/computed-styles")
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", rr.Code, http.StatusBadRequest)
+	}
+}
+
+func TestHandleCleanSnapshot(t *testing.T) {
+	resetPage(t)
+	rr := doGet(testServer, "/clean-snapshot?selector=footer")
+	if rr.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d (body: %s)", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	resp := parseResponse(t, rr)
+	if !resp.Success {
+		t.Errorf("expected success=true, error: %s", resp.Error)
+	}
+	data, ok := resp.Data.(map[string]any)
+	if !ok {
+		t.Fatal("expected data to be a map")
+	}
+	html, _ := data["html"].(string)
+	if html == "" {
+		t.Error("expected non-empty html")
+	}
+}
+
+func TestHandleCleanSnapshot_JSON(t *testing.T) {
+	resetPage(t)
+	rr := doGet(testServer, "/clean-snapshot?selector=header&format=json")
+	if rr.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d (body: %s)", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	resp := parseResponse(t, rr)
+	if !resp.Success {
+		t.Errorf("expected success=true, error: %s", resp.Error)
+	}
+	data, ok := resp.Data.(map[string]any)
+	if !ok {
+		t.Fatal("expected data to be a map")
+	}
+	if data["tree"] == nil {
+		t.Error("expected tree in JSON response")
+	}
+}
+
+func TestHandleCleanSnapshot_MissingSelector(t *testing.T) {
+	rr := doGet(testServer, "/clean-snapshot")
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", rr.Code, http.StatusBadRequest)
+	}
+}
+
+func TestHandleViewport_Get(t *testing.T) {
+	resetPage(t)
+	rr := doGet(testServer, "/viewport")
+	if rr.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d (body: %s)", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	resp := parseResponse(t, rr)
+	if !resp.Success {
+		t.Errorf("expected success=true, error: %s", resp.Error)
+	}
+	data, ok := resp.Data.(map[string]any)
+	if !ok {
+		t.Fatal("expected data to be a map")
+	}
+	if data["width"] == nil || data["height"] == nil {
+		t.Error("expected width and height in viewport response")
+	}
+}
+
+func TestHandleViewport_Set(t *testing.T) {
+	resetPage(t)
+	rr := doPost(testServer, "/viewport", map[string]any{
+		"width":  800,
+		"height": 600,
+	})
+	if rr.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d (body: %s)", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	resp := parseResponse(t, rr)
+	if !resp.Success {
+		t.Errorf("expected success=true, error: %s", resp.Error)
+	}
+}
+
+func TestHandleViewport_Preset(t *testing.T) {
+	resetPage(t)
+	rr := doPost(testServer, "/viewport", map[string]any{
+		"preset": "mobile",
+	})
+	if rr.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d (body: %s)", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	resp := parseResponse(t, rr)
+	if !resp.Success {
+		t.Errorf("expected success=true, error: %s", resp.Error)
+	}
+}
+
+func TestHandleViewport_InvalidPreset(t *testing.T) {
+	rr := doPost(testServer, "/viewport", map[string]any{
+		"preset": "invalid",
+	})
 	if rr.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want %d", rr.Code, http.StatusBadRequest)
 	}
