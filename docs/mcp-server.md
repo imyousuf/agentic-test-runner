@@ -25,7 +25,7 @@ atr mcp serve [flags]
 
 ## Available Browser Tools
 
-The MCP server exposes 15 browser automation tools:
+The MCP server exposes 16 browser automation tools:
 
 ### Navigation
 
@@ -54,6 +54,12 @@ The MCP server exposes 15 browser automation tools:
 | `browser_get_html` | Get the page HTML content | - |
 | `browser_snapshot` | Get accessibility tree | `verbose` (optional) |
 | `browser_screenshot` | Take a screenshot | `file` (optional), `full_page` (optional) |
+
+### AI
+
+| Tool | Description | Parameters |
+|------|-------------|------------|
+| `browser_ask` | Ask AI a question about the page | `question` (required) |
 
 ### Debugging
 

@@ -115,10 +115,19 @@ Control a browser via HTTP server mode. See [Browser Server Mode](browser-server
 ### Lifecycle Commands
 
 ```bash
-atr browser start [--port PORT]   # Start browser daemon
+atr browser start [flags]         # Start browser daemon
 atr browser stop                  # Stop browser daemon
 atr browser status                # Check if running
 ```
+
+| Flag | Description |
+|------|-------------|
+| `--port <port>` | Server port (default: 9333) |
+| `--headless` | Run browser in headless mode (no visible window) |
+| `--persist-session` | Keep cookies/sessions after browser closes |
+| `--data-dir <path>` | Directory for browser data (default: `~/.atr/browser-data` when `--persist-session`) |
+| `--sandbox` | Enable Chrome sandbox (disabled by default for Ubuntu 23.10+ compatibility) |
+| `--system-chrome` | Use system-installed Google Chrome (falls back to bundled browser if not found) |
 
 ### Navigation
 
@@ -141,22 +150,141 @@ atr browser close-page <index>    # Close tab
 ### Interaction
 
 ```bash
-atr browser click <target>        # Click element
-atr browser fill <target> <value> # Type into input
-atr browser hover <target>        # Hover over element
-atr browser press-key <key>       # Press keyboard key
-atr browser drag <from> <to>      # Drag element
+atr browser click <target> [--double]        # Click element (or double-click)
+atr browser fill <target> <value>            # Type into input
+atr browser hover <target>                   # Hover over element
+atr browser press-key <key>                  # Press keyboard key
+atr browser drag <from> <to>                 # Drag element
+atr browser scroll -s <selector> [flags]     # Scroll within an element
+atr browser wait <selector> [flags]          # Wait for element to appear
 ```
+
+Target can be a UID (e.g., `e0`), text, aria-label, data-testid, or CSS selector.
+
+#### scroll flags
+
+| Flag | Description |
+|------|-------------|
+| `-s, --selector <selector>` | CSS selector of scrollable element (required) |
+| `--x <pixels>` | Horizontal scroll position in pixels |
+| `--y <pixels>` | Vertical scroll position in pixels |
+| `--to-bottom` | Scroll to bottom of element |
+| `--to-top` | Scroll to top of element |
+
+#### wait flags
+
+| Flag | Description |
+|------|-------------|
+| `--timeout <ms>` | Timeout in milliseconds (default: 5000) |
+| `--visible` | Wait for element to be visible (not `display:none` or `opacity:0`) |
 
 ### Inspection
 
 ```bash
-atr browser snapshot [--verbose]  # Get page elements with UIDs
-atr browser screenshot [--full]   # Capture screenshot
-atr browser html                  # Get page HTML
-atr browser url                   # Get current URL
-atr browser title                 # Get page title
-atr browser eval <script>         # Run JavaScript
+atr browser snapshot [--verbose]              # Get page elements with UIDs
+atr browser screenshot [flags]                # Capture screenshot
+atr browser html                              # Get page HTML
+atr browser url                               # Get current URL
+atr browser title                             # Get page title
+atr browser eval <script>                     # Run JavaScript
+atr browser computed-styles <selector> [flags] # Get computed CSS styles
+atr browser computed-styles-diff <selector> [flags] # Compare styles across pages
+atr browser text <selector> [flags]           # Extract text content
+atr browser clean-snapshot <selector> [flags] # Get cleaned DOM subtree
+atr browser font-check <font-family>          # Check if a font is loaded
+atr browser viewport [width height] [flags]   # Get or set viewport size
+atr browser ask <question>                    # Ask AI about the page
+```
+
+#### screenshot flags
+
+| Flag | Description |
+|------|-------------|
+| `--full` | Capture full scrollable page |
+| `--file` | Save to file instead of base64 |
+| `-s, --selector <selector>` | CSS selector of element to screenshot |
+| `--selector-all <selector>` | CSS selector matching multiple elements to screenshot |
+| `--output-dir <path>` | Directory to save screenshots (used with `--selector-all`) |
+| `--timeout <ms>` | Per-element timeout in milliseconds (used with `--selector-all`, default: 30000) |
+
+Combine `--selector` with `--full` to capture the full scrollable height of an element (e.g., a modal with overflow scroll).
+
+#### computed-styles flags
+
+| Flag | Description |
+|------|-------------|
+| `--properties <csv>` | Comma-separated CSS properties to return (e.g., `fontSize,color,fontWeight`) |
+| `--selector-all <selector>` | Get styles for every element matching the selector |
+| `--selector <selector>` | Repeatable flag for batch-querying multiple selectors |
+
+#### computed-styles-diff flags
+
+| Flag | Description |
+|------|-------------|
+| `--against <page-index>` | Page index to compare against (default: `0`) |
+| `--properties <csv>` | Comma-separated CSS properties to compare |
+| `--selector-target <selector>` | CSS selector on target page (defaults to source selector) |
+| `--selector <selector>` | Repeatable flag for batch-diffing multiple selectors |
+
+#### text flags
+
+| Flag | Description |
+|------|-------------|
+| `--flat` | Return plain text only |
+| `--links` | Return only link elements with href |
+| `--headings` | Return only heading elements (h1-h6) |
+
+#### clean-snapshot flags
+
+| Flag | Description |
+|------|-------------|
+| `--depth <n>` | Maximum tree depth (0 = unlimited) |
+| `--max-length <chars>` | Maximum output characters (default: 5000) |
+| `--svg-full` | Include full SVG path data (collapsed by default) |
+| `--json` | Output as JSON tree instead of HTML |
+
+#### viewport flags
+
+| Flag | Description |
+|------|-------------|
+| `--preset <name>` | Named preset: `mobile`, `tablet`, `desktop`, `wide` |
+| `--dpr <number>` | Device pixel ratio (default: 1) |
+
+Without arguments, returns the current viewport size. With `width height` or `--preset`, sets the viewport.
+
+### Image Downloading
+
+```bash
+atr browser download-images <selector> [flags]  # Download images from elements
+```
+
+| Flag | Description |
+|------|-------------|
+| `--output-dir <path>` | Directory to save images (default: `/tmp/`) |
+| `--fallback-screenshot` | Screenshot elements when no `<img>` tags found |
+
+### Batch Execution
+
+```bash
+atr browser batch [flags]         # Execute multiple commands sequentially
+```
+
+Reads commands from stdin or a file, one per line (without the `atr browser` prefix). Lines starting with `#` are comments. Supports variable extraction with `let` statements and interpolation with `[[name]]` syntax. Maximum 100 commands.
+
+| Flag | Description |
+|------|-------------|
+| `--on-error <mode>` | Error handling: `stop` (default), `continue`, or `retry:N` |
+| `--timeout <seconds>` | Total batch timeout in seconds (default: 60) |
+| `--file <path>` | Read commands from file instead of stdin |
+
+```bash
+atr browser batch << 'EOF'
+navigate https://example.com
+wait .content --timeout 5000
+eval "document.querySelectorAll('.card').length"
+let count = $.result
+screenshot --file
+EOF
 ```
 
 ### Debugging
@@ -216,6 +344,7 @@ The server communicates via JSON-RPC 2.0 over stdio and exposes browser tools fo
 | `browser_go_back` | Navigate back |
 | `browser_go_forward` | Navigate forward |
 | `browser_reload` | Reload the page |
+| `browser_ask` | Ask AI a question about the page |
 
 #### Integration Examples
 
