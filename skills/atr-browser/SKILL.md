@@ -81,6 +81,12 @@ Once running, use navigation and interaction commands to control the browser.
 | `atr browser viewport [W H] [--preset mobile\|tablet\|desktop\|wide]` | Get or set viewport size |
 | `atr browser batch [--file F] [--on-error stop\|continue\|retry:N]` | Execute multiple commands from stdin/file |
 
+### Recording Commands
+
+| Command | Description |
+|---------|-------------|
+| `atr browser record [--url URL] [-o FILE]` | Record browser interactions as a behavior test |
+
 ### Inspection Commands
 
 | Command | Description |
@@ -164,6 +170,24 @@ Prefer `ask` over `html` or `snapshot` when:
 - You need a specific fact, not the full page structure
 - You want to keep your context clean for subsequent reasoning
 - The answer can be expressed as a short text response
+
+## Recording Browser Interactions
+
+Use `atr browser record` to capture user interactions and output a `.test.txt` behavior test file. A floating overlay appears in the browser showing recorded steps in real time.
+
+```bash
+# Record interactions on a page
+atr browser record --url https://example.com -o repro-steps.test.txt
+
+# Record on the already-open page
+atr browser record -o flow.test.txt
+```
+
+Stop recording with Ctrl+C in the terminal or the "Stop" button in the browser overlay.
+
+The recorder captures clicks, form fills, keyboard shortcuts, navigation, scrolling, and select changes. It handles shadow DOM (web components) and generates stable CSS selectors. Password fields are automatically masked.
+
+The output `.test.txt` file can be replayed with `atr run --behavior repro-steps.test.txt`.
 
 ## Using JSON Output
 

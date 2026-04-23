@@ -58,7 +58,7 @@ Tool implementations:
 
 ### Other Key Packages
 
-- **`internal/cli/`** — Cobra command definitions (run, config, browser, mcp, test, version, update). Browser subcommands include: navigate, click, fill, hover, drag, wait, scroll, screenshot (with --selector, --selector-all, --full, --timeout), snapshot, clean-snapshot, computed-styles (with --selector, --selector-all), computed-styles-diff (with --selector), text, font-check, download-images, viewport, batch, eval, ask, console, network, errors
+- **`internal/cli/`** — Cobra command definitions (run, config, browser, mcp, test, version, update). Browser subcommands include: navigate, click, fill, hover, drag, wait, scroll, screenshot (with --selector, --selector-all, --full, --timeout), snapshot, clean-snapshot, computed-styles (with --selector, --selector-all), computed-styles-diff (with --selector), text, font-check, download-images, viewport, batch, eval, ask, record (with --output, --url), console, network, errors
 - **`internal/config/`** — Configuration loading from `~/.atr/config.yaml`, env vars, and CLI flags via Viper
 - **`internal/executor/`** — Cross-platform shell execution with environment detection (Python venv, nvm)
 - **`internal/browser/`** — Browser lifecycle management using `go-rod/rod` (Chromium via CDP)

@@ -520,6 +520,9 @@ The server exposes a REST API at `http://localhost:<port>/api/v1`:
 | `/viewport` | GET/POST | Get or set viewport size |
 | `/download-images` | POST | Download images from elements |
 | `/ask` | POST | Ask AI about the page |
+| `/record/start` | POST | Start recording interactions |
+| `/record/stop` | POST | Stop recording, return events |
+| `/record/status` | GET | Check recording status |
 | `/console` | GET | Get console logs |
 | `/network` | GET | Get network requests |
 | `/errors` | GET | Get failed requests |

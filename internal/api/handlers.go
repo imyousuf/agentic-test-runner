@@ -80,6 +80,11 @@ func (s *Server) registerRoutes() {
 
 	// AI-powered
 	s.mux.HandleFunc("/api/v1/ask", s.handleAsk)
+
+	// Recording
+	s.mux.HandleFunc("/api/v1/record/start", s.handleRecordStart)
+	s.mux.HandleFunc("/api/v1/record/stop", s.handleRecordStop)
+	s.mux.HandleFunc("/api/v1/record/status", s.handleRecordStatus)
 }
 
 // handleHealth handles GET /api/v1/health
@@ -1275,5 +1280,68 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 
 	writeSuccess(w, map[string]interface{}{
 		"answer": answer,
+	})
+}
+
+// handleRecordStart handles POST /api/v1/record/start
+func (s *Server) handleRecordStart(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	var req struct {
+		URL string `json:"url"`
+	}
+	if r.Body != nil {
+		json.NewDecoder(r.Body).Decode(&req)
+	}
+
+	if err := s.browser.StartRecording(req.URL); err != nil {
+		if strings.Contains(err.Error(), "already in progress") {
+			writeError(w, http.StatusConflict, err.Error())
+			return
+		}
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	writeSuccess(w, map[string]interface{}{
+		"recording": true,
+	})
+}
+
+// handleRecordStop handles POST /api/v1/record/stop
+func (s *Server) handleRecordStop(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	events, err := s.browser.StopRecording()
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	testContent := browser.FormatTestFile(events, "Recorded Session")
+
+	writeSuccess(w, map[string]interface{}{
+		"event_count":  len(events),
+		"test_content": testContent,
+		"events":       events,
+	})
+}
+
+// handleRecordStatus handles GET /api/v1/record/status
+func (s *Server) handleRecordStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+
+	writeSuccess(w, map[string]interface{}{
+		"recording":   s.browser.IsRecording(),
+		"event_count": s.browser.RecordingEventCount(),
 	})
 }

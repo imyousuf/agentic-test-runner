@@ -871,3 +871,159 @@ func TestHandleMethodNotAllowed(t *testing.T) {
 		t.Errorf("status = %d, want %d", rr.Code, http.StatusMethodNotAllowed)
 	}
 }
+
+// --- Recording endpoint tests ---
+
+func TestHandleRecordStart(t *testing.T) {
+	resetPage(t)
+	// Ensure no recording is in progress
+	testServer.browser.StopRecording()
+	testServer.browser.ClearRecording()
+
+	rr := doPost(testServer, "/record/start", nil)
+	if rr.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d (body: %s)", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	resp := parseResponse(t, rr)
+	if !resp.Success {
+		t.Errorf("expected success=true, got error: %s", resp.Error)
+	}
+
+	// Clean up
+	testServer.browser.StopRecording()
+}
+
+func TestHandleRecordStartWithURL(t *testing.T) {
+	resetPage(t)
+	testServer.browser.StopRecording()
+
+	rr := doPost(testServer, "/record/start", map[string]any{
+		"url": testFixtureURL + "/test_fixture.html",
+	})
+	if rr.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d (body: %s)", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	resp := parseResponse(t, rr)
+	if !resp.Success {
+		t.Errorf("expected success=true, got error: %s", resp.Error)
+	}
+
+	// Verify browser navigated
+	url := testServer.browser.CurrentURL()
+	if !strings.Contains(url, "test_fixture.html") {
+		t.Errorf("expected browser at test_fixture.html, got: %s", url)
+	}
+
+	testServer.browser.StopRecording()
+}
+
+func TestHandleRecordStartWhileRecording(t *testing.T) {
+	resetPage(t)
+	testServer.browser.StopRecording()
+
+	// Start first recording
+	rr := doPost(testServer, "/record/start", nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("first start failed: %s", rr.Body.String())
+	}
+
+	// Try to start second recording
+	rr = doPost(testServer, "/record/start", nil)
+	if rr.Code != http.StatusConflict {
+		t.Errorf("status = %d, want %d (body: %s)", rr.Code, http.StatusConflict, rr.Body.String())
+	}
+
+	testServer.browser.StopRecording()
+}
+
+func TestHandleRecordStop(t *testing.T) {
+	resetPage(t)
+	testServer.browser.StopRecording()
+
+	// Start recording
+	doPost(testServer, "/record/start", nil)
+
+	// Stop recording
+	rr := doPost(testServer, "/record/stop", nil)
+	if rr.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d (body: %s)", rr.Code, http.StatusOK, rr.Body.String())
+	}
+	resp := parseResponse(t, rr)
+	if !resp.Success {
+		t.Errorf("expected success=true, got error: %s", resp.Error)
+	}
+
+	// Verify response has expected fields
+	data, ok := resp.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("expected map data, got: %T", resp.Data)
+	}
+	if _, ok := data["event_count"]; !ok {
+		t.Error("expected 'event_count' in response")
+	}
+	if _, ok := data["test_content"]; !ok {
+		t.Error("expected 'test_content' in response")
+	}
+	if _, ok := data["events"]; !ok {
+		t.Error("expected 'events' in response")
+	}
+}
+
+func TestHandleRecordStopNotRecording(t *testing.T) {
+	resetPage(t)
+	testServer.browser.StopRecording()
+	testServer.browser.ClearRecording()
+
+	rr := doPost(testServer, "/record/stop", nil)
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d (body: %s)", rr.Code, http.StatusBadRequest, rr.Body.String())
+	}
+}
+
+func TestHandleRecordStatus(t *testing.T) {
+	resetPage(t)
+	testServer.browser.StopRecording()
+
+	// Start recording
+	doPost(testServer, "/record/start", nil)
+
+	rr := doGet(testServer, "/record/status")
+	if rr.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+	resp := parseResponse(t, rr)
+	data, ok := resp.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("expected map data, got: %T", resp.Data)
+	}
+	if recording, ok := data["recording"].(bool); !ok || !recording {
+		t.Errorf("expected recording=true, got: %v", data["recording"])
+	}
+
+	testServer.browser.StopRecording()
+}
+
+func TestHandleRecordStatusNotRecording(t *testing.T) {
+	resetPage(t)
+	testServer.browser.StopRecording()
+
+	rr := doGet(testServer, "/record/status")
+	if rr.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+	resp := parseResponse(t, rr)
+	data, ok := resp.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("expected map data, got: %T", resp.Data)
+	}
+	if recording, ok := data["recording"].(bool); !ok || recording {
+		t.Errorf("expected recording=false, got: %v", data["recording"])
+	}
+}
+
+func TestHandleRecordStartMethodCheck(t *testing.T) {
+	rr := doGet(testServer, "/record/start")
+	if rr.Code != http.StatusMethodNotAllowed {
+		t.Errorf("status = %d, want %d", rr.Code, http.StatusMethodNotAllowed)
+	}
+}

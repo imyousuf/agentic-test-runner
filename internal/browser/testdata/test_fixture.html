@@ -130,6 +130,23 @@
 
     <input id="test-input" type="text" placeholder="Enter text here" aria-label="Test Input" />
 
+    <!-- Recorder test elements -->
+    <input id="test-password" type="password" name="password" placeholder="Enter password" />
+    <select id="test-select" name="country">
+      <option value="us">United States</option>
+      <option value="uk">United Kingdom</option>
+      <option value="ca">Canada</option>
+    </select>
+    <div data-testid="testid-element">TestID Element</div>
+    <div aria-label="Accessible Element">Aria Element</div>
+    <a id="test-link" href="/test_fixture.html">Test Link</a>
+
+    <!-- Shadow DOM test: web component with shadow root -->
+    <div id="shadow-host"></div>
+
+    <!-- Iframe test -->
+    <iframe id="test-iframe" srcdoc='<!DOCTYPE html><html><body><button id="iframe-btn">Iframe Button</button></body></html>' style="width:200px;height:50px;border:1px solid #ccc;"></iframe>
+
     <!-- Spacer to ensure page is always scrollable for scroll tests -->
     <div id="page-spacer" style="height: 2000px;"></div>
 
@@ -159,6 +176,13 @@
       document.getElementById('delayed-element').style.display = 'block';
     }, 500);
     // #invisible-element stays display:none permanently
+
+    // Set up shadow DOM for testing
+    (function() {
+      const host = document.getElementById('shadow-host');
+      const shadow = host.attachShadow({ mode: 'open' });
+      shadow.innerHTML = '<div id="shadow-inner"><button id="shadow-btn" data-testid="shadow-action">Shadow Button</button><input id="shadow-input" type="text" placeholder="Shadow input" /></div>';
+    })();
   </script>
 </body>
 </html>

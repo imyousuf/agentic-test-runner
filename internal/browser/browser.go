@@ -50,6 +50,9 @@ type Browser struct {
 	// Spoofed user agent derived from the actual browser version
 	spoofedUA       string
 	spoofedPlatform string
+
+	// Recording session (nil when not recording)
+	recording *RecordingSession
 }
 
 // ConsoleMessage represents a browser console message.
@@ -510,6 +513,11 @@ func (b *Browser) CDPEndpoint() string {
 // When connected to an external browser (e.g., a running server), only pages
 // created by this instance are closed; the browser process is left running.
 func (b *Browser) Close() error {
+	// Stop recording if active (before acquiring lock since StopRecording acquires it)
+	if b.recording != nil && b.recording.active {
+		b.StopRecording()
+	}
+
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -1075,6 +1083,11 @@ func (b *Browser) startTargetListener() {
 			// Apply spoofed user agent
 			b.applyUserAgent(page)
 
+			// Inject recorder into new tabs if recording is active
+			if b.recording != nil && b.recording.active {
+				b.injectRecorder(page)
+			}
+
 			// Add to tracked pages
 			b.pages = append(b.pages, page)
 			b.targetIDs[e.TargetInfo.TargetID] = page
@@ -1177,6 +1190,11 @@ func (b *Browser) syncExistingPages() {
 
 		// Apply spoofed user agent
 		b.applyUserAgent(page)
+
+		// Inject recorder into synced pages if recording is active
+		if b.recording != nil && b.recording.active {
+			b.injectRecorder(page)
+		}
 
 		b.pages = append(b.pages, page)
 		b.targetIDs[targetID] = page

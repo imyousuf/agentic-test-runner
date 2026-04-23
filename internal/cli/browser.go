@@ -9,8 +9,10 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/go-rod/rod/lib/launcher"
@@ -114,6 +116,9 @@ to control a browser via shell commands.`,
 
 	// AI-powered
 	browserCmd.AddCommand(newBrowserAskCmd())
+
+	// Recording
+	browserCmd.AddCommand(newBrowserRecordCmd())
 
 	return browserCmd
 }
@@ -1151,4 +1156,126 @@ func summarizeMap(m map[string]interface{}) string {
 		return text
 	}
 	return fmt.Sprintf("%v", m)
+}
+
+// Recording command
+
+var (
+	recordOutput string
+	recordURL    string
+)
+
+func newBrowserRecordCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "record",
+		Short: "Record browser interactions as a behavior test",
+		Long: `Record user interactions in the browser and output a .test.txt behavior test file.
+
+Captures clicks, form fills, keyboard shortcuts, navigation, and scroll events.
+A recording overlay appears in the browser showing captured steps in real time.
+
+Stop recording with Ctrl+C in the terminal or the "Stop" button in the browser overlay.
+
+Examples:
+  atr browser record --url https://example.com --output repro.test.txt
+  atr browser record -o login-flow.test.txt`,
+		RunE: runBrowserRecord,
+	}
+	cmd.Flags().StringVarP(&recordOutput, "output", "o", "", "Output file path (default: record-<timestamp>.test.txt)")
+	cmd.Flags().StringVar(&recordURL, "url", "", "Initial URL to navigate to")
+	return cmd
+}
+
+func runBrowserRecord(cmd *cobra.Command, args []string) error {
+	// Start recording
+	body := map[string]interface{}{}
+	if recordURL != "" {
+		body["url"] = recordURL
+	}
+	result, err := apiRequestRaw("POST", "/record/start", body)
+	if err != nil {
+		return fmt.Errorf("failed to start recording: %w", err)
+	}
+	if !result.Success {
+		return fmt.Errorf("failed to start recording: %s", result.Error)
+	}
+
+	fmt.Println("Recording started. Interact with the browser.")
+	fmt.Println("Press Ctrl+C or click \"Stop\" in the browser overlay to finish.")
+
+	// Wait for stop signal (Ctrl+C or overlay stop)
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
+	stoppedByOverlay := false
+	for {
+		select {
+		case <-sigCh:
+			fmt.Println("\nStopping recording...")
+			goto stop
+		case <-ticker.C:
+			// Check if recording was stopped via overlay
+			statusResult, err := apiRequestRaw("GET", "/record/status", nil)
+			if err == nil && statusResult.Success {
+				if data, ok := statusResult.Data.(map[string]interface{}); ok {
+					if recording, ok := data["recording"].(bool); ok && !recording {
+						stoppedByOverlay = true
+						goto stop
+					}
+				}
+			}
+		}
+	}
+
+stop:
+	// Fetch results
+	var stopResult *api.APIResponse
+	if stoppedByOverlay {
+		// Recording already stopped, just get the events
+		stopResult, err = apiRequestRaw("POST", "/record/stop", nil)
+		if err != nil {
+			// If stop fails because already stopped, that's fine
+			// Try to get status with events
+			stopResult, err = apiRequestRaw("GET", "/record/status", nil)
+		}
+	} else {
+		stopResult, err = apiRequestRaw("POST", "/record/stop", nil)
+	}
+	if err != nil {
+		return fmt.Errorf("failed to stop recording: %w", err)
+	}
+
+	// Extract test content from response
+	data, ok := stopResult.Data.(map[string]interface{})
+	if !ok {
+		return fmt.Errorf("unexpected response format")
+	}
+
+	testContent, _ := data["test_content"].(string)
+	eventCount := 0
+	if ec, ok := data["event_count"].(float64); ok {
+		eventCount = int(ec)
+	}
+
+	if testContent == "" {
+		fmt.Println("No interactions were recorded.")
+		return nil
+	}
+
+	// Determine output filename
+	outputPath := recordOutput
+	if outputPath == "" {
+		outputPath = fmt.Sprintf("record-%s.test.txt", time.Now().Format("20060102-150405"))
+	}
+
+	// Write file
+	if err := os.WriteFile(outputPath, []byte(testContent), 0644); err != nil {
+		return fmt.Errorf("failed to write output file: %w", err)
+	}
+
+	fmt.Printf("Recorded %d steps to %s\n", eventCount, outputPath)
+	return nil
 }

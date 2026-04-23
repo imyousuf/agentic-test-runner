@@ -287,6 +287,29 @@ screenshot --file
 EOF
 ```
 
+### Recording
+
+```bash
+atr browser record [flags]        # Record browser interactions as a behavior test
+```
+
+Records user interactions in the browser and outputs a `.test.txt` behavior test file. Captures clicks, form fills, keyboard shortcuts, navigation, and scroll events. A floating overlay appears in the browser showing recorded steps in real time.
+
+| Flag | Description |
+|------|-------------|
+| `--output`, `-o` | Output file path (default: `record-<timestamp>.test.txt`) |
+| `--url` | Initial URL to navigate to before recording |
+
+```bash
+# Record interactions and save to file
+atr browser record --url https://example.com -o repro.test.txt
+
+# Record with auto-generated filename
+atr browser record
+```
+
+Stop recording with Ctrl+C in the terminal or the "Stop" button in the browser overlay.
+
 ### Debugging
 
 ```bash
@@ -325,26 +348,42 @@ The server communicates via JSON-RPC 2.0 over stdio and exposes browser tools fo
 | `--headless` | Run browser in headless mode (default: `true`) |
 | `--ignore-https-errors` | Ignore HTTPS certificate errors |
 
-#### Available Tools
+#### Available Tools (30)
 
 | Tool | Description |
 |------|-------------|
 | `browser_navigate` | Navigate to a URL |
+| `browser_go_back` | Navigate back |
+| `browser_go_forward` | Navigate forward |
+| `browser_reload` | Reload the page |
+| `browser_new_page` | Open a new tab |
+| `browser_list_pages` | List all open tabs |
+| `browser_select_page` | Switch to tab by index |
+| `browser_close_page` | Close tab by index |
 | `browser_click` | Click on an element |
 | `browser_fill` | Fill a form field |
-| `browser_screenshot` | Take a screenshot |
+| `browser_hover` | Hover over an element |
+| `browser_press_key` | Press a key |
+| `browser_drag` | Drag one element to another |
+| `browser_wait` | Wait for element to appear |
+| `browser_scroll` | Scroll within an element |
 | `browser_get_url` | Get current page URL |
 | `browser_get_title` | Get page title |
 | `browser_get_html` | Get page HTML content |
 | `browser_snapshot` | Get accessibility tree snapshot |
+| `browser_screenshot` | Take a screenshot (page, element, or multi-element) |
+| `browser_eval` | Execute JavaScript |
+| `browser_computed_styles` | Get computed CSS styles |
+| `browser_computed_styles_diff` | Compare styles across pages |
+| `browser_text` | Extract text content |
+| `browser_clean_snapshot` | Get cleaned DOM subtree |
+| `browser_font_check` | Check font load status |
+| `browser_viewport` | Get or set viewport size |
+| `browser_download_images` | Download images from elements |
+| `browser_ask` | Ask AI a question about the page |
 | `browser_console` | Get console messages |
 | `browser_network` | Get network requests |
-| `browser_press_key` | Press a key |
-| `browser_hover` | Hover over an element |
-| `browser_go_back` | Navigate back |
-| `browser_go_forward` | Navigate forward |
-| `browser_reload` | Reload the page |
-| `browser_ask` | Ask AI a question about the page |
+| `browser_errors` | Get failed network requests |
 
 #### Integration Examples
 
