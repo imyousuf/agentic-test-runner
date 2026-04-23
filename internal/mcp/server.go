@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/imyousuf/agentic-test-runner/internal/agent"
@@ -293,12 +295,64 @@ func (s *Server) executeTool(ctx context.Context, name string, args map[string]a
 
 	case "browser_screenshot":
 		fullPage, _ := args["full_page"].(bool)
+		selector, _ := args["selector"].(string)
+		selectorAll, _ := args["selector_all"].(string)
+		filename, _ := args["file"].(string)
+
+		// Multiple element screenshots
+		if selectorAll != "" {
+			outputDir, _ := args["output_dir"].(string)
+			if outputDir == "" {
+				outputDir = "/tmp"
+			}
+			results, err := s.browser.GetMultipleElementScreenshots(selectorAll)
+			if err != nil {
+				return "", fmt.Errorf("multi-screenshot failed: %w", err)
+			}
+			var saved []string
+			for _, r := range results {
+				if r.Error != "" {
+					continue
+				}
+				path := filepath.Join(outputDir, fmt.Sprintf("element-%d.png", r.Index))
+				if err := os.WriteFile(path, r.Data, 0644); err != nil {
+					continue
+				}
+				saved = append(saved, path)
+			}
+			data, _ := json.MarshalIndent(map[string]interface{}{
+				"count": len(saved),
+				"files": saved,
+			}, "", "  ")
+			return string(data), nil
+		}
+
+		// Single element screenshot
+		if selector != "" {
+			var data []byte
+			var err error
+			if fullPage {
+				data, err = s.browser.GetElementFullHeightScreenshot(selector)
+			} else {
+				data, err = s.browser.GetElementScreenshotByCSS(selector)
+			}
+			if err != nil {
+				return "", err
+			}
+			if filename == "" {
+				filename = fmt.Sprintf("/tmp/element-screenshot-%d.png", os.Getpid())
+			}
+			if err := os.WriteFile(filename, data, 0644); err != nil {
+				return "", err
+			}
+			return fmt.Sprintf("Screenshot saved to %s", filename), nil
+		}
+
+		// Full page or viewport screenshot
 		data, err := s.browser.Screenshot(fullPage)
 		if err != nil {
 			return "", err
 		}
-		// Save to temp file and return path
-		filename, _ := args["file"].(string)
 		if filename == "" {
 			filename = fmt.Sprintf("/tmp/screenshot-%d.png", os.Getpid())
 		}
@@ -423,6 +477,341 @@ func (s *Server) executeTool(ctx context.Context, name string, args map[string]a
 			return "", fmt.Errorf("ask failed: %w", err)
 		}
 		return answer, nil
+
+	// --- Pre-v1.2.0 gap tools ---
+
+	case "browser_eval":
+		script, _ := args["script"].(string)
+		if script == "" {
+			return "", fmt.Errorf("script is required")
+		}
+		result, err := s.browser.Evaluate(script)
+		if err != nil {
+			return "", fmt.Errorf("eval failed: %w", err)
+		}
+		data, err := json.MarshalIndent(result, "", "  ")
+		if err != nil {
+			return "", err
+		}
+		return string(data), nil
+
+	case "browser_drag":
+		from, _ := args["from"].(string)
+		to, _ := args["to"].(string)
+		if from == "" || to == "" {
+			return "", fmt.Errorf("from and to are required")
+		}
+		if err := s.browser.Drag(ctx, from, to); err != nil {
+			return "", fmt.Errorf("drag failed: %w", err)
+		}
+		return fmt.Sprintf("Dragged from %s to %s", from, to), nil
+
+	case "browser_errors":
+		requests := s.browser.GetFailedRequests()
+		data, err := json.MarshalIndent(requests, "", "  ")
+		if err != nil {
+			return "", err
+		}
+		return string(data), nil
+
+	case "browser_new_page":
+		url, _ := args["url"].(string)
+		if err := s.browser.NewPage(ctx, url); err != nil {
+			return "", fmt.Errorf("new page failed: %w", err)
+		}
+		if url != "" {
+			return fmt.Sprintf("Opened new tab at %s", url), nil
+		}
+		return "Opened new blank tab", nil
+
+	case "browser_list_pages":
+		pages := s.browser.ListPages()
+		data, err := json.MarshalIndent(pages, "", "  ")
+		if err != nil {
+			return "", err
+		}
+		return string(data), nil
+
+	case "browser_select_page":
+		index, ok := args["index"].(float64)
+		if !ok {
+			return "", fmt.Errorf("index is required")
+		}
+		if err := s.browser.SelectPage(int(index)); err != nil {
+			return "", fmt.Errorf("select page failed: %w", err)
+		}
+		return fmt.Sprintf("Switched to tab %d", int(index)), nil
+
+	case "browser_close_page":
+		index, ok := args["index"].(float64)
+		if !ok {
+			return "", fmt.Errorf("index is required")
+		}
+		if err := s.browser.ClosePage(int(index)); err != nil {
+			return "", fmt.Errorf("close page failed: %w", err)
+		}
+		return fmt.Sprintf("Closed tab %d", int(index)), nil
+
+	// --- v1.2.0 gap tools ---
+
+	case "browser_wait":
+		selector, _ := args["selector"].(string)
+		if selector == "" {
+			return "", fmt.Errorf("selector is required")
+		}
+		timeout := 5000 * time.Millisecond
+		if t, ok := args["timeout"].(float64); ok && t > 0 {
+			timeout = time.Duration(t) * time.Millisecond
+		}
+		visible, _ := args["visible"].(bool)
+		if visible {
+			if err := s.browser.WaitForElementVisible(ctx, selector, timeout); err != nil {
+				return "", fmt.Errorf("wait visible failed: %w", err)
+			}
+			return fmt.Sprintf("Element %s is visible", selector), nil
+		}
+		if err := s.browser.WaitForElement(ctx, selector, timeout); err != nil {
+			return "", fmt.Errorf("wait failed: %w", err)
+		}
+		return fmt.Sprintf("Element %s found", selector), nil
+
+	case "browser_scroll":
+		selector, _ := args["selector"].(string)
+		if selector == "" {
+			return "", fmt.Errorf("selector is required")
+		}
+		var x, y int
+		if v, ok := args["x"].(float64); ok {
+			x = int(v)
+		}
+		if v, ok := args["y"].(float64); ok {
+			y = int(v)
+		}
+		toBottom, _ := args["to_bottom"].(bool)
+		toTop, _ := args["to_top"].(bool)
+		result, err := s.browser.ScrollElement(selector, x, y, toBottom, toTop)
+		if err != nil {
+			return "", fmt.Errorf("scroll failed: %w", err)
+		}
+		data, err := json.MarshalIndent(result, "", "  ")
+		if err != nil {
+			return "", err
+		}
+		return string(data), nil
+
+	case "browser_computed_styles":
+		selector, _ := args["selector"].(string)
+		if selector == "" {
+			return "", fmt.Errorf("selector is required")
+		}
+		var properties []string
+		if p, ok := args["properties"].(string); ok && p != "" {
+			properties = strings.Split(p, ",")
+		}
+		styles, err := s.browser.GetComputedStyles(selector, properties)
+		if err != nil {
+			return "", fmt.Errorf("computed styles failed: %w", err)
+		}
+		data, err := json.MarshalIndent(styles, "", "  ")
+		if err != nil {
+			return "", err
+		}
+		return string(data), nil
+
+	case "browser_computed_styles_diff":
+		selector, _ := args["selector"].(string)
+		if selector == "" {
+			return "", fmt.Errorf("selector is required")
+		}
+		against, ok := args["against"].(float64)
+		if !ok {
+			return "", fmt.Errorf("against page index is required")
+		}
+		var properties []string
+		if p, ok := args["properties"].(string); ok && p != "" {
+			properties = strings.Split(p, ",")
+		}
+		selectorTarget, _ := args["selector_target"].(string)
+		result, err := s.browser.GetComputedStylesDiff(selector, int(against), properties, selectorTarget)
+		if err != nil {
+			return "", fmt.Errorf("style diff failed: %w", err)
+		}
+		data, err := json.MarshalIndent(result, "", "  ")
+		if err != nil {
+			return "", err
+		}
+		return string(data), nil
+
+	case "browser_text":
+		selector, _ := args["selector"].(string)
+		if selector == "" {
+			return "", fmt.Errorf("selector is required")
+		}
+		mode, _ := args["mode"].(string)
+		if mode == "" {
+			mode = "structured"
+		}
+		result, err := s.browser.GetTextContent(selector, mode)
+		if err != nil {
+			return "", fmt.Errorf("text extraction failed: %w", err)
+		}
+		data, err := json.MarshalIndent(result, "", "  ")
+		if err != nil {
+			return "", err
+		}
+		return string(data), nil
+
+	case "browser_font_check":
+		family, _ := args["family"].(string)
+		if family == "" {
+			return "", fmt.Errorf("family is required")
+		}
+		result, err := s.browser.CheckFont(family)
+		if err != nil {
+			return "", fmt.Errorf("font check failed: %w", err)
+		}
+		data, err := json.MarshalIndent(result, "", "  ")
+		if err != nil {
+			return "", err
+		}
+		return string(data), nil
+
+	case "browser_viewport":
+		preset, _ := args["preset"].(string)
+		width, hasWidth := args["width"].(float64)
+		height, hasHeight := args["height"].(float64)
+
+		// GET: no args → return current viewport
+		if preset == "" && !hasWidth && !hasHeight {
+			vp, err := s.browser.GetViewport()
+			if err != nil {
+				return "", err
+			}
+			data, err := json.MarshalIndent(vp, "", "  ")
+			if err != nil {
+				return "", err
+			}
+			return string(data), nil
+		}
+
+		// Resolve preset
+		if preset != "" {
+			switch preset {
+			case "mobile":
+				width, height = 375, 812
+			case "tablet":
+				width, height = 768, 1024
+			case "desktop":
+				width, height = 1440, 900
+			case "wide":
+				width, height = 1920, 1080
+			default:
+				return "", fmt.Errorf("unknown preset: %s (use mobile, tablet, desktop, or wide)", preset)
+			}
+		}
+
+		if width == 0 || height == 0 {
+			return "", fmt.Errorf("width and height are required")
+		}
+
+		var dprArgs []float64
+		if d, ok := args["dpr"].(float64); ok && d > 0 {
+			dprArgs = []float64{d}
+		}
+		prev, current, err := s.browser.SetViewport(int(width), int(height), dprArgs...)
+		if err != nil {
+			return "", fmt.Errorf("viewport resize failed: %w", err)
+		}
+		data, err := json.MarshalIndent(map[string]interface{}{
+			"previous": prev,
+			"current":  current,
+		}, "", "  ")
+		if err != nil {
+			return "", err
+		}
+		return string(data), nil
+
+	case "browser_clean_snapshot":
+		selector, _ := args["selector"].(string)
+		if selector == "" {
+			return "", fmt.Errorf("selector is required")
+		}
+		opts := browser.CleanSnapshotOptions{}
+		if d, ok := args["depth"].(float64); ok {
+			opts.Depth = int(d)
+		}
+		if m, ok := args["max_length"].(float64); ok {
+			opts.MaxLength = int(m)
+		}
+		if sv, ok := args["svg_full"].(bool); ok {
+			opts.SVGFull = sv
+		}
+		jsonOutput, _ := args["json"].(bool)
+		htmlStr, jsonNode, err := s.browser.GetCleanSnapshot(selector, opts)
+		if err != nil {
+			return "", fmt.Errorf("clean snapshot failed: %w", err)
+		}
+		if jsonOutput && jsonNode != nil {
+			data, err := json.MarshalIndent(jsonNode, "", "  ")
+			if err != nil {
+				return "", err
+			}
+			return string(data), nil
+		}
+		return htmlStr, nil
+
+	case "browser_download_images":
+		selector, _ := args["selector"].(string)
+		if selector == "" {
+			return "", fmt.Errorf("selector is required")
+		}
+		fallbackScreenshot, _ := args["fallback_screenshot"].(bool)
+		outputDir, _ := args["output_dir"].(string)
+		if outputDir == "" {
+			outputDir = "/tmp"
+		}
+		images, err := s.browser.DownloadImages(selector, fallbackScreenshot)
+		if err != nil {
+			return "", fmt.Errorf("download images failed: %w", err)
+		}
+		var saved []map[string]interface{}
+		for i, img := range images {
+			if img.Error != "" {
+				saved = append(saved, map[string]interface{}{
+					"index": i,
+					"error": img.Error,
+				})
+				continue
+			}
+			ext := ".png"
+			if img.Method == "download" && img.Source != "" {
+				if strings.HasSuffix(strings.ToLower(img.Source), ".jpg") || strings.HasSuffix(strings.ToLower(img.Source), ".jpeg") {
+					ext = ".jpg"
+				}
+			}
+			path := filepath.Join(outputDir, fmt.Sprintf("image-%d%s", i, ext))
+			if err := os.WriteFile(path, img.Data, 0644); err != nil {
+				saved = append(saved, map[string]interface{}{
+					"index": i,
+					"error": err.Error(),
+				})
+				continue
+			}
+			saved = append(saved, map[string]interface{}{
+				"index":  i,
+				"path":   path,
+				"method": img.Method,
+				"source": img.Source,
+			})
+		}
+		data, err := json.MarshalIndent(map[string]interface{}{
+			"count": len(saved),
+			"files": saved,
+		}, "", "  ")
+		if err != nil {
+			return "", err
+		}
+		return string(data), nil
 
 	default:
 		return "", fmt.Errorf("unknown tool: %s", name)

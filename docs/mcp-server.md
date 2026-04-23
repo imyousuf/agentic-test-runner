@@ -25,7 +25,7 @@ atr mcp serve [flags]
 
 ## Available Browser Tools
 
-The MCP server exposes 16 browser automation tools:
+The MCP server exposes 30 browser automation tools:
 
 ### Navigation
 
@@ -36,6 +36,15 @@ The MCP server exposes 16 browser automation tools:
 | `browser_go_forward` | Navigate forward in history | - |
 | `browser_reload` | Reload the current page | - |
 
+### Page Management
+
+| Tool | Description | Parameters |
+|------|-------------|------------|
+| `browser_new_page` | Open a new tab | `url` (optional) |
+| `browser_list_pages` | List all open tabs | - |
+| `browser_select_page` | Switch to tab by index | `index` (required) |
+| `browser_close_page` | Close tab by index | `index` (required) |
+
 ### Interaction
 
 | Tool | Description | Parameters |
@@ -44,6 +53,9 @@ The MCP server exposes 16 browser automation tools:
 | `browser_fill` | Fill a form field | `selector` (required), `value` (required) |
 | `browser_hover` | Hover over an element | `selector` (required) |
 | `browser_press_key` | Press a key or combination | `key` (required) |
+| `browser_drag` | Drag one element to another | `from` (required), `to` (required) |
+| `browser_wait` | Wait for element to appear | `selector` (required), `timeout` (optional, ms), `visible` (optional) |
+| `browser_scroll` | Scroll within an element | `selector` (required), `x`/`y` (optional), `to_bottom`/`to_top` (optional) |
 
 ### Inspection
 
@@ -53,7 +65,15 @@ The MCP server exposes 16 browser automation tools:
 | `browser_get_title` | Get the current page title | - |
 | `browser_get_html` | Get the page HTML content | - |
 | `browser_snapshot` | Get accessibility tree | `verbose` (optional) |
-| `browser_screenshot` | Take a screenshot | `file` (optional), `full_page` (optional) |
+| `browser_screenshot` | Take a screenshot | `file`, `full_page`, `selector`, `selector_all`, `output_dir` (all optional) |
+| `browser_eval` | Execute JavaScript | `script` (required) |
+| `browser_computed_styles` | Get computed CSS styles | `selector` (required), `properties` (optional, CSV) |
+| `browser_computed_styles_diff` | Compare styles across pages | `selector` (required), `against` (required), `properties`, `selector_target` (optional) |
+| `browser_text` | Extract text content | `selector` (required), `mode` (optional: structured/flat/links/headings) |
+| `browser_clean_snapshot` | Get cleaned DOM subtree | `selector` (required), `depth`, `max_length`, `svg_full`, `json` (optional) |
+| `browser_font_check` | Check font load status | `family` (required) |
+| `browser_viewport` | Get or set viewport size | `width`/`height`, `preset`, `dpr` (all optional — omit all to get current) |
+| `browser_download_images` | Download images from elements | `selector` (required), `output_dir`, `fallback_screenshot` (optional) |
 
 ### AI
 
@@ -67,6 +87,7 @@ The MCP server exposes 16 browser automation tools:
 |------|-------------|------------|
 | `browser_console` | Get console messages | `limit` (optional, default: 50) |
 | `browser_network` | Get network requests | `limit` (optional, default: 50) |
+| `browser_errors` | Get failed network requests | - |
 
 ## Integration with Claude CLI
 

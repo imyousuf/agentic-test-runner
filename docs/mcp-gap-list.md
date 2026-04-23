@@ -2,41 +2,26 @@
 
 CLI/API commands that have no MCP tool equivalent yet.
 
-## Existing Commands (pre-v1.2.0)
+## Status
 
-| CLI Command | API Endpoint | Priority |
-|-------------|-------------|----------|
-| `eval` | `POST /api/v1/eval` | High — agents need JS execution |
-| `drag` | `POST /api/v1/drag` | Medium |
-| `errors` | `GET /api/v1/errors` | Low |
-| `new-page` | `POST /api/v1/pages` | Medium |
-| `list-pages` | `GET /api/v1/pages` | Medium |
-| `select-page` | `PUT /api/v1/pages/{index}` | Medium |
-| `close-page` | `DELETE /api/v1/pages/{index}` | Low |
+All previously identified gaps have been closed. The MCP server now exposes 30 tools
+covering navigation, page management, interaction, inspection, AI, and debugging.
 
-## New Commands (v1.2.0)
+## Remaining Gaps
 
-| CLI Command | API Endpoint | Priority |
-|-------------|-------------|----------|
-| `computed-styles` | `GET /api/v1/computed-styles` | High — most frequent operation in style pipelines |
-| `computed-styles --selector-all` | `GET /api/v1/computed-styles?selector_all=` | High — bulk style verification |
-| `computed-styles-diff` | `GET /api/v1/computed-styles-diff` | High — cross-page style comparison |
-| `text` | `GET /api/v1/text` | High — structured text extraction |
-| `wait` | `POST /api/v1/wait` | High — element readiness check |
-| `scroll` | `POST /api/v1/scroll` | Medium — modal/dialog scrolling |
-| `screenshot --selector-all` | `GET /api/v1/screenshot?selector_all=` | Medium — batch element screenshots |
-| `screenshot --selector --full` | `GET /api/v1/screenshot?selector=&full=true` | Medium — full-height element capture |
-| `font-check` | `GET /api/v1/font-check` | High — verifies actual font load status |
-| `download-images` | `POST /api/v1/download-images` | Medium — download/screenshot images within elements |
-| `viewport` | `GET/POST /api/v1/viewport` | Medium — responsive testing viewport control |
-| `clean-snapshot` | `GET /api/v1/clean-snapshot` | Medium — cleaned DOM subtree extraction |
-| `batch` | N/A (CLI-only) | Low — CLI pipeline mode (no server equivalent) |
-| `computed-styles --selector` (batch) | `GET /api/v1/computed-styles?selectors=` | High — batch style extraction |
-| `computed-styles-diff --selector` (batch) | `GET /api/v1/computed-styles-diff?selectors=` | High — batch style comparison |
+| CLI Command | API Endpoint | Notes |
+|-------------|-------------|-------|
+| `batch` | N/A (CLI-only) | CLI pipeline mode — no server equivalent by design |
 
-## MCP Tools That Already Exist
+## MCP Tools (30 total)
 
-browser_navigate, browser_click, browser_fill, browser_screenshot,
+browser_navigate, browser_go_back, browser_go_forward, browser_reload,
+browser_new_page, browser_list_pages, browser_select_page, browser_close_page,
+browser_click, browser_fill, browser_hover, browser_press_key, browser_drag,
+browser_wait, browser_scroll,
 browser_get_url, browser_get_title, browser_get_html, browser_snapshot,
-browser_console, browser_network, browser_press_key, browser_hover,
-browser_go_back, browser_go_forward, browser_reload, browser_ask
+browser_screenshot, browser_eval, browser_computed_styles,
+browser_computed_styles_diff, browser_text, browser_clean_snapshot,
+browser_font_check, browser_viewport, browser_download_images,
+browser_ask,
+browser_console, browser_network, browser_errors
