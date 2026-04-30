@@ -8,9 +8,38 @@ permissions:
   contents: write
 
 jobs:
-  release:
-    name: Build & Release Dev
-    runs-on: ubuntu-latest
+  build:
+    name: Build (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-amd64
+            os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+            ext: ''
+            archive: tar.gz
+          - target: darwin-amd64
+            os: macos-latest
+            goos: darwin
+            goarch: amd64
+            ext: ''
+            archive: tar.gz
+          - target: darwin-arm64
+            os: macos-latest
+            goos: darwin
+            goarch: arm64
+            ext: ''
+            archive: tar.gz
+          - target: windows-amd64
+            os: windows-latest
+            goos: windows
+            goarch: amd64
+            ext: '.exe'
+            archive: zip
+
+    runs-on: ${{ matrix.os }}
 
     steps:
       - name: Checkout code
@@ -21,14 +50,69 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.23'
+          go-version: '1.25'
           cache: true
+
+      - name: Install Linux runtime dependencies
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libxtst-dev libxss-dev libpng-dev \
+            libxkbcommon-dev libx11-dev xclip xsel
 
       - name: Download dependencies
         run: go mod download
 
       - name: Run tests
-        run: go test -v ./...
+        run: go test ./...
+
+      - name: Build binary
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        shell: bash
+        run: |
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          VERSION="dev-$SHORT_SHA"
+          DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          LDFLAGS="-X main.version=$VERSION -X main.commit=${{ github.sha }} -X main.date=$DATE"
+          mkdir -p dist
+          go build -ldflags "$LDFLAGS" -o dist/atr${{ matrix.ext }} ./cmd/atr
+
+      - name: Archive (tar.gz)
+        if: matrix.archive == 'tar.gz'
+        shell: bash
+        run: |
+          cd dist
+          tar -czvf atr-${{ matrix.target }}.tar.gz atr
+          rm atr
+
+      - name: Archive (zip)
+        if: matrix.archive == 'zip'
+        shell: bash
+        run: |
+          cd dist
+          7z a atr-${{ matrix.target }}.zip atr.exe
+          rm atr.exe
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: atr-${{ matrix.target }}
+          path: dist/atr-${{ matrix.target }}.*
+          retention-days: 7
+
+  release:
+    name: Publish Dev Release
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Get version info
         id: version
@@ -38,44 +122,16 @@ jobs:
           echo "version=dev-$SHORT_SHA" >> $GITHUB_OUTPUT
           echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_OUTPUT
 
-      - name: Build all platforms
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
-          COMMIT: ${{ github.sha }}
-          DATE: ${{ steps.version.outputs.date }}
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Stage release files
         run: |
-          LDFLAGS="-X main.version=$VERSION -X main.commit=$COMMIT -X main.date=$DATE"
-
-          # Linux AMD64
-          GOOS=linux GOARCH=amd64 go build -ldflags "$LDFLAGS" -o dist/atr ./cmd/atr
-          tar -czvf dist/atr-linux-amd64.tar.gz -C dist atr
-          rm dist/atr
-
-          # Linux ARM64
-          GOOS=linux GOARCH=arm64 go build -ldflags "$LDFLAGS" -o dist/atr ./cmd/atr
-          tar -czvf dist/atr-linux-arm64.tar.gz -C dist atr
-          rm dist/atr
-
-          # macOS AMD64
-          GOOS=darwin GOARCH=amd64 go build -ldflags "$LDFLAGS" -o dist/atr ./cmd/atr
-          tar -czvf dist/atr-darwin-amd64.tar.gz -C dist atr
-          rm dist/atr
-
-          # macOS ARM64
-          GOOS=darwin GOARCH=arm64 go build -ldflags "$LDFLAGS" -o dist/atr ./cmd/atr
-          tar -czvf dist/atr-darwin-arm64.tar.gz -C dist atr
-          rm dist/atr
-
-          # Windows AMD64
-          GOOS=windows GOARCH=amd64 go build -ldflags "$LDFLAGS" -o dist/atr.exe ./cmd/atr
-          cd dist && zip atr-windows-amd64.zip atr.exe && rm atr.exe && cd ..
-
-          # Windows ARM64
-          GOOS=windows GOARCH=arm64 go build -ldflags "$LDFLAGS" -o dist/atr.exe ./cmd/atr
-          cd dist && zip atr-windows-arm64.zip atr.exe && rm atr.exe && cd ..
-
-      - name: Generate checksums
-        run: |
+          mkdir -p dist
+          find artifacts -type f \( -name '*.tar.gz' -o -name '*.zip' \) -exec mv {} dist/ \;
+          ls -la dist/
           cd dist
           sha256sum *.tar.gz *.zip > checksums.txt
           cat checksums.txt
@@ -104,6 +160,12 @@ jobs:
 
             Download the appropriate archive for your platform and extract the `atr` binary.
 
+            **Linux:** Requires X11 and a few system libraries for `atr computer` (mouse/keyboard/screen control). Install with:
+
+            ```bash
+            sudo apt-get install -y libxtst-dev libxss-dev libpng-dev libxkbcommon-dev libx11-dev xclip xsel
+            ```
+
             **Linux/macOS:**
             ```bash
             tar -xzf atr-<platform>.tar.gz
@@ -114,17 +176,22 @@ jobs:
             **Windows:**
             Extract `atr.exe` from the zip file and add it to your PATH.
 
+            > **Note:** Linux ARM64 is not built in this release because robotgo's
+            > native build chain does not run on the ubuntu-latest x64 runners
+            > without a cross-compile sysroot. Track this as future work if needed.
+            >
+            > Windows ARM64 is omitted for the same reason on macOS/Linux runners.
+            > x64 binaries cover the common case for both platforms.
+
             ---
 
             > **Note:** This is a development build and may contain unstable features.
             > For stable releases, please use tagged versions.
           files: |
             dist/atr-linux-amd64.tar.gz
-            dist/atr-linux-arm64.tar.gz
             dist/atr-darwin-amd64.tar.gz
             dist/atr-darwin-arm64.tar.gz
             dist/atr-windows-amd64.zip
-            dist/atr-windows-arm64.zip
             dist/checksums.txt
           prerelease: true
           make_latest: false
