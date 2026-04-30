@@ -2,7 +2,7 @@
 	build-linux-amd64 build-linux-arm64 \
 	build-darwin-amd64 build-darwin-arm64 \
 	build-windows-amd64 build-windows-arm64 \
-	build-all
+	build-all install-deps-linux
 
 # Binary name
 BINARY_NAME=atr
@@ -113,6 +113,13 @@ tidy:
 ## deps: Download dependencies
 deps:
 	$(GOMOD) download
+
+## install-deps-linux: Install Linux system libraries required for desktop control (X11)
+install-deps-linux:
+	sudo apt-get update
+	sudo apt-get install -y \
+		libxtst-dev libxss-dev libpng-dev \
+		libxkbcommon-dev libx11-dev xclip xsel
 
 ## help: Show this help
 help:

@@ -1,0 +1,126 @@
+---
+name: atr-computer
+description: Control the desktop (mouse, keyboard, screen, windows, apps) cross-platform via ATR. Take screenshots, click at coordinates, type text, drag, manage windows, launch and quit apps. Use for native UI testing, desktop automation, or anything outside the browser. Pairs with atr-browser when a workflow spans both (e.g. drag a file from the OS file manager into a browser drop zone).
+allowed-tools: Bash(atr computer:*)
+---
+
+# ATR Desktop Computer-Use Skill
+
+This skill provides cross-platform desktop control through ATR's computer daemon. Mouse, keyboard, screen capture, window management, and app launch — all driven from the same `atr` CLI that powers `atr-browser`.
+
+## Architecture
+
+```
+Claude Code --> atr CLI --> ATR Computer Daemon --> robotgo (X11 / macOS / Windows)
+```
+
+The daemon enforces a configurable safety countdown before every action so the user can intervene with Ctrl+C. Read-only operations (screenshot, position, list windows) skip the countdown.
+
+> **Linux:** X11 only in v1. Wayland is not supported yet.
+
+## Getting Started
+
+### Step 1: Check status and start if needed
+
+```bash
+atr computer status
+```
+
+If not running:
+
+```bash
+atr computer start                           # default: per-request 3s countdown
+atr computer start --countdown-mode per-app  # countdown only on first action per app
+atr computer start --countdown-mode off      # no countdown (trusted batch runs)
+atr computer start --countdown 1             # 1-second countdown
+```
+
+State and logs:
+- State: `~/.atr/computer.state`
+- Daemon log (where countdown messages appear): `~/.atr/computer.log`
+
+### Step 2: Take a screenshot
+
+```bash
+atr computer screenshot --output /tmp/desk.png
+atr computer screenshot --output /tmp/region.png --region 0,0,800,600
+```
+
+### Step 3: Drive mouse and keyboard
+
+```bash
+atr computer click 800 50
+atr computer click 800 50 --double
+atr computer click 800 50 --button right
+atr computer move 100 100
+atr computer drag --from 200,300 --to 1200,400
+atr computer scroll --dy -3
+atr computer hover 500 500
+
+atr computer type "Hello, world"
+atr computer key enter
+atr computer chord ctrl+shift+t
+```
+
+### Step 4: Manage windows
+
+```bash
+atr computer --json window list                          # enumerate
+atr computer window active                               # focused window
+atr computer window focus --title "Firefox"              # by title or app name
+atr computer window minimize --title "Slack"
+atr computer window maximize --title "Code"
+atr computer window restore --id 12345
+atr computer window close --title "Calculator"
+atr computer window move --id 12345 --to 100,100
+atr computer window resize --id 12345 --size 800,600
+```
+
+### Step 5: Launch / quit apps
+
+```bash
+atr computer app launch firefox
+atr computer app launch xclock
+atr computer app quit firefox
+```
+
+### Step 6: Stop the daemon
+
+```bash
+atr computer stop
+```
+
+## Safety countdown modes
+
+| Mode          | Behavior                                                                  |
+|---------------|---------------------------------------------------------------------------|
+| `per-request` | Default. Every gated action shows a countdown.                            |
+| `per-app`     | First action against an app prompts; subsequent actions auto-approve.     |
+| `off`         | No countdown. Explicit opt-in for trusted batches.                        |
+
+Aborting: press Ctrl+C in the daemon's terminal during a countdown. The action returns `aborted by user`.
+
+## Combined workflow with `atr-browser`
+
+ATR can drive both desktop and browser in one flow. Example: end-to-end drag-and-drop between the OS file manager and a browser upload zone.
+
+```bash
+atr browser start
+atr browser navigate https://example.com/upload
+
+atr computer start --countdown-mode off
+atr computer app launch nautilus
+atr computer window focus --title "Files"
+atr computer drag --from 200,300 --to 1200,400   # drag file into browser
+
+atr browser screenshot --output /tmp/dnd.png
+```
+
+For browser-only workflows, see the `atr-browser` skill. For combined workflows, both daemons can run simultaneously on different ports (browser: 9333, computer: 9334).
+
+## Tips
+
+- Use `atr computer --json window list` to enumerate windows, then operate on a specific ID for stability.
+- For Linux, the per-app cache key is `WM_CLASS` (window class), so all Chrome windows share one approval.
+- Screenshots return PNG bytes; set `--output` to a local path the user expects.
+- Coordinates are absolute screen pixels. With multiple displays, use `atr computer displays` to get bounds.
