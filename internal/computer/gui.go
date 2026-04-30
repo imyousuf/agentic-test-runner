@@ -248,27 +248,34 @@ func (g *gui) runOsascript(action ActionDesc, seconds int) {
 }
 
 // runPowerShellToast shows a Windows toast via PowerShell. Visual only.
+//
+// The toast body comes from caller-supplied action data (description and
+// app id). We pass it through an environment variable rather than
+// interpolating into the PowerShell script so a description containing a
+// single-quote can't break out of the string literal and inject commands.
 func (g *gui) runPowerShellToast(action ActionDesc, seconds int) {
 	desc := action.Description
 	if action.AppID != "" {
 		desc = fmt.Sprintf("%s on %s", desc, action.AppID)
 	}
-	body := fmt.Sprintf("%s\\nStarts in %ds. Ctrl+C in daemon terminal to abort.", desc, seconds)
-	// Use Windows Forms balloon notification — most universal across Windows
-	// versions, no external modules required.
+	body := fmt.Sprintf("%s\nStarts in %ds. Ctrl+C in daemon terminal to abort.", desc, seconds)
+	durationMs := seconds * 1000
+	// Script reads the body from $env:ATR_GUI_BODY — fixed string with no
+	// caller-supplied content interpolated.
 	script := strings.Join([]string{
 		"Add-Type -AssemblyName System.Windows.Forms;",
 		"$n = New-Object System.Windows.Forms.NotifyIcon;",
 		"$n.Icon = [System.Drawing.SystemIcons]::Information;",
 		"$n.BalloonTipTitle = 'ATR Computer Use';",
-		fmt.Sprintf("$n.BalloonTipText = '%s';", body),
+		"$n.BalloonTipText = $env:ATR_GUI_BODY;",
 		"$n.Visible = $true;",
-		fmt.Sprintf("$n.ShowBalloonTip(%d);", seconds*1000),
-		fmt.Sprintf("Start-Sleep -Milliseconds %d;", seconds*1000),
+		fmt.Sprintf("$n.ShowBalloonTip(%d);", durationMs),
+		fmt.Sprintf("Start-Sleep -Milliseconds %d;", durationMs),
 		"$n.Dispose();",
 	}, " ")
-	// #nosec G204
+	// #nosec G204 -- script is a fixed string; user input arrives via env var.
 	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", script)
+	cmd.Env = append(cmd.Env, "ATR_GUI_BODY="+body)
 	if err := cmd.Start(); err != nil {
 		if g.logger != nil {
 			g.logger.Printf("powershell start: %v", err)

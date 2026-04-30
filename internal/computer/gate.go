@@ -72,11 +72,17 @@ func (c *Computer) runCountdown(ctx context.Context, action ActionDesc) error {
 
 	fmt.Fprintf(c.cfg.Output, "[atr] About to: %s\n[atr]   Press Ctrl+C to abort. ", desc)
 
+	// One ticker for the entire countdown: cancellation responsiveness comes
+	// from the select, not from per-iteration timer allocations. Using
+	// time.After here would leak (seconds * 10) timers per gate.
+	tick := time.NewTicker(100 * time.Millisecond)
+	defer tick.Stop()
+
 	guiAborted := false
 loop:
 	for remaining := seconds; remaining > 0; remaining-- {
 		fmt.Fprintf(c.cfg.Output, "%d... ", remaining)
-		// Use a 1-second tick made of 10×100ms slices for responsive cancellation.
+		// 10 × 100ms slices = 1 second, with abort checks on every slice.
 		for range 10 {
 			select {
 			case <-ctx.Done():
@@ -98,7 +104,7 @@ loop:
 				// GUI channel closed or returned nil → keep counting; nil out
 				// so we don't keep selecting on a closed channel.
 				guiDone = nil
-			case <-time.After(100 * time.Millisecond):
+			case <-tick.C:
 			}
 		}
 	}
