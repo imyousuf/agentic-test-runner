@@ -100,8 +100,69 @@ Linux requires X11 (Wayland is not supported in v1).`,
 	cmd.AddCommand(newComputerResetApprovalsCmd())
 	cmd.AddCommand(newComputerWindowCmd())
 	cmd.AddCommand(newComputerAppCmd())
+	cmd.AddCommand(newComputerAskCmd())
 
 	return cmd
+}
+
+var (
+	computerAskMaxSteps int
+	computerAskTimeout  time.Duration
+)
+
+func newComputerAskCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "ask <instruction>",
+		Short: "Drive the desktop to accomplish a natural-language instruction",
+		Long: `Run an in-process agent loop that screenshots the desktop, asks an LLM what
+to do next, and calls the computer tools (click/type/key/launch/etc.) until
+the goal is achieved or max-steps is reached.
+
+The LLM backend and model are inherited from the global ATR config (set via
+'atr config' or env vars). Default backend resolves to 'gemini-api' or
+'vertex-ai' depending on credentials; backend 'claude-cli' uses the Claude
+CLI subprocess that already drives the existing 'atr browser ask'.
+
+Examples:
+  atr computer ask "open xclock and tell me what time it shows"
+  atr computer ask "list the open windows that contain 'chrome' in the title"
+  atr computer ask --max-steps 30 --timeout 10m "<longer task>"
+`,
+		Args: cobra.ExactArgs(1),
+		RunE: runComputerAsk,
+	}
+	cmd.Flags().IntVar(&computerAskMaxSteps, "max-steps", 0, "Max agent iterations (default 20)")
+	cmd.Flags().DurationVar(&computerAskTimeout, "timeout", 0, "Max wall-clock time for the run (default 5m)")
+	return cmd
+}
+
+func runComputerAsk(cmd *cobra.Command, args []string) error {
+	body := map[string]any{"instruction": args[0]}
+	if computerAskMaxSteps > 0 {
+		body["max_steps"] = computerAskMaxSteps
+	}
+	if computerAskTimeout > 0 {
+		body["timeout_seconds"] = int(computerAskTimeout.Seconds())
+	}
+	// Use a long client timeout so the daemon's own timeout is what
+	// terminates the run.
+	resp, err := computerAPIRequestRaw("POST", "/computer/ask", body)
+	if err != nil {
+		return err
+	}
+	if !resp.Success {
+		return fmt.Errorf("%s", resp.Error)
+	}
+	if computerJSONOutput {
+		return outputJSON(resp.Data)
+	}
+	if data, ok := resp.Data.(map[string]any); ok {
+		if a, ok := data["answer"].(string); ok && a != "" {
+			fmt.Println(a)
+			return nil
+		}
+	}
+	return outputHuman(resp.Data)
 }
 
 // ---------------- Daemon lifecycle ----------------
@@ -238,6 +299,7 @@ func runComputerServe(cmd *cobra.Command, args []string) error {
 	server, err := api.NewComputerServer(api.ComputerServerConfig{
 		Port:        computerPort,
 		ComputerCfg: cfg.Computer,
+		AppConfig:   cfg,
 	})
 	if err != nil {
 		return err
@@ -799,8 +861,9 @@ func computerAPIRequestRaw(method, path string, body any) (*api.APIResponse, err
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	// Long timeout: a per-request countdown alone takes 3s; longer for typing.
-	client := &http.Client{Timeout: 5 * time.Minute}
+	// Long timeout: covers per-action countdowns AND multi-step ask agent runs
+	// (the daemon's own --timeout flag is the real cap).
+	client := &http.Client{Timeout: 30 * time.Minute}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("request failed: %w", err)

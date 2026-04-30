@@ -11,7 +11,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/imyousuf/agentic-test-runner/internal/agent"
 	"github.com/imyousuf/agentic-test-runner/internal/computer"
+	"github.com/imyousuf/agentic-test-runner/pkg/llm"
 )
 
 // registerComputerRoutes wires the computer endpoints into s.mux.
@@ -38,6 +40,7 @@ func (s *ComputerServer) registerComputerRoutes() {
 	s.mux.HandleFunc("/api/v1/computer/window/resize", s.handleComputerResizeWindow)
 	s.mux.HandleFunc("/api/v1/computer/app/launch", s.handleComputerLaunchApp)
 	s.mux.HandleFunc("/api/v1/computer/app/quit", s.handleComputerQuitApp)
+	s.mux.HandleFunc("/api/v1/computer/ask", s.handleComputerAsk)
 }
 
 // requireMethod returns true if the request method matches; otherwise it
@@ -522,6 +525,72 @@ func (s *ComputerServer) handleComputerQuitApp(w http.ResponseWriter, r *http.Re
 		return
 	}
 	writeSuccess(w, map[string]any{"quit": req.Name})
+}
+
+// handleComputerAsk runs an in-process agent loop that drives the desktop
+// to accomplish the user's natural-language instruction. Mirrors handleAsk
+// (browser) at internal/api/handlers.go.
+func (s *ComputerServer) handleComputerAsk(w http.ResponseWriter, r *http.Request) {
+	if !requireMethod(w, r, http.MethodPost) {
+		return
+	}
+	var req struct {
+		Instruction    string `json:"instruction"`
+		MaxSteps       int    `json:"max_steps,omitempty"`
+		TimeoutSeconds int    `json:"timeout_seconds,omitempty"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if req.Instruction == "" {
+		writeError(w, http.StatusBadRequest, "instruction is required")
+		return
+	}
+	if s.appConfig == nil {
+		writeError(w, http.StatusInternalServerError, "LLM not configured: app config not provided to server")
+		return
+	}
+	if err := s.appConfig.ValidateForLLM(); err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("LLM configuration error: %v", err))
+		return
+	}
+
+	llmCfg := s.appConfig.GetLLMConfig()
+	llmClient, err := llm.NewClient(r.Context(), llmCfg)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to create LLM client: %v", err))
+		return
+	}
+	defer llmClient.Close()
+
+	timeout := time.Duration(req.TimeoutSeconds) * time.Second
+	askAgent := agent.NewComputerAskAgent(agent.ComputerAskConfig{
+		LLMClient:     llmClient,
+		Computer:      s.computer,
+		MaxIterations: req.MaxSteps,
+		Timeout:       timeout,
+		Verbose:       true,
+	})
+
+	ctx, cancel := s.gatedContext(r.Context())
+	defer cancel()
+
+	start := time.Now()
+	answer, err := askAgent.ComputerAsk(ctx, req.Instruction)
+	duration := time.Since(start)
+
+	if err != nil {
+		writeError(w, abortStatus(err), fmt.Sprintf("computer ask failed: %v", err))
+		return
+	}
+
+	writeSuccess(w, map[string]any{
+		"answer":      answer,
+		"duration_ms": duration.Milliseconds(),
+		"backend":     string(llmClient.Provider()),
+		"model":       llmClient.Model(),
+	})
 }
 
 // decodeJSON decodes the request body into v. Empty body is OK.

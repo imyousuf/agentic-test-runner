@@ -10,8 +10,8 @@
     {
       "name": "atr-skills",
       "source": "./",
-      "description": "Skills: browser control + recording (atr-browser), cross-platform desktop control with multi-monitor support (atr-computer: mouse, keyboard, screen, windows, apps), run tests with AI analysis (atr-analyze), behavior testing (atr-behavior). MCP Server: 50+ tools (30 browser + 21 desktop) via 'atr mcp serve'",
-      "version": "1.8.0"
+      "description": "Skills: browser control + recording (atr-browser), cross-platform desktop control with in-process agent + multi-monitor support (atr-computer: mouse, keyboard, screen, windows, apps, 'computer ask' for natural-language tasks), run tests with AI analysis (atr-analyze), behavior testing (atr-behavior). MCP Server: 50+ tools (30 browser + 22 desktop) via 'atr mcp serve'",
+      "version": "1.9.0"
     }
   ]
 }

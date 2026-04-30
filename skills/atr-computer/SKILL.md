@@ -121,6 +121,34 @@ atr browser screenshot --output /tmp/dnd.png
 
 For browser-only workflows, see the `atr-browser` skill. For combined workflows, both daemons can run simultaneously on different ports (browser: 9333, computer: 9334).
 
+## Asking the agent (`atr computer ask`)
+
+Instead of issuing one command at a time, you can describe a desktop task in plain language and let an agent loop drive the screenshots, clicks, and keystrokes:
+
+```bash
+atr computer ask "open xclock and tell me what time it shows"
+atr computer ask "list the open windows that contain 'chrome' in the title"
+atr computer ask --max-steps 30 --timeout 10m "open the GNOME calculator and compute 17 * 23"
+```
+
+The agent uses the LLM backend configured for ATR (`backend: gemini-api | vertex-ai | claude-cli` in `~/.atr/config.yaml`). Default model aliases:
+
+| Tier  | Model                          |
+|-------|--------------------------------|
+| flash | `gemini-3.1-flash-preview`     |
+| pro   | `gemini-3.2-pro-preview`       |
+
+Override per-run with the global `--model` flag (e.g. `atr --model pro computer ask "..."`). With `backend: claude-cli`, the model flag is ignored and Claude CLI is invoked as a subprocess.
+
+**Tools the agent can call** (curated subset):
+- Perception: `computer_screenshot` (image fed back to the LLM), `computer_displays`, `computer_active_window`, `computer_list_windows`, `computer_position`
+- Actuation: `computer_click`, `computer_type`, `computer_press_key`, `computer_key_chord`, `computer_focus_window`, `computer_window_state` (minimize/maximize/restore/close), `computer_launch_app`
+
+**Limits and gotchas:**
+- The agent **cannot type passwords** — if a sudo / polkit prompt appears, it stops and reports the blocker.
+- Each screenshot sent to the LLM costs vision tokens; with `--model pro` a 10-step task is measurable spend.
+- The countdown gate inherits whatever the daemon was started with. For ask runs you usually want `atr computer start --countdown-mode per-app` so the first action against an app prompts and subsequent ones auto-approve.
+
 ## Coordinates and multi-monitor
 
 ATR uses **root coordinates** as the public API for clicks, moves, drags, and window positions. Root coords have a single bounding-box origin at (0, 0) covering all monitors — every visible coordinate is non-negative, matching `xrandr` and the X11 root window. `atr computer --json window list` and `atr computer displays` both return root coords.

@@ -21,12 +21,17 @@ type ComputerServer struct {
 	endpoint   string
 	mux        *http.ServeMux
 	mode       computer.Mode
+	appConfig  *config.Config // for LLM-powered features (computer ask)
 }
 
 // ComputerServerConfig holds configuration for the computer server.
 type ComputerServerConfig struct {
 	Port        int
 	ComputerCfg config.ComputerConfig
+	// AppConfig is the full ATR config used by LLM-powered features such
+	// as `atr computer ask`. May be nil; ask endpoints will return an
+	// error in that case.
+	AppConfig *config.Config
 }
 
 // NewComputerServer creates a new computer-control server.
@@ -46,9 +51,10 @@ func NewComputerServer(cfg ComputerServerConfig) (*ComputerServer, error) {
 		return nil, fmt.Errorf("failed to create computer: %w", err)
 	}
 	s := &ComputerServer{
-		computer: c,
-		mux:      http.NewServeMux(),
-		mode:     mode,
+		computer:  c,
+		mux:       http.NewServeMux(),
+		mode:      mode,
+		appConfig: cfg.AppConfig,
 	}
 	s.registerComputerRoutes()
 	return s, nil

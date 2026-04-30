@@ -258,5 +258,17 @@ func GetComputerTools() []Tool {
 				"required": []string{"name"},
 			},
 		},
+		{
+			Name:        "computer_ask",
+			Description: "Run an in-process agent loop to accomplish a desktop task described in natural language. The agent screenshots the desktop, calls the LLM with the goal, and iterates clicks/type/key/launch until the goal is achieved or max-steps is hit. Use this when you want to delegate a multi-step UI task; use the lower-level computer_* tools when you want to drive each step yourself.",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"instruction": strProp("Plain-language description of what to do (e.g. 'open xclock and tell me what time it shows')"),
+					"max_steps":   intProp("Max agent iterations (default 20)"),
+				},
+				"required": []string{"instruction"},
+			},
+		},
 	}
 }

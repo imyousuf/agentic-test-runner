@@ -327,8 +327,8 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("cli.timeout", "5m")
 
 	// Model name defaults
-	v.SetDefault("models.flash", "gemini-3-flash-preview")
-	v.SetDefault("models.pro", "gemini-3-pro-preview")
+	v.SetDefault("models.flash", "gemini-3.1-flash-preview")
+	v.SetDefault("models.pro", "gemini-3.2-pro-preview")
 
 	// Agent defaults
 	v.SetDefault("agent.max_iterations", 100)

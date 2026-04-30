@@ -9,7 +9,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/imyousuf/agentic-test-runner/internal/agent"
 	"github.com/imyousuf/agentic-test-runner/internal/computer"
+	"github.com/imyousuf/agentic-test-runner/pkg/llm"
 )
 
 // ensureComputer lazy-initializes s.computer using the configured countdown
@@ -198,9 +200,53 @@ func (s *Server) executeComputerTool(ctx context.Context, name string, args map[
 		}
 		return fmt.Sprintf("Quit %q", appName), nil
 
+	case "computer_ask":
+		return s.executeComputerAsk(ctx, args)
+
 	default:
 		return "", fmt.Errorf("unknown computer tool: %s", name)
 	}
+}
+
+// executeComputerAsk runs an in-process agent loop using the daemon's
+// configured LLM. Mirrors handleComputerAsk in internal/api but reachable
+// from MCP clients (e.g., Claude Code).
+func (s *Server) executeComputerAsk(ctx context.Context, args map[string]any) (string, error) {
+	instruction := getString(args, "instruction")
+	if instruction == "" {
+		return "", fmt.Errorf("instruction is required")
+	}
+	if s.appConfig == nil {
+		return "", fmt.Errorf("LLM not configured: app config not provided to MCP server")
+	}
+	if err := s.appConfig.ValidateForLLM(); err != nil {
+		return "", fmt.Errorf("LLM configuration error: %w", err)
+	}
+
+	c, err := s.ensureComputer()
+	if err != nil {
+		return "", err
+	}
+
+	llmCfg := s.appConfig.GetLLMConfig()
+	llmClient, err := llm.NewClient(ctx, llmCfg)
+	if err != nil {
+		return "", fmt.Errorf("failed to create LLM client: %w", err)
+	}
+	defer llmClient.Close()
+
+	askAgent := agent.NewComputerAskAgent(agent.ComputerAskConfig{
+		LLMClient:     llmClient,
+		Computer:      c,
+		MaxIterations: getInt(args, "max_steps"),
+		Verbose:       true,
+	})
+
+	answer, err := askAgent.ComputerAsk(ctx, instruction)
+	if err != nil {
+		return "", err
+	}
+	return answer, nil
 }
 
 func computerScreenshot(c *computer.Computer, args map[string]any) (string, error) {
