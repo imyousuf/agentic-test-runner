@@ -74,9 +74,15 @@ func (s *ComputerServer) Start(ctx context.Context, port int) error {
 	s.endpoint = fmt.Sprintf("http://localhost:%d", actualPort)
 
 	s.httpServer = &http.Server{
-		Handler:      s.mux,
-		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 120 * time.Second,
+		Handler:     s.mux,
+		ReadTimeout: 30 * time.Second,
+		// WriteTimeout is disabled: ask runs can legitimately exceed any
+		// fixed wall clock (the agent loop is bounded by its own
+		// context.WithTimeout from ComputerAskConfig.Timeout). Leaving
+		// WriteTimeout > 0 would kill long ask requests mid-flight while
+		// the agent continues spending LLM calls against a dropped
+		// connection.
+		WriteTimeout: 0,
 	}
 
 	state := &ComputerState{

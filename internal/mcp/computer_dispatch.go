@@ -235,10 +235,12 @@ func (s *Server) executeComputerAsk(ctx context.Context, args map[string]any) (s
 	}
 	defer llmClient.Close()
 
+	timeout := time.Duration(getInt(args, "timeout_seconds")) * time.Second
 	askAgent := agent.NewComputerAskAgent(agent.ComputerAskConfig{
 		LLMClient:     llmClient,
 		Computer:      c,
 		MaxIterations: getInt(args, "max_steps"),
+		Timeout:       timeout,
 		Verbose:       true,
 	})
 

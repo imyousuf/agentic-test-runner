@@ -556,8 +556,14 @@ func (s *ComputerServer) handleComputerAsk(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	// Build the gated context FIRST so the LLM client lifetime is bounded
+	// by the same context as the agent loop — Ctrl+C in the daemon's
+	// terminal cancels everything in one shot.
+	ctx, cancel := s.gatedContext(r.Context())
+	defer cancel()
+
 	llmCfg := s.appConfig.GetLLMConfig()
-	llmClient, err := llm.NewClient(r.Context(), llmCfg)
+	llmClient, err := llm.NewClient(ctx, llmCfg)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to create LLM client: %v", err))
 		return
@@ -572,9 +578,6 @@ func (s *ComputerServer) handleComputerAsk(w http.ResponseWriter, r *http.Reques
 		Timeout:       timeout,
 		Verbose:       true,
 	})
-
-	ctx, cancel := s.gatedContext(r.Context())
-	defer cancel()
 
 	start := time.Now()
 	answer, err := askAgent.ComputerAsk(ctx, req.Instruction)

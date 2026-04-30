@@ -264,8 +264,9 @@ func GetComputerTools() []Tool {
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"instruction": strProp("Plain-language description of what to do (e.g. 'open xclock and tell me what time it shows')"),
-					"max_steps":   intProp("Max agent iterations (default 20)"),
+					"instruction":     strProp("Plain-language description of what to do (e.g. 'open xclock and tell me what time it shows')"),
+					"max_steps":       intProp("Max agent iterations (default 20)"),
+					"timeout_seconds": intProp("Wall-clock timeout for the run in seconds (default 300)"),
 				},
 				"required": []string{"instruction"},
 			},
