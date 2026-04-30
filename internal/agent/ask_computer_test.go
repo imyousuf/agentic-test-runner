@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/imyousuf/agentic-test-runner/internal/computer"
+	"github.com/imyousuf/agentic-test-runner/pkg/llm"
 )
 
 func newTestComputerForAsk(t *testing.T) *computer.Computer {
@@ -85,6 +86,61 @@ func TestComputerScreenshotImageToolReturnsBytes(t *testing.T) {
 	}
 	if summary == "" {
 		t.Error("expected non-empty summary string")
+	}
+}
+
+func TestTrimImageHistoryKeepsRecentN(t *testing.T) {
+	mkTool := func(content string, withImg bool) llm.Message {
+		m := llm.Message{Role: llm.RoleTool, Content: content}
+		if withImg {
+			m.ImageData = []byte("png-bytes-" + content)
+			m.ImageMIME = "image/png"
+		}
+		return m
+	}
+	messages := []llm.Message{
+		{Role: llm.RoleSystem, Content: "sys"},
+		{Role: llm.RoleUser, Content: "go"},
+		{Role: llm.RoleAssistant, Content: ""},
+		mkTool("step1", true),
+		{Role: llm.RoleAssistant, Content: ""},
+		mkTool("step2", true),
+		{Role: llm.RoleAssistant, Content: ""},
+		mkTool("step3", true),
+		{Role: llm.RoleAssistant, Content: ""},
+		mkTool("step4", true),
+	}
+	out := trimImageHistory(messages, 2)
+
+	// Most recent two tool messages must KEEP image data
+	if len(out[len(out)-1].ImageData) == 0 {
+		t.Error("most recent tool message lost ImageData")
+	}
+	if len(out[len(out)-3].ImageData) == 0 {
+		t.Error("second-most recent tool message lost ImageData")
+	}
+	// Older tool messages must have empty ImageData but keep Content
+	if len(out[3].ImageData) != 0 {
+		t.Errorf("step1 should have ImageData stripped, got %d bytes", len(out[3].ImageData))
+	}
+	if out[3].Content != "step1" {
+		t.Errorf("step1 Content lost: %q", out[3].Content)
+	}
+	if len(out[5].ImageData) != 0 {
+		t.Error("step2 should have ImageData stripped")
+	}
+}
+
+func TestTrimImageHistoryNoOpUnderThreshold(t *testing.T) {
+	messages := []llm.Message{
+		{Role: llm.RoleTool, Content: "a", ImageData: []byte("x"), ImageMIME: "image/png"},
+		{Role: llm.RoleTool, Content: "b", ImageData: []byte("y"), ImageMIME: "image/png"},
+	}
+	out := trimImageHistory(messages, 5)
+	for i, m := range out {
+		if len(m.ImageData) == 0 {
+			t.Errorf("message %d unexpectedly stripped: %+v", i, m)
+		}
 	}
 }
 

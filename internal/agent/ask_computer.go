@@ -70,8 +70,17 @@ Output:
 - Final answer is plain text, 1–2 sentences. No markdown, no formatting.
 - Be concrete: name the windows you interacted with, the buttons you clicked.`
 
+// computerAskRecentImageWindow is the number of most-recent tool messages
+// whose image bytes are kept in the LLM context. Older tool messages get
+// their ImageData/ImageMIME cleared (text content is preserved). Without
+// this, every screenshot stays in the history forever — at ~2 MB each over
+// 20 iterations, we'd be re-sending tens of megabytes per LLM call.
+const computerAskRecentImageWindow = 2
+
 // ComputerAsk runs the computer ask sub-agent loop with the given instruction.
-// It mirrors (*Agent).Ask but with the computer-specific system prompt.
+// It mirrors (*Agent).Ask but with the computer-specific system prompt and
+// applies a sliding window over screenshot bytes to keep request payloads
+// bounded.
 func (a *Agent) ComputerAsk(ctx context.Context, instruction string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, a.timeout)
 	defer cancel()
@@ -118,7 +127,7 @@ func (a *Agent) ComputerAsk(ctx context.Context, instruction string) (string, er
 			msg := llm.Message{
 				Role:       llm.RoleTool,
 				Content:    toolResult,
-				ToolCallID: tc.Name,
+				ToolCallID: tc.ID,
 			}
 			if len(imgData) > 0 {
 				msg.ImageData = imgData
@@ -126,7 +135,29 @@ func (a *Agent) ComputerAsk(ctx context.Context, instruction string) (string, er
 			}
 			messages = append(messages, msg)
 		}
+
+		messages = trimImageHistory(messages, computerAskRecentImageWindow)
 	}
 
 	return "", fmt.Errorf("computer ask agent reached maximum iterations (%d) without completing", a.maxIterations)
+}
+
+// trimImageHistory keeps only the keepLast most recent tool messages with
+// image data; older tool messages have ImageData/ImageMIME cleared (text
+// Content is preserved so the LLM still sees what the action returned).
+func trimImageHistory(messages []llm.Message, keepLast int) []llm.Message {
+	imageIdxs := []int{}
+	for i, m := range messages {
+		if m.Role == llm.RoleTool && len(m.ImageData) > 0 {
+			imageIdxs = append(imageIdxs, i)
+		}
+	}
+	if len(imageIdxs) <= keepLast {
+		return messages
+	}
+	for _, idx := range imageIdxs[:len(imageIdxs)-keepLast] {
+		messages[idx].ImageData = nil
+		messages[idx].ImageMIME = ""
+	}
+	return messages
 }
