@@ -121,9 +121,32 @@ atr browser screenshot --output /tmp/dnd.png
 
 For browser-only workflows, see the `atr-browser` skill. For combined workflows, both daemons can run simultaneously on different ports (browser: 9333, computer: 9334).
 
+## Coordinates and multi-monitor
+
+ATR uses **root coordinates** as the public API for clicks, moves, drags, and window positions. Root coords have a single bounding-box origin at (0, 0) covering all monitors — every visible coordinate is non-negative, matching `xrandr` and the X11 root window. `atr computer --json window list` and `atr computer displays` both return root coords.
+
+For interactive use it's often easier to think in display-local pixels. Every mouse command accepts `--display N`, which interprets `x` and `y` as pixels relative to that display's top-left:
+
+```bash
+# Display 0 is primary (whose root origin may NOT be (0, 0) on multi-monitor setups)
+atr computer click --display 0 100 200      # display-local
+atr computer click 1540 200                  # root coords (equivalent on a setup where primary is at root (1440, 0))
+```
+
+`atr computer screenshot --region X,Y,W,H` is always display-local within the chosen `--display`.
+
+A common workflow:
+
+```bash
+atr computer displays                                # see each display's root bounds
+atr computer --json window list                      # find a window's root bounds
+atr computer screenshot --display 0 --region X,Y,W,H # crop using display-local pixels
+atr computer click --display 0 X Y                   # click the spot you cropped
+```
+
 ## Tips
 
 - Use `atr computer --json window list` to enumerate windows, then operate on a specific ID for stability.
 - For Linux, the per-app cache key is `WM_CLASS` (window class), so all Chrome windows share one approval.
 - Screenshots return PNG bytes; set `--output` to a local path the user expects.
-- Coordinates are absolute screen pixels. With multiple displays, use `atr computer displays` to get bounds.
+- For multi-monitor setups: prefer `--display N` with display-local pixels for new code; reach for absolute root coords only when relaying values from `window list`.

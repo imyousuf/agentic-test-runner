@@ -70,6 +70,7 @@ type Computer struct {
 	cfg    Config
 	logger *log.Logger
 	gui    *gui
+	coords coords // primary-centric ↔ root coord translation
 
 	appsMu       sync.Mutex
 	approvedApps map[string]time.Time // app-id -> approval time
@@ -91,6 +92,7 @@ func New(cfg Config) (*Computer, error) {
 		cfg:          cfg,
 		logger:       logger,
 		gui:          newGUI(cfg.GUIEnabled, logger),
+		coords:       detectCoords(),
 		approvedApps: make(map[string]time.Time),
 	}, nil
 }

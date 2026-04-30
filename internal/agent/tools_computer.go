@@ -51,6 +51,22 @@ func NewComputerTools(c *computer.Computer) []Tool {
 		}
 		return 0
 	}
+	// getDisplay returns the display index from args, or computer.NoDisplay
+	// if absent. Distinguishes "missing" from "0" (display 0 is a valid value).
+	getDisplay := func(args map[string]any) int {
+		v, ok := args["display"]
+		if !ok || v == nil {
+			return computer.NoDisplay
+		}
+		switch n := v.(type) {
+		case float64:
+			return int(n)
+		case int:
+			return n
+		}
+		return computer.NoDisplay
+	}
+	displayProp := intProp("Optional display index. When set, x/y are pixels relative to that display's top-left; otherwise they are absolute root coordinates.")
 	getStr := func(args map[string]any, k string) string { s, _ := args[k].(string); return s }
 	getStrDef := func(args map[string]any, k, def string) string {
 		if s, ok := args[k].(string); ok && s != "" {
@@ -108,15 +124,16 @@ func NewComputerTools(c *computer.Computer) []Tool {
 			name:        "computer_click",
 			description: "Click at screen coordinates. button=left|right|center; double=true for double click.",
 			parameters: obj([]string{"x", "y"}, map[string]any{
-				"x":      intProp("X pixel coordinate"),
-				"y":      intProp("Y pixel coordinate"),
-				"button": strProp("Mouse button"),
-				"double": boolProp("Double click"),
+				"x":       intProp("X pixel coordinate"),
+				"y":       intProp("Y pixel coordinate"),
+				"button":  strProp("Mouse button"),
+				"double":  boolProp("Double click"),
+				"display": displayProp,
 			}),
 			exec: func(ctx context.Context, args map[string]any) (string, bool) {
 				x, y := getInt(args, "x"), getInt(args, "y")
 				btn := computer.MouseButton(getStrDef(args, "button", "left"))
-				err := c.Click(ctx, x, y, btn, getBool(args, "double"))
+				err := c.Click(ctx, x, y, btn, getBool(args, "double"), getDisplay(args))
 				return wrap(err, fmt.Sprintf("Clicked at (%d, %d)", x, y))
 			},
 		},
@@ -124,52 +141,58 @@ func NewComputerTools(c *computer.Computer) []Tool {
 			name:        "computer_double_click",
 			description: "Double-click at screen coordinates.",
 			parameters: obj([]string{"x", "y"}, map[string]any{
-				"x": intProp("X"), "y": intProp("Y"),
+				"x":       intProp("X"),
+				"y":       intProp("Y"),
+				"display": displayProp,
 			}),
 			exec: func(ctx context.Context, args map[string]any) (string, bool) {
 				x, y := getInt(args, "x"), getInt(args, "y")
-				return wrap(c.Click(ctx, x, y, computer.ButtonLeft, true), fmt.Sprintf("Double-clicked at (%d, %d)", x, y))
+				return wrap(c.Click(ctx, x, y, computer.ButtonLeft, true, getDisplay(args)), fmt.Sprintf("Double-clicked at (%d, %d)", x, y))
 			},
 		},
 		&computerTool{
 			name:        "computer_right_click",
 			description: "Right-click at screen coordinates.",
 			parameters: obj([]string{"x", "y"}, map[string]any{
-				"x": intProp("X"), "y": intProp("Y"),
+				"x":       intProp("X"),
+				"y":       intProp("Y"),
+				"display": displayProp,
 			}),
 			exec: func(ctx context.Context, args map[string]any) (string, bool) {
 				x, y := getInt(args, "x"), getInt(args, "y")
-				return wrap(c.Click(ctx, x, y, computer.ButtonRight, false), fmt.Sprintf("Right-clicked at (%d, %d)", x, y))
+				return wrap(c.Click(ctx, x, y, computer.ButtonRight, false, getDisplay(args)), fmt.Sprintf("Right-clicked at (%d, %d)", x, y))
 			},
 		},
 		&computerTool{
 			name:        "computer_move",
 			description: "Move mouse to (x, y). smooth=true animates.",
 			parameters: obj([]string{"x", "y"}, map[string]any{
-				"x":      intProp("X"),
-				"y":      intProp("Y"),
-				"smooth": boolProp("Animate"),
+				"x":       intProp("X"),
+				"y":       intProp("Y"),
+				"smooth":  boolProp("Animate"),
+				"display": displayProp,
 			}),
 			exec: func(ctx context.Context, args map[string]any) (string, bool) {
 				x, y := getInt(args, "x"), getInt(args, "y")
-				return wrap(c.MoveTo(ctx, x, y, getBool(args, "smooth")), fmt.Sprintf("Moved to (%d, %d)", x, y))
+				return wrap(c.MoveTo(ctx, x, y, getBool(args, "smooth"), getDisplay(args)), fmt.Sprintf("Moved to (%d, %d)", x, y))
 			},
 		},
 		&computerTool{
 			name:        "computer_drag",
 			description: "Drag from (from_x, from_y) to (to_x, to_y).",
 			parameters: obj([]string{"from_x", "from_y", "to_x", "to_y"}, map[string]any{
-				"from_x": intProp("Start X"),
-				"from_y": intProp("Start Y"),
-				"to_x":   intProp("End X"),
-				"to_y":   intProp("End Y"),
-				"button": strProp("Mouse button"),
+				"from_x":  intProp("Start X"),
+				"from_y":  intProp("Start Y"),
+				"to_x":    intProp("End X"),
+				"to_y":    intProp("End Y"),
+				"button":  strProp("Mouse button"),
+				"display": displayProp,
 			}),
 			exec: func(ctx context.Context, args map[string]any) (string, bool) {
 				fx, fy := getInt(args, "from_x"), getInt(args, "from_y")
 				tx, ty := getInt(args, "to_x"), getInt(args, "to_y")
 				btn := computer.MouseButton(getStrDef(args, "button", "left"))
-				return wrap(c.Drag(ctx, fx, fy, tx, ty, btn), fmt.Sprintf("Dragged (%d,%d) -> (%d,%d)", fx, fy, tx, ty))
+				return wrap(c.Drag(ctx, fx, fy, tx, ty, btn, getDisplay(args)), fmt.Sprintf("Dragged (%d,%d) -> (%d,%d)", fx, fy, tx, ty))
 			},
 		},
 		&computerTool{
@@ -188,11 +211,13 @@ func NewComputerTools(c *computer.Computer) []Tool {
 			name:        "computer_hover",
 			description: "Move mouse to (x, y) without clicking.",
 			parameters: obj([]string{"x", "y"}, map[string]any{
-				"x": intProp("X"), "y": intProp("Y"),
+				"x":       intProp("X"),
+				"y":       intProp("Y"),
+				"display": displayProp,
 			}),
 			exec: func(ctx context.Context, args map[string]any) (string, bool) {
 				x, y := getInt(args, "x"), getInt(args, "y")
-				return wrap(c.Hover(ctx, x, y), fmt.Sprintf("Hovered at (%d, %d)", x, y))
+				return wrap(c.Hover(ctx, x, y, getDisplay(args)), fmt.Sprintf("Hovered at (%d, %d)", x, y))
 			},
 		},
 		&computerTool{

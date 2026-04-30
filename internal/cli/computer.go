@@ -31,14 +31,41 @@ var (
 	computerScreenshotRgn   string
 	computerClickButton     string
 	computerClickDouble     bool
+	computerClickDisplay    int
 	computerMoveSmooth      bool
+	computerMoveDisplay     int
 	computerDragFrom        string
 	computerDragTo          string
 	computerDragButton      string
+	computerDragDisplay     int
+	computerHoverDisplay    int
 	computerScrollDX        int
 	computerScrollDY        int
 	computerTypeDelayMs     int
 )
+
+// displayBody returns a request body field map for "display" — included
+// only when the user passed --display, so the daemon can distinguish
+// "absolute root coords" (no display) from "display 0 with display-local
+// coords".
+func displayBody(d int) map[string]any {
+	if d < 0 {
+		return nil
+	}
+	return map[string]any{"display": d}
+}
+
+// mergeBody combines two map[string]any into a new map.
+func mergeBody(a, b map[string]any) map[string]any {
+	out := make(map[string]any, len(a)+len(b))
+	for k, v := range a {
+		out[k] = v
+	}
+	for k, v := range b {
+		out[k] = v
+	}
+	return out
+}
 
 func newComputerCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -286,11 +313,19 @@ func newComputerClickCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "click <x> <y>",
 		Short: "Click at screen coordinates",
-		Args:  cobra.ExactArgs(2),
-		RunE:  runComputerClick,
+		Long: `Click at screen coordinates.
+
+By default x and y are absolute root coordinates (the same coordinate
+system used by 'window list' and xrandr). On a multi-monitor setup this
+means coordinates can extend beyond a single display. Use --display to
+specify display-local pixels relative to the chosen display's top-left
+instead.`,
+		Args: cobra.ExactArgs(2),
+		RunE: runComputerClick,
 	}
 	cmd.Flags().StringVar(&computerClickButton, "button", "left", "Mouse button: left, right, center")
 	cmd.Flags().BoolVar(&computerClickDouble, "double", false, "Double click")
+	cmd.Flags().IntVar(&computerClickDisplay, "display", -1, "Display index (-1 = absolute root coords)")
 	return cmd
 }
 
@@ -299,12 +334,13 @@ func runComputerClick(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	return computerAPIPost("/computer/click", map[string]any{
+	body := mergeBody(map[string]any{
 		"x":      x,
 		"y":      y,
 		"button": computerClickButton,
 		"double": computerClickDouble,
-	})
+	}, displayBody(computerClickDisplay))
+	return computerAPIPost("/computer/click", body)
 }
 
 func newComputerMoveCmd() *cobra.Command {
@@ -315,6 +351,7 @@ func newComputerMoveCmd() *cobra.Command {
 		RunE:  runComputerMove,
 	}
 	cmd.Flags().BoolVar(&computerMoveSmooth, "smooth", false, "Animate the move")
+	cmd.Flags().IntVar(&computerMoveDisplay, "display", -1, "Display index (-1 = absolute root coords)")
 	return cmd
 }
 
@@ -323,11 +360,12 @@ func runComputerMove(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	return computerAPIPost("/computer/move", map[string]any{
+	body := mergeBody(map[string]any{
 		"x":      x,
 		"y":      y,
 		"smooth": computerMoveSmooth,
-	})
+	}, displayBody(computerMoveDisplay))
+	return computerAPIPost("/computer/move", body)
 }
 
 func newComputerDragCmd() *cobra.Command {
@@ -339,6 +377,7 @@ func newComputerDragCmd() *cobra.Command {
 	cmd.Flags().StringVar(&computerDragFrom, "from", "", "Start point as X,Y")
 	cmd.Flags().StringVar(&computerDragTo, "to", "", "End point as X,Y")
 	cmd.Flags().StringVar(&computerDragButton, "button", "left", "Mouse button: left, right, center")
+	cmd.Flags().IntVar(&computerDragDisplay, "display", -1, "Display index (-1 = absolute root coords)")
 	_ = cmd.MarkFlagRequired("from")
 	_ = cmd.MarkFlagRequired("to")
 	return cmd
@@ -353,11 +392,12 @@ func runComputerDrag(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("--to: %w", err)
 	}
-	return computerAPIPost("/computer/drag", map[string]any{
+	body := mergeBody(map[string]any{
 		"from_x": fx, "from_y": fy,
 		"to_x": tx, "to_y": ty,
 		"button": computerDragButton,
-	})
+	}, displayBody(computerDragDisplay))
+	return computerAPIPost("/computer/drag", body)
 }
 
 func newComputerScrollCmd() *cobra.Command {
@@ -382,7 +422,7 @@ func runComputerScroll(cmd *cobra.Command, args []string) error {
 }
 
 func newComputerHoverCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "hover <x> <y>",
 		Short: "Move mouse to coordinates without clicking",
 		Args:  cobra.ExactArgs(2),
@@ -391,9 +431,12 @@ func newComputerHoverCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return computerAPIPost("/computer/hover", map[string]any{"x": x, "y": y})
+			body := mergeBody(map[string]any{"x": x, "y": y}, displayBody(computerHoverDisplay))
+			return computerAPIPost("/computer/hover", body)
 		},
 	}
+	cmd.Flags().IntVar(&computerHoverDisplay, "display", -1, "Display index (-1 = absolute root coords)")
+	return cmd
 }
 
 func newComputerTypeCmd() *cobra.Command {

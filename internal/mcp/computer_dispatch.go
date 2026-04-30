@@ -60,28 +60,28 @@ func (s *Server) executeComputerTool(ctx context.Context, name string, args map[
 		x, y := getInt(args, "x"), getInt(args, "y")
 		button := computer.MouseButton(getStringOrDefault(args, "button", "left"))
 		double := getBool(args, "double")
-		if err := c.Click(ctx, x, y, button, double); err != nil {
+		if err := c.Click(ctx, x, y, button, double, getDisplay(args)); err != nil {
 			return "", err
 		}
 		return fmt.Sprintf("Clicked (%s%s) at (%d, %d)", button, doubleSuffix(double), x, y), nil
 
 	case "computer_double_click":
 		x, y := getInt(args, "x"), getInt(args, "y")
-		if err := c.Click(ctx, x, y, computer.ButtonLeft, true); err != nil {
+		if err := c.Click(ctx, x, y, computer.ButtonLeft, true, getDisplay(args)); err != nil {
 			return "", err
 		}
 		return fmt.Sprintf("Double-clicked at (%d, %d)", x, y), nil
 
 	case "computer_right_click":
 		x, y := getInt(args, "x"), getInt(args, "y")
-		if err := c.Click(ctx, x, y, computer.ButtonRight, false); err != nil {
+		if err := c.Click(ctx, x, y, computer.ButtonRight, false, getDisplay(args)); err != nil {
 			return "", err
 		}
 		return fmt.Sprintf("Right-clicked at (%d, %d)", x, y), nil
 
 	case "computer_move":
 		x, y := getInt(args, "x"), getInt(args, "y")
-		if err := c.MoveTo(ctx, x, y, getBool(args, "smooth")); err != nil {
+		if err := c.MoveTo(ctx, x, y, getBool(args, "smooth"), getDisplay(args)); err != nil {
 			return "", err
 		}
 		return fmt.Sprintf("Moved to (%d, %d)", x, y), nil
@@ -90,7 +90,7 @@ func (s *Server) executeComputerTool(ctx context.Context, name string, args map[
 		fx, fy := getInt(args, "from_x"), getInt(args, "from_y")
 		tx, ty := getInt(args, "to_x"), getInt(args, "to_y")
 		btn := computer.MouseButton(getStringOrDefault(args, "button", "left"))
-		if err := c.Drag(ctx, fx, fy, tx, ty, btn); err != nil {
+		if err := c.Drag(ctx, fx, fy, tx, ty, btn, getDisplay(args)); err != nil {
 			return "", err
 		}
 		return fmt.Sprintf("Dragged from (%d, %d) to (%d, %d)", fx, fy, tx, ty), nil
@@ -104,7 +104,7 @@ func (s *Server) executeComputerTool(ctx context.Context, name string, args map[
 
 	case "computer_hover":
 		x, y := getInt(args, "x"), getInt(args, "y")
-		if err := c.Hover(ctx, x, y); err != nil {
+		if err := c.Hover(ctx, x, y, getDisplay(args)); err != nil {
 			return "", err
 		}
 		return fmt.Sprintf("Hovered at (%d, %d)", x, y), nil
@@ -225,6 +225,19 @@ func computerScreenshot(c *computer.Computer, args map[string]any) (string, erro
 }
 
 // ----- helpers -----
+
+// getDisplay returns the display index from args, or computer.NoDisplay if
+// absent or null. Distinguishes "missing" from "0" (display 0 is valid).
+func getDisplay(args map[string]any) int {
+	v, ok := args["display"]
+	if !ok || v == nil {
+		return computer.NoDisplay
+	}
+	if n, err := toInt(v); err == nil {
+		return n
+	}
+	return computer.NoDisplay
+}
 
 func getInt(args map[string]any, key string) int {
 	v, ok := args[key]

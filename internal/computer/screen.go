@@ -11,29 +11,37 @@ import (
 )
 
 // Display describes a single physical or virtual display.
+//
+// Bounds are in root coords (the same coordinate system used by mouse
+// clicks, window positions, and xrandr). On a single-monitor setup or
+// any layout where every monitor is to the right of and below primary,
+// these values match what the screenshot library reports natively;
+// when a monitor sits to the left or above primary, the screenshot
+// library would report a negative origin while these bounds are shifted
+// so the bounding box of all monitors starts at (0, 0).
 type Display struct {
 	Index   int             `json:"index"`
 	Bounds  image.Rectangle `json:"bounds"`
 	Primary bool            `json:"primary"`
 }
 
-// ScreenSize returns the size of the primary display in pixels.
-// This is a passive read; no safety gate.
+// ScreenSize returns the size of the virtual desktop bounding box in
+// pixels (the union of every monitor's area). This is a passive read.
 func (c *Computer) ScreenSize() (width, height int) {
 	return robotgo.GetScreenSize()
 }
 
-// Displays enumerates all attached displays. Index 0 is the primary
-// display per platform convention.
+// Displays enumerates all attached displays in root coords. The display
+// whose primary-centric origin is (0, 0) is marked Primary=true.
 func (c *Computer) Displays() []Display {
 	n := screenshot.NumActiveDisplays()
 	out := make([]Display, 0, n)
 	for i := range n {
-		bounds := screenshot.GetDisplayBounds(i)
+		pc := screenshot.GetDisplayBounds(i)
 		out = append(out, Display{
 			Index:   i,
-			Bounds:  bounds,
-			Primary: i == 0,
+			Bounds:  c.coords.primaryRectToRoot(pc),
+			Primary: pc.Min.X == 0 && pc.Min.Y == 0,
 		})
 	}
 	return out

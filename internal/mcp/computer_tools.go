@@ -32,10 +32,11 @@ func GetComputerTools() []Tool {
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"x":      intProp("X pixel coordinate"),
-					"y":      intProp("Y pixel coordinate"),
-					"button": strProp("Mouse button (left, right, center)"),
-					"double": boolProp("Double-click"),
+					"x":       intProp("X pixel coordinate"),
+					"y":       intProp("Y pixel coordinate"),
+					"button":  strProp("Mouse button (left, right, center)"),
+					"double":  boolProp("Double-click"),
+					"display": intProp("Optional display index. When set, x and y are pixels relative to that display's top-left; otherwise they are absolute root coordinates."),
 				},
 				"required": []string{"x", "y"},
 			},
@@ -47,7 +48,8 @@ func GetComputerTools() []Tool {
 				"type": "object",
 				"properties": map[string]any{
 					"x": intProp("X pixel coordinate"),
-					"y": intProp("Y pixel coordinate"),
+					"y":       intProp("Y pixel coordinate"),
+					"display": intProp("Optional display index. When set, x and y are pixels relative to that display's top-left; otherwise they are absolute root coordinates."),
 				},
 				"required": []string{"x", "y"},
 			},
@@ -59,7 +61,8 @@ func GetComputerTools() []Tool {
 				"type": "object",
 				"properties": map[string]any{
 					"x": intProp("X pixel coordinate"),
-					"y": intProp("Y pixel coordinate"),
+					"y":       intProp("Y pixel coordinate"),
+					"display": intProp("Optional display index. When set, x and y are pixels relative to that display's top-left; otherwise they are absolute root coordinates."),
 				},
 				"required": []string{"x", "y"},
 			},
@@ -70,9 +73,10 @@ func GetComputerTools() []Tool {
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"x":      intProp("X pixel coordinate"),
-					"y":      intProp("Y pixel coordinate"),
-					"smooth": boolProp("Animate the move"),
+					"x":       intProp("X pixel coordinate"),
+					"y":       intProp("Y pixel coordinate"),
+					"smooth":  boolProp("Animate the move"),
+					"display": intProp("Optional display index. When set, x and y are pixels relative to that display's top-left; otherwise they are absolute root coordinates."),
 				},
 				"required": []string{"x", "y"},
 			},
@@ -83,11 +87,12 @@ func GetComputerTools() []Tool {
 			InputSchema: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"from_x": intProp("Start X"),
-					"from_y": intProp("Start Y"),
-					"to_x":   intProp("End X"),
-					"to_y":   intProp("End Y"),
-					"button": strProp("Mouse button (default: left)"),
+					"from_x":  intProp("Start X"),
+					"from_y":  intProp("Start Y"),
+					"to_x":    intProp("End X"),
+					"to_y":    intProp("End Y"),
+					"button":  strProp("Mouse button (default: left)"),
+					"display": intProp("Optional display index. When set, all coordinates are pixels relative to that display's top-left; otherwise they are absolute root coordinates."),
 				},
 				"required": []string{"from_x", "from_y", "to_x", "to_y"},
 			},
@@ -110,7 +115,8 @@ func GetComputerTools() []Tool {
 				"type": "object",
 				"properties": map[string]any{
 					"x": intProp("X pixel coordinate"),
-					"y": intProp("Y pixel coordinate"),
+					"y":       intProp("Y pixel coordinate"),
+					"display": intProp("Optional display index. When set, x and y are pixels relative to that display's top-left; otherwise they are absolute root coordinates."),
 				},
 				"required": []string{"x", "y"},
 			},

@@ -139,10 +139,11 @@ func (s *ComputerServer) handleComputerClick(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	var req struct {
-		X      int    `json:"x"`
-		Y      int    `json:"y"`
-		Button string `json:"button"`
-		Double bool   `json:"double"`
+		X       int    `json:"x"`
+		Y       int    `json:"y"`
+		Button  string `json:"button"`
+		Double  bool   `json:"double"`
+		Display *int   `json:"display,omitempty"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -151,13 +152,17 @@ func (s *ComputerServer) handleComputerClick(w http.ResponseWriter, r *http.Requ
 	if req.Button == "" {
 		req.Button = "left"
 	}
+	display := computer.NoDisplay
+	if req.Display != nil {
+		display = *req.Display
+	}
 	ctx, cancel := s.gatedContext(r.Context())
 	defer cancel()
-	if err := s.computer.Click(ctx, req.X, req.Y, computer.MouseButton(req.Button), req.Double); err != nil {
+	if err := s.computer.Click(ctx, req.X, req.Y, computer.MouseButton(req.Button), req.Double, display); err != nil {
 		writeError(w, abortStatus(err), err.Error())
 		return
 	}
-	writeSuccess(w, map[string]any{"x": req.X, "y": req.Y})
+	writeSuccess(w, map[string]any{"x": req.X, "y": req.Y, "display": display})
 }
 
 func (s *ComputerServer) handleComputerMove(w http.ResponseWriter, r *http.Request) {
@@ -165,21 +170,26 @@ func (s *ComputerServer) handleComputerMove(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	var req struct {
-		X      int  `json:"x"`
-		Y      int  `json:"y"`
-		Smooth bool `json:"smooth"`
+		X       int  `json:"x"`
+		Y       int  `json:"y"`
+		Smooth  bool `json:"smooth"`
+		Display *int `json:"display,omitempty"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	display := computer.NoDisplay
+	if req.Display != nil {
+		display = *req.Display
+	}
 	ctx, cancel := s.gatedContext(r.Context())
 	defer cancel()
-	if err := s.computer.MoveTo(ctx, req.X, req.Y, req.Smooth); err != nil {
+	if err := s.computer.MoveTo(ctx, req.X, req.Y, req.Smooth, display); err != nil {
 		writeError(w, abortStatus(err), err.Error())
 		return
 	}
-	writeSuccess(w, map[string]any{"x": req.X, "y": req.Y})
+	writeSuccess(w, map[string]any{"x": req.X, "y": req.Y, "display": display})
 }
 
 func (s *ComputerServer) handleComputerDrag(w http.ResponseWriter, r *http.Request) {
@@ -187,11 +197,12 @@ func (s *ComputerServer) handleComputerDrag(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	var req struct {
-		FromX  int    `json:"from_x"`
-		FromY  int    `json:"from_y"`
-		ToX    int    `json:"to_x"`
-		ToY    int    `json:"to_y"`
-		Button string `json:"button"`
+		FromX   int    `json:"from_x"`
+		FromY   int    `json:"from_y"`
+		ToX     int    `json:"to_x"`
+		ToY     int    `json:"to_y"`
+		Button  string `json:"button"`
+		Display *int   `json:"display,omitempty"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -200,13 +211,17 @@ func (s *ComputerServer) handleComputerDrag(w http.ResponseWriter, r *http.Reque
 	if req.Button == "" {
 		req.Button = "left"
 	}
+	display := computer.NoDisplay
+	if req.Display != nil {
+		display = *req.Display
+	}
 	ctx, cancel := s.gatedContext(r.Context())
 	defer cancel()
-	if err := s.computer.Drag(ctx, req.FromX, req.FromY, req.ToX, req.ToY, computer.MouseButton(req.Button)); err != nil {
+	if err := s.computer.Drag(ctx, req.FromX, req.FromY, req.ToX, req.ToY, computer.MouseButton(req.Button), display); err != nil {
 		writeError(w, abortStatus(err), err.Error())
 		return
 	}
-	writeSuccess(w, map[string]any{"from": [2]int{req.FromX, req.FromY}, "to": [2]int{req.ToX, req.ToY}})
+	writeSuccess(w, map[string]any{"from": [2]int{req.FromX, req.FromY}, "to": [2]int{req.ToX, req.ToY}, "display": display})
 }
 
 func (s *ComputerServer) handleComputerScroll(w http.ResponseWriter, r *http.Request) {
@@ -235,20 +250,25 @@ func (s *ComputerServer) handleComputerHover(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	var req struct {
-		X int `json:"x"`
-		Y int `json:"y"`
+		X       int  `json:"x"`
+		Y       int  `json:"y"`
+		Display *int `json:"display,omitempty"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	display := computer.NoDisplay
+	if req.Display != nil {
+		display = *req.Display
+	}
 	ctx, cancel := s.gatedContext(r.Context())
 	defer cancel()
-	if err := s.computer.Hover(ctx, req.X, req.Y); err != nil {
+	if err := s.computer.Hover(ctx, req.X, req.Y, display); err != nil {
 		writeError(w, abortStatus(err), err.Error())
 		return
 	}
-	writeSuccess(w, map[string]any{"x": req.X, "y": req.Y})
+	writeSuccess(w, map[string]any{"x": req.X, "y": req.Y, "display": display})
 }
 
 func (s *ComputerServer) handleComputerType(w http.ResponseWriter, r *http.Request) {
