@@ -21,7 +21,9 @@ jobs:
             ext: ''
             archive: tar.gz
           - target: darwin-amd64
-            os: macos-latest
+            # macos-13 is the last Intel runner image; macos-latest is now
+            # ARM and cannot natively compile robotgo's CGo for amd64.
+            os: macos-13
             goos: darwin
             goarch: amd64
             ext: ''

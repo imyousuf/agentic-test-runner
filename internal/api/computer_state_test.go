@@ -7,12 +7,15 @@ import (
 	"time"
 )
 
-// withFakeHome redirects HOME for the duration of the test so state files go
-// into a temp dir.
+// withFakeHome redirects the home directory for the duration of the test
+// so state files go into a temp dir. Sets both HOME (Unix / macOS) and
+// USERPROFILE (Windows) since os.UserHomeDir() consults different env vars
+// per platform.
 func withFakeHome(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
 	return dir
 }
 
