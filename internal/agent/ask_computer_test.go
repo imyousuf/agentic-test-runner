@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/vcaesar/screenshot"
+
 	"github.com/imyousuf/agentic-test-runner/internal/computer"
 	"github.com/imyousuf/agentic-test-runner/pkg/llm"
 )
@@ -66,11 +68,15 @@ func TestComputerScreenshotImageToolImplementsImageResultTool(t *testing.T) {
 }
 
 // TestComputerScreenshotImageToolReturnsBytes runs the actual screenshot and
-// confirms the LLM would receive non-empty PNG data. Behind the smoke tag
-// because it requires a display.
+// confirms the LLM would receive non-empty PNG data. Auto-skipped when no
+// displays are attached (e.g., headless CI runners) so the suite stays
+// green on `go test ./...` without `-short`.
 func TestComputerScreenshotImageToolReturnsBytes(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires display")
+	}
+	if screenshot.NumActiveDisplays() == 0 {
+		t.Skip("no displays available (headless environment)")
 	}
 	c := newTestComputerForAsk(t)
 	tool := &computerScreenshotImageTool{c: c}
