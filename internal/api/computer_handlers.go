@@ -115,6 +115,10 @@ func (s *ComputerServer) handleComputerScreenshot(w http.ResponseWriter, r *http
 		err error
 	)
 	if req.Region {
+		if req.Width <= 0 || req.Height <= 0 {
+			writeError(w, http.StatusBadRequest, "region requires positive width and height")
+			return
+		}
 		png, err = s.computer.ScreenshotRegion(display, req.X, req.Y, req.Width, req.Height)
 	} else {
 		png, err = s.computer.Screenshot(display)

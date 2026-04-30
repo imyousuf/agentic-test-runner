@@ -60,6 +60,12 @@ func (c *Computer) Screenshot(displayIndex int) ([]byte, error) {
 // ScreenshotRegion captures (x, y, w, h) in screen coordinates of the given
 // display and returns PNG-encoded bytes. displayIndex < 0 uses the default.
 func (c *Computer) ScreenshotRegion(displayIndex, x, y, w, h int) ([]byte, error) {
+	if w <= 0 || h <= 0 {
+		return nil, fmt.Errorf("region width and height must be positive (got %d, %d)", w, h)
+	}
+	if x < 0 || y < 0 {
+		return nil, fmt.Errorf("region x and y must be non-negative (got %d, %d)", x, y)
+	}
 	if displayIndex < 0 {
 		displayIndex = c.cfg.DefaultDisplay
 	}
@@ -68,6 +74,11 @@ func (c *Computer) ScreenshotRegion(displayIndex, x, y, w, h int) ([]byte, error
 		return nil, fmt.Errorf("display %d out of range (have %d)", displayIndex, n)
 	}
 	dispBounds := screenshot.GetDisplayBounds(displayIndex)
+	dispW := dispBounds.Dx()
+	dispH := dispBounds.Dy()
+	if x+w > dispW || y+h > dispH {
+		return nil, fmt.Errorf("region (%d, %d, %d, %d) exceeds display %d bounds (%dx%d)", x, y, w, h, displayIndex, dispW, dispH)
+	}
 	region := image.Rect(
 		dispBounds.Min.X+x,
 		dispBounds.Min.Y+y,

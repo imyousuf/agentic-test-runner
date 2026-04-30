@@ -15,8 +15,14 @@ func platformLaunchApp(name string) error {
 }
 
 func platformQuitApp(name string) error {
-	script := fmt.Sprintf(`tell application %q to quit`, name)
-	out, err := exec.Command("osascript", "-e", script).CombinedOutput()
+	// Pass `name` as an osascript run-arg rather than interpolating it into
+	// a script string. Go's %q produces Go-style quoting which differs from
+	// AppleScript's; a name containing `"` would otherwise break out of the
+	// string literal and execute arbitrary code.
+	script := `on run argv
+		tell application (item 1 of argv) to quit
+	end run`
+	out, err := exec.Command("osascript", "-e", script, "--", name).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("osascript quit: %v (%s)", err, string(out))
 	}
