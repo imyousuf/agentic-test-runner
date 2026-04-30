@@ -58,10 +58,11 @@ Tool implementations:
 
 ### Other Key Packages
 
-- **`internal/cli/`** — Cobra command definitions (run, config, browser, mcp, test, version, update). Browser subcommands include: navigate, click, fill, hover, drag, wait, scroll, screenshot (with --selector, --selector-all, --full, --timeout), snapshot, clean-snapshot, computed-styles (with --selector, --selector-all), computed-styles-diff (with --selector), text, font-check, download-images, viewport, batch, eval, ask, record (with --output, --url), console, network, errors
+- **`internal/cli/`** — Cobra command definitions (run, config, browser, computer, mcp, test, version, update). Browser subcommands include: navigate, click, fill, hover, drag, wait, scroll, screenshot (with --selector, --selector-all, --full, --timeout), snapshot, clean-snapshot, computed-styles (with --selector, --selector-all), computed-styles-diff (with --selector), text, font-check, download-images, viewport, batch, eval, ask, record (with --output, --url), console, network, errors. Computer subcommands include: start, stop, status, screenshot, click, move, drag, scroll, hover, type, key, chord, position, displays, window (list/active/focus/minimize/maximize/restore/close/move/resize), app (launch/quit), reset-approvals, ask (LLM agent loop for natural-language tasks).
 - **`internal/config/`** — Configuration loading from `~/.atr/config.yaml`, env vars, and CLI flags via Viper
 - **`internal/executor/`** — Cross-platform shell execution with environment detection (Python venv, nvm)
 - **`internal/browser/`** — Browser lifecycle management using `go-rod/rod` (Chromium via CDP)
+- **`internal/computer/`** — Cross-platform desktop control via `go-vgo/robotgo` (mouse/keyboard/screen) and `xgbutil/ewmh` for X11 window management. Linux-X11 only in v1; macOS/Windows window management is stubbed. Includes a configurable countdown safety gate (`per-request` / `per-app` / `off`) before each gated action, abortable via SIGINT.
 - **`internal/api/`** — HTTP server for long-running browser control (`atr browser start`)
 - **`internal/mcp/`** — MCP JSON-RPC server for Claude Code integration (`atr mcp serve`)
 - **`internal/capture/`** — Test failure context capture
@@ -72,7 +73,7 @@ Tool implementations:
 
 - `.mcp.json` — Registers ATR as an MCP server
 - `.claude-plugin/plugin.json` — Plugin metadata
-- `skills/` — Claude Code skills (atr-browser, atr-behavior, atr-analyze)
+- `skills/` — Claude Code skills (atr-browser, atr-computer, atr-behavior, atr-analyze)
 
 ## Code Conventions
 

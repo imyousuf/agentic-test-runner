@@ -54,6 +54,9 @@ type Config struct {
 	// Server contains browser server configuration.
 	Server ServerConfig `mapstructure:"server"`
 
+	// Computer contains desktop computer-use configuration.
+	Computer ComputerConfig `mapstructure:"computer"`
+
 	// Update contains update configuration.
 	Update UpdateConfig `mapstructure:"update"`
 }
@@ -213,6 +216,34 @@ type UpdateConfig struct {
 	Disabled bool `mapstructure:"disabled"`
 }
 
+// ComputerConfig holds desktop computer-use configuration.
+type ComputerConfig struct {
+	// Enabled toggles whether the computer feature is exposed via CLI/MCP.
+	Enabled bool `mapstructure:"enabled"`
+	// Port is the daemon HTTP port (default 9334).
+	Port int `mapstructure:"port"`
+	// Countdown holds safety-gate configuration.
+	Countdown ComputerCountdownConfig `mapstructure:"countdown"`
+	// GUI holds optional overlay configuration.
+	GUI ComputerGUIConfig `mapstructure:"gui"`
+	// Display selects the default monitor for screenshots (0-indexed).
+	Display int `mapstructure:"display"`
+}
+
+// ComputerCountdownConfig holds safety-gate configuration.
+type ComputerCountdownConfig struct {
+	// Mode selects when the gate prompts: per-request, per-app, or off.
+	Mode string `mapstructure:"mode"`
+	// Seconds is the countdown duration before each gated action.
+	Seconds int `mapstructure:"seconds"`
+}
+
+// ComputerGUIConfig holds optional GUI overlay configuration.
+type ComputerGUIConfig struct {
+	// Enabled toggles the webview countdown overlay.
+	Enabled bool `mapstructure:"enabled"`
+}
+
 // Load loads configuration from file, environment variables, and defaults.
 func Load() (*Config, error) {
 	v := viper.New()
@@ -249,6 +280,14 @@ func Load() (*Config, error) {
 	_ = v.BindEnv("vertex.project", "GOOGLE_CLOUD_PROJECT")
 	_ = v.BindEnv("vertex.location", "GOOGLE_CLOUD_LOCATION")
 	_ = v.BindEnv("vertex.credentials_file", "GOOGLE_APPLICATION_CREDENTIALS")
+
+	// Computer feature env bindings (also reachable via AutomaticEnv, but
+	// explicit binding ensures struct unmarshal sees the override even when
+	// no config file is present).
+	_ = v.BindEnv("computer.gui.enabled", "ATR_COMPUTER_GUI_ENABLED")
+	_ = v.BindEnv("computer.countdown.mode", "ATR_COMPUTER_COUNTDOWN_MODE")
+	_ = v.BindEnv("computer.countdown.seconds", "ATR_COMPUTER_COUNTDOWN_SECONDS")
+	_ = v.BindEnv("computer.port", "ATR_COMPUTER_PORT")
 
 	// Read config file (ignore if not found)
 	if err := v.ReadInConfig(); err != nil {
@@ -288,8 +327,8 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("cli.timeout", "5m")
 
 	// Model name defaults
-	v.SetDefault("models.flash", "gemini-3-flash-preview")
-	v.SetDefault("models.pro", "gemini-3-pro-preview")
+	v.SetDefault("models.flash", "gemini-3.1-flash-preview")
+	v.SetDefault("models.pro", "gemini-3.2-pro-preview")
 
 	// Agent defaults
 	v.SetDefault("agent.max_iterations", 100)
@@ -339,6 +378,14 @@ func setDefaults(v *viper.Viper) {
 	// Update defaults
 	v.SetDefault("update.auto_update_dev", true)
 	v.SetDefault("update.disabled", false)
+
+	// Computer (desktop computer-use) defaults
+	v.SetDefault("computer.enabled", true)
+	v.SetDefault("computer.port", 9334)
+	v.SetDefault("computer.countdown.mode", "per-request")
+	v.SetDefault("computer.countdown.seconds", 3)
+	v.SetDefault("computer.gui.enabled", true)
+	v.SetDefault("computer.display", 0)
 }
 
 // Validate checks that the configuration is valid and complete.

@@ -15,6 +15,7 @@ import (
 
 	"github.com/imyousuf/agentic-test-runner/internal/agent"
 	"github.com/imyousuf/agentic-test-runner/internal/browser"
+	"github.com/imyousuf/agentic-test-runner/internal/computer"
 	"github.com/imyousuf/agentic-test-runner/internal/config"
 	"github.com/imyousuf/agentic-test-runner/pkg/llm"
 )
@@ -22,6 +23,7 @@ import (
 // Server implements the MCP server for browser automation.
 type Server struct {
 	browser     *browser.Browser
+	computer    *computer.Computer
 	config      config.BrowserConfig
 	cdpEndpoint string
 	scanner     *bufio.Scanner
@@ -177,9 +179,9 @@ func (s *Server) handleInitialize(req *Request) {
 
 // handleToolsList returns the list of available tools.
 func (s *Server) handleToolsList(req *Request) {
-	result := ToolsListResult{
-		Tools: GetBrowserTools(),
-	}
+	tools := GetBrowserTools()
+	tools = append(tools, GetComputerTools()...)
+	result := ToolsListResult{Tools: tools}
 	s.sendResult(req.ID, result)
 }
 
@@ -220,8 +222,13 @@ func mcpLog(format string, args ...interface{}) {
 	fmt.Fprintf(f, "[%s] %s\n", time.Now().Format("15:04:05.000"), msg)
 }
 
-// executeTool executes a browser tool.
+// executeTool executes a browser or computer tool.
 func (s *Server) executeTool(ctx context.Context, name string, args map[string]any) (string, error) {
+	// Computer tools route to a separate dispatcher.
+	if isComputerTool(name) {
+		return s.executeComputerTool(ctx, name, args)
+	}
+
 	// Lazy browser initialization
 	if s.browser == nil {
 		mcpLog("Initializing browser, cdpEndpoint=%q", s.cdpEndpoint)

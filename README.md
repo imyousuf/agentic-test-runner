@@ -11,7 +11,8 @@
 - **Browser Behavior Testing**: Write tests in natural language, let AI execute them
 - **Multiple LLM Backends**: Supports Google Gemini API, Vertex AI, and CLI tools (Claude, Gemini)
 - **CLI Backend Support**: Use Claude CLI or Gemini CLI as backends - no API keys needed
-- **MCP Server**: Expose browser tools to any MCP-compatible client
+- **Cross-platform Desktop Control**: Mouse, keyboard, screen capture, window/app management on Linux (X11), macOS, and Windows via `atr computer`, with multi-monitor support and an in-process LLM agent (`atr computer ask`)
+- **MCP Server**: Expose browser AND desktop tools to any MCP-compatible client
 - **Cross-Platform**: Works on Linux, macOS, and Windows
 - **Extensible**: Tool-based architecture for custom extensions
 
@@ -155,9 +156,12 @@ ATR includes Claude Code skills for seamless AI-assisted browser automation. Ins
 
 | Skill | Description |
 |-------|-------------|
-| **atr-browser** | Control browser via ATR server (navigate, click, fill, screenshot) |
+| **atr-browser** | Control browser via ATR server (navigate, click, fill, screenshot, `browser ask`) |
+| **atr-computer** | Cross-platform desktop control (mouse, keyboard, screen, windows, apps, multi-monitor) plus `computer ask` — an in-process LLM agent that takes a natural-language instruction and drives the desktop end-to-end |
 | **atr-analyze** | Run tests with AI analysis (default for test suites - keeps context clean) |
 | **atr-behavior** | Run natural language browser tests |
+
+The `atr-browser` and `atr-computer` skills cross-reference each other and can be loaded together when a workflow spans both (e.g. drag a file from the file manager into a browser drop zone).
 
 ### Usage Examples
 
@@ -166,6 +170,7 @@ Once installed, Claude Code automatically uses these skills when relevant:
 - "Navigate to google.com and take a screenshot"
 - "Run the pytest tests" (uses atr-analyze for clean output)
 - "Run the behavior tests in tests/e2e/"
+- "Open the GNOME calculator and tell me what 17×23 is" (computer ask)
 
 ## MCP Server
 
@@ -203,7 +208,41 @@ Add to your project's `.gemini/settings.json`:
 }
 ```
 
-See [MCP Server Documentation](docs/mcp-server.md) for the full list of available browser tools.
+See [MCP Server Documentation](docs/mcp-server.md) for the full list of browser and desktop tools exposed via MCP.
+
+## Desktop Control (`atr computer`)
+
+ATR also drives the desktop directly — mouse, keyboard, screen capture, window/app management — for tests and automation that go beyond the browser.
+
+```bash
+# Start the daemon (default: 3-second countdown before each action; Ctrl+C to abort)
+atr computer start
+
+# Low-level primitives
+atr computer screenshot --output /tmp/desktop.png
+atr computer click --display 0 800 50
+atr computer type "hello world"
+atr computer window list
+
+# High-level: ask an agent to do it for you
+atr computer ask "open xclock and tell me what time it shows"
+atr computer ask --max-steps 30 "open the GNOME calculator and compute 17 * 23"
+
+atr computer stop
+```
+
+Default LLM models for `atr computer ask` (and `atr browser ask`):
+
+| Tier  | Model                          |
+|-------|--------------------------------|
+| flash | `gemini-3.1-flash-preview`     |
+| pro   | `gemini-3.2-pro-preview`       |
+
+Switch with `atr --model pro computer ask "..."`. Backend `claude-cli` uses the Claude CLI subprocess via MCP and ignores the model flag.
+
+Multi-monitor: bounds reported by `atr computer displays` and `window list` are in **root coordinates** (the bounding box of all monitors at origin). Use `--display N` to pass display-local pixels for clicks. Linux is X11-only in v1; Wayland is tracked as future work.
+
+See [CLI Reference — atr computer](docs/cli-reference.md#atr-computer) and [Computer Server REST API](docs/computer-server.md) for full details.
 
 ## Configuration
 
@@ -230,11 +269,34 @@ See [Configuration Guide](docs/configuration.md) for all options including CLI b
 
 ## Requirements
 
-- Go 1.23+ (for building from source)
+- Go 1.25+ (for building from source)
 - One of the following LLM backends:
   - **Claude CLI** or **Gemini CLI** (recommended - no API key needed)
   - Google Gemini API key
   - Google Cloud project with Vertex AI
+
+### Linux runtime dependencies (for `atr computer`)
+
+The desktop computer-use feature uses [robotgo](https://github.com/go-vgo/robotgo) which requires X11 development headers and a few system libraries. On Debian/Ubuntu install them with:
+
+```bash
+make install-deps-linux
+# or, manually:
+sudo apt-get install -y \
+  libxtst-dev libxss-dev libpng-dev \
+  libxkbcommon-dev libx11-dev xclip xsel
+```
+
+Optional GUI overlay packages:
+
+- **`zenity`** — abortable progress dialog for the per-action countdown (recommended). Install with `sudo apt-get install -y zenity`.
+- **`libnotify-bin`** — fallback when `zenity` is not present; provides `notify-send` for visual-only notifications. Install with `sudo apt-get install -y libnotify-bin`.
+
+If neither is available the daemon falls back to terminal-only countdown — no functionality is lost, but Claude-Code/MCP users won't see a visible interrupt.
+
+> **Note:** Linux support for `atr computer` is X11 only in v1. Wayland is tracked as future work.
+>
+> **Cross-platform builds:** robotgo and webview-style libraries depend on platform-native CGo, so cross-compiling from a single host is no longer supported. Each release artifact is built on its own platform's CI runner (`ubuntu-latest`, `macos-latest`, `windows-latest`). For local development, `make build` produces a binary for your current platform.
 
 ## Simple Testing
 

@@ -85,6 +85,7 @@ func init() {
 	rootCmd.AddCommand(newVersionCmd())
 	rootCmd.AddCommand(newConfigCmd())
 	rootCmd.AddCommand(newBrowserCmd())
+	rootCmd.AddCommand(newComputerCmd())
 	rootCmd.AddCommand(newTestCmd())
 	rootCmd.AddCommand(newUpdateCmd())
 	rootCmd.AddCommand(newTestCmdEnvCmd())
