@@ -69,6 +69,7 @@ func DefaultConfig() Config {
 type Computer struct {
 	cfg    Config
 	logger *log.Logger
+	gui    *gui
 
 	appsMu       sync.Mutex
 	approvedApps map[string]time.Time // app-id -> approval time
@@ -85,9 +86,11 @@ func New(cfg Config) (*Computer, error) {
 	if cfg.Output == nil {
 		cfg.Output = os.Stderr
 	}
+	logger := log.New(cfg.Output, "[atr-computer] ", log.LstdFlags)
 	return &Computer{
 		cfg:          cfg,
-		logger:       log.New(cfg.Output, "[atr-computer] ", log.LstdFlags),
+		logger:       logger,
+		gui:          newGUI(cfg.GUIEnabled, logger),
 		approvedApps: make(map[string]time.Time),
 	}, nil
 }

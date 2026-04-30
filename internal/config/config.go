@@ -281,6 +281,14 @@ func Load() (*Config, error) {
 	_ = v.BindEnv("vertex.location", "GOOGLE_CLOUD_LOCATION")
 	_ = v.BindEnv("vertex.credentials_file", "GOOGLE_APPLICATION_CREDENTIALS")
 
+	// Computer feature env bindings (also reachable via AutomaticEnv, but
+	// explicit binding ensures struct unmarshal sees the override even when
+	// no config file is present).
+	_ = v.BindEnv("computer.gui.enabled", "ATR_COMPUTER_GUI_ENABLED")
+	_ = v.BindEnv("computer.countdown.mode", "ATR_COMPUTER_COUNTDOWN_MODE")
+	_ = v.BindEnv("computer.countdown.seconds", "ATR_COMPUTER_COUNTDOWN_SECONDS")
+	_ = v.BindEnv("computer.port", "ATR_COMPUTER_PORT")
+
 	// Read config file (ignore if not found)
 	if err := v.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {

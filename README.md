@@ -236,6 +236,29 @@ See [Configuration Guide](docs/configuration.md) for all options including CLI b
   - Google Gemini API key
   - Google Cloud project with Vertex AI
 
+### Linux runtime dependencies (for `atr computer`)
+
+The desktop computer-use feature uses [robotgo](https://github.com/go-vgo/robotgo) which requires X11 development headers and a few system libraries. On Debian/Ubuntu install them with:
+
+```bash
+make install-deps-linux
+# or, manually:
+sudo apt-get install -y \
+  libxtst-dev libxss-dev libpng-dev \
+  libxkbcommon-dev libx11-dev xclip xsel
+```
+
+Optional GUI overlay packages:
+
+- **`zenity`** — abortable progress dialog for the per-action countdown (recommended). Install with `sudo apt-get install -y zenity`.
+- **`libnotify-bin`** — fallback when `zenity` is not present; provides `notify-send` for visual-only notifications. Install with `sudo apt-get install -y libnotify-bin`.
+
+If neither is available the daemon falls back to terminal-only countdown — no functionality is lost, but Claude-Code/MCP users won't see a visible interrupt.
+
+> **Note:** Linux support for `atr computer` is X11 only in v1. Wayland is tracked as future work.
+>
+> **Cross-platform builds:** robotgo and webview-style libraries depend on platform-native CGo, so cross-compiling from a single host is no longer supported. Each release artifact is built on its own platform's CI runner (`ubuntu-latest`, `macos-latest`, `windows-latest`). For local development, `make build` produces a binary for your current platform.
+
 ## Simple Testing
 
 To test the browser functionality just using this command should give you some idea -

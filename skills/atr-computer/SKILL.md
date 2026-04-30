@@ -16,7 +16,10 @@ Claude Code --> atr CLI --> ATR Computer Daemon --> robotgo (X11 / macOS / Windo
 
 The daemon enforces a configurable safety countdown before every action so the user can intervene with Ctrl+C. Read-only operations (screenshot, position, list windows) skip the countdown.
 
+When the daemon is started without `--no-gui` it also surfaces the countdown in a small native overlay so MCP/Claude-Code clients (which don't see the daemon's terminal) can still interrupt visually. On Linux the overlay uses `zenity` (full Cancel button — clicking it aborts the action with `ErrAborted`); when only `notify-send` is available it falls back to a one-shot desktop notification (visual only — abort still works via Ctrl+C in the daemon terminal). On macOS it uses `osascript display notification`; on Windows it uses a PowerShell toast. If no backend can initialize, the daemon logs a warning and continues with terminal-only countdown.
+
 > **Linux:** X11 only in v1. Wayland is not supported yet.
+> **GUI overlay:** install `zenity` for an abortable dialog (`apt install zenity`); fall back to `libnotify-bin` for visual-only notifications.
 
 ## Getting Started
 
