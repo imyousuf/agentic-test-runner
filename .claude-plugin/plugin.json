@@ -1,7 +1,7 @@
 {
   "name": "atr-skills",
-  "description": "Claude Code skills and MCP server for ATR. Skills: atr-browser (browser control + recording), atr-computer (cross-platform desktop control: mouse, keyboard, screen, windows, apps), atr-analyze (run tests with AI analysis - keeps context clean), atr-behavior (natural language browser tests). MCP Server: 50+ tools (30 browser + 21 desktop) via 'atr mcp serve'.",
-  "version": "1.7.0",
+  "description": "Claude Code skills and MCP server for ATR. Skills: atr-browser (browser control + recording), atr-computer (cross-platform desktop control with multi-monitor support: mouse, keyboard, screen, windows, apps), atr-analyze (run tests with AI analysis - keeps context clean), atr-behavior (natural language browser tests). MCP Server: 50+ tools (30 browser + 21 desktop) via 'atr mcp serve'.",
+  "version": "1.8.0",
   "author": {
     "name": "imyousuf"
   },
