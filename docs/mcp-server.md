@@ -1,10 +1,14 @@
 # MCP Server
 
-ATR can run as an MCP (Model Context Protocol) server, exposing browser automation tools to any MCP-compatible client like Claude CLI or Gemini CLI.
+ATR can run as an MCP (Model Context Protocol) server, exposing **browser** AND **desktop** automation tools to any MCP-compatible client like Claude CLI or Gemini CLI.
 
 ## Overview
 
-The MCP server allows you to use ATR's browser automation capabilities from within AI CLI tools. Instead of running ATR commands directly, the CLI tool can invoke ATR's browser tools through the standardized MCP protocol.
+The MCP server allows you to use ATR's browser and desktop automation capabilities from within AI CLI tools. Instead of running ATR commands directly, the CLI tool can invoke ATR's tools through the standardized MCP protocol.
+
+The server exposes two tool families:
+- `browser_*` (30 tools) — Chromium control via the browser daemon
+- `computer_*` (22 tools) — cross-platform desktop control via the computer daemon, including `computer_ask` (an in-process LLM agent for natural-language tasks)
 
 ```
 CLI Tool (Claude/Gemini) --> MCP Protocol --> ATR Server --> Browser
@@ -23,9 +27,11 @@ atr mcp serve [flags]
 | `--headless` | Run browser in headless mode | `true` |
 | `--ignore-https-errors` | Ignore HTTPS certificate errors | `false` |
 
-## Available Browser Tools
+## Available Tools
 
-The MCP server exposes 30 browser automation tools:
+52 tools total: 30 browser (`browser_*`) and 22 desktop (`computer_*`).
+
+## Available Browser Tools (30)
 
 ### Navigation
 
@@ -88,6 +94,62 @@ The MCP server exposes 30 browser automation tools:
 | `browser_console` | Get console messages | `limit` (optional, default: 50) |
 | `browser_network` | Get network requests | `limit` (optional, default: 50) |
 | `browser_errors` | Get failed network requests | - |
+
+## Available Computer Tools (22)
+
+Cross-platform desktop control. Coordinates default to **root coords** (the bounding box of all monitors with origin (0, 0)). Mouse tools accept an optional `display` integer to switch to display-local pixels relative to that display's top-left.
+
+### Perception
+
+| Tool | Description | Parameters |
+|------|-------------|------------|
+| `computer_screenshot` | Capture the desktop and write to a file. Returns the path. | `output` (optional path), `display` (optional) |
+| `computer_displays` | List all displays and primary screen size | - |
+| `computer_position` | Current mouse position (root coords) | - |
+| `computer_active_window` | Currently focused window with bounds + app name | - |
+| `computer_list_windows` | All top-level windows with bounds | - |
+
+### Mouse
+
+| Tool | Description | Parameters |
+|------|-------------|------------|
+| `computer_click` | Click at (x, y) | `x`, `y` (required), `button` (left/right/center), `double`, `display` |
+| `computer_double_click` | Double-click | `x`, `y` (required), `display` |
+| `computer_right_click` | Right-click | `x`, `y` (required), `display` |
+| `computer_move` | Move cursor | `x`, `y` (required), `smooth`, `display` |
+| `computer_drag` | Drag from (from_x, from_y) to (to_x, to_y) | `from_x`, `from_y`, `to_x`, `to_y` (required), `button`, `display` |
+| `computer_scroll` | Scroll wheel at cursor position | `dx`, `dy` (positive = up) |
+| `computer_hover` | Move without clicking | `x`, `y` (required), `display` |
+
+### Keyboard
+
+| Tool | Description | Parameters |
+|------|-------------|------------|
+| `computer_type` | Type text | `text` (required), `delay_ms` |
+| `computer_press_key` | Press a single named key | `key` (required, e.g. `enter`, `esc`, `f5`) |
+| `computer_key_chord` | Press a key combination | `chord` (required, e.g. `ctrl+shift+t`) |
+
+### Window Management
+
+| Tool | Description | Parameters |
+|------|-------------|------------|
+| `computer_focus_window` | Bring window to front | `id` (required) |
+| `computer_window_state` | Set state | `id`, `state` (required, one of: minimize/maximize/restore/close) |
+| `computer_move_window` | Move window | `id`, `x`, `y` (required) |
+| `computer_resize_window` | Resize window | `id`, `width`, `height` (required) |
+
+### App Lifecycle
+
+| Tool | Description | Parameters |
+|------|-------------|------------|
+| `computer_launch_app` | Launch an application by name | `name` (required) |
+| `computer_quit_app` | Quit an application by name | `name` (required) |
+
+### Agent
+
+| Tool | Description | Parameters |
+|------|-------------|------------|
+| `computer_ask` | Run an in-process LLM agent loop to accomplish a desktop task. The daemon uses its configured LLM (gemini-3.1-flash-preview, gemini-3.2-pro-preview, or claude-cli) to screenshot, decide, and call lower-level tools until done. | `instruction` (required), `max_steps` (optional, default 20) |
 
 ## Integration with Claude CLI
 

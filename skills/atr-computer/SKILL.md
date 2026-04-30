@@ -1,12 +1,20 @@
 ---
 name: atr-computer
-description: Control the desktop (mouse, keyboard, screen, windows, apps) cross-platform via ATR. Take screenshots, click at coordinates, type text, drag, manage windows, launch and quit apps. Use for native UI testing, desktop automation, or anything outside the browser. Pairs with atr-browser when a workflow spans both (e.g. drag a file from the OS file manager into a browser drop zone).
+description: Control the desktop (mouse, keyboard, screen, windows, apps) cross-platform via ATR. Take screenshots, click at coordinates, type text, drag, manage windows, launch and quit apps. Includes 'atr computer ask' — an in-process LLM agent that takes a natural-language instruction and drives the desktop end-to-end. Use for native UI testing, desktop automation, multi-monitor flows, or anything outside the browser. Pairs with atr-browser for combined web + desktop workflows.
 allowed-tools: Bash(atr computer:*)
 ---
 
+> **Companion skill — `atr-browser`** controls Chromium for any in-page operation (navigate, click on web elements, fill forms, scrape). Load both when:
+>
+> - You need to drag a file from the OS file manager into a browser upload zone.
+> - Authentication or a native dialog (1Password, system file picker) is part of the flow.
+> - You're delegating a high-level task that touches both — `atr computer ask "..."` can shell out to `atr browser ...` and vice versa.
+>
+> Computer daemon listens on port 9334; browser daemon on 9333. Both can run simultaneously.
+
 # ATR Desktop Computer-Use Skill
 
-This skill provides cross-platform desktop control through ATR's computer daemon. Mouse, keyboard, screen capture, window management, and app launch — all driven from the same `atr` CLI that powers `atr-browser`.
+This skill provides cross-platform desktop control through ATR's computer daemon. Mouse, keyboard, screen capture, window management, app launch, and an in-process LLM agent (`atr computer ask`) — all driven from the same `atr` CLI that powers `atr-browser`.
 
 ## Architecture
 

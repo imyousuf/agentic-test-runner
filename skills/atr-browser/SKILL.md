@@ -1,8 +1,15 @@
 ---
 name: atr-browser
-description: Control browser, automate browser interactions, navigate to URLs, click on webpages, fill forms, take screenshots, inspect webpages, web scraping with browser, test websites manually, or interact with web pages programmatically using ATR browser server mode.
+description: Control browser, automate browser interactions, navigate to URLs, click on webpages, fill forms, take screenshots, inspect webpages, web scraping with browser, test websites manually, or interact with web pages programmatically using ATR browser server mode. Pairs with the atr-computer skill when a workflow needs the OS desktop too (drag-and-drop from the file manager, system dialogs, native apps).
 allowed-tools: Bash(atr browser:*)
 ---
+
+> **Companion skill — `atr-computer`** controls the OS desktop (mouse, keyboard, screen, windows, app launch, plus an in-process LLM agent via `atr computer ask`). Load both when:
+>
+> - The browser action needs an OS file picker, drag from the file manager, or anything outside the page (e.g. authentication via 1Password desktop app).
+> - You want a single high-level instruction to span web + desktop — `atr computer ask "<instruction>"` can call `atr browser` along the way.
+>
+> Browser daemon listens on port 9333; computer daemon on 9334. Both can run simultaneously.
 
 # ATR Browser Automation Skill
 

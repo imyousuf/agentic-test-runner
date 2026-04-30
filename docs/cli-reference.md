@@ -327,6 +327,110 @@ atr browser errors                # Get failed requests
 
 ---
 
+## atr computer
+
+Cross-platform desktop control: mouse, keyboard, screen capture, window/app management, and a built-in LLM agent (`atr computer ask`). Linux is X11-only in v1 (Wayland not supported).
+
+The computer daemon is a separate process from the browser daemon — they listen on different ports (computer: 9334, browser: 9333) and can run simultaneously.
+
+### Lifecycle Commands
+
+```bash
+atr computer start            # Start daemon (default: per-request 3s countdown)
+atr computer start --countdown-mode per-app    # First action per app prompts; subsequent auto-approve
+atr computer start --countdown-mode off        # No countdown (explicit opt-in for unattended)
+atr computer start --countdown 1               # 1-second countdown
+atr computer start --no-gui                    # Disable GUI overlay (terminal-only)
+atr computer stop
+atr computer status
+atr computer reset-approvals  # Clear per-app approval cache
+```
+
+### Coordinates and `--display`
+
+By default, mouse coordinates are **root coordinates** — the bounding box of all monitors with origin (0, 0). `atr computer displays` and `atr computer window list` both return root coords. Every mouse command also accepts `--display N` to switch to display-local pixels (relative to display N's top-left), which is usually easier to read off a screenshot.
+
+```bash
+atr computer displays                              # show each display's root bounds
+atr computer click 1500 800                        # absolute root coords
+atr computer click --display 0 60 800              # display-local on primary
+```
+
+### Screen and Mouse
+
+| Command | Description |
+|---------|-------------|
+| `atr computer screenshot --output PATH` | Capture full primary display |
+| `atr computer screenshot --display N --output PATH` | Capture display N |
+| `atr computer screenshot --display N --region X,Y,W,H --output PATH` | Crop within display N (display-local pixels) |
+| `atr computer click X Y` | Left click at root coords |
+| `atr computer click --display N X Y --button right --double` | Display-local right double-click |
+| `atr computer move X Y [--smooth] [--display N]` | Move mouse |
+| `atr computer hover X Y [--display N]` | Move without clicking |
+| `atr computer drag --from X,Y --to X,Y [--display N] [--button left/right/center]` | Drag with held button |
+| `atr computer scroll --dy N [--dx N]` | Scroll wheel at current cursor position |
+| `atr computer position` | Print current cursor coords |
+
+### Keyboard
+
+| Command | Description |
+|---------|-------------|
+| `atr computer type "TEXT" [--delay-ms N]` | Type text |
+| `atr computer key KEY` | Press a single named key (e.g. `enter`, `esc`, `f5`, `tab`) |
+| `atr computer chord "ctrl+shift+t"` | Press a key combination |
+
+### Window Management
+
+```bash
+atr computer window list                            # JSON list of all windows
+atr computer window active                          # Currently focused window
+atr computer window focus --title "Firefox"         # Match by substring of title or app name
+atr computer window minimize --id 12345
+atr computer window maximize --title "Code"
+atr computer window restore --id 12345
+atr computer window close --title "Calculator"
+atr computer window move --id 12345 --to 100,100
+atr computer window resize --id 12345 --size 800,600
+```
+
+### Apps
+
+```bash
+atr computer app launch firefox       # On Linux: tries PATH, gtk-launch, xdg-open
+atr computer app launch xclock
+atr computer app quit firefox         # SIGTERM via pkill on Unix; taskkill on Windows
+```
+
+### Ask the agent (`atr computer ask`)
+
+Run an in-process agent loop that screenshots the desktop, sends frames to the configured LLM, and calls the curated subset of computer tools (click, type, key, chord, focus_window, window_state, launch_app) until the goal is achieved or `--max-steps` is hit.
+
+```bash
+atr computer ask "open xclock and tell me what time it shows"
+atr computer ask "list the open windows that contain 'chrome' in the title"
+atr computer ask --max-steps 30 --timeout 10m "open the GNOME calculator and compute 17 * 23"
+```
+
+#### Flags
+
+| Flag | Description |
+|------|-------------|
+| `--max-steps N` | Max agent iterations (default 20) |
+| `--timeout DURATION` | Max wall-clock time (default 5m) |
+
+The LLM backend and model are inherited from the global ATR config (`--backend`, `--model`, env vars, `~/.atr/config.yaml`). Default model aliases: `flash → gemini-3.1-flash-preview`, `pro → gemini-3.2-pro-preview`. With `--backend claude-cli`, the model flag is ignored and Claude CLI drives the loop via MCP.
+
+The agent **cannot type passwords**. If a sudo / polkit / authentication prompt appears, it stops and reports the blocker.
+
+### Global flags (apply to all `atr computer ...` subcommands)
+
+| Flag | Description |
+|------|-------------|
+| `--json` | Output as JSON |
+| `--endpoint <url>` | Override server endpoint |
+
+---
+
 ## atr mcp
 
 Run ATR as an MCP (Model Context Protocol) server, exposing browser automation tools to MCP-compatible clients like Claude CLI or Gemini CLI.
