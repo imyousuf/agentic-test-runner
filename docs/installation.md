@@ -56,9 +56,11 @@ sudo mv atr /usr/local/bin/
 
 #### Windows
 
-1. Download `atr-windows-amd64.zip` or `atr-windows-arm64.zip` from [Releases](https://github.com/imyousuf/agentic-test-runner/releases)
+1. Download `atr-windows-amd64.zip` from [Releases](https://github.com/imyousuf/agentic-test-runner/releases)
 2. Extract `atr.exe`
 3. Add the directory containing `atr.exe` to your PATH
+
+> **Windows on ARM:** No pre-built binary is shipped — GitHub's `windows-11-arm` runners do not yet ship a CGo toolchain that can compile robotgo. Build from source with `make build`.
 
 PowerShell:
 ```powershell
