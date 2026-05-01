@@ -47,14 +47,12 @@ sudo mv atr /usr/local/bin/
 #### macOS
 
 ```bash
-# Intel Mac
-curl -L https://github.com/imyousuf/agentic-test-runner/releases/download/dev/atr-darwin-amd64.tar.gz | tar xz
-sudo mv atr /usr/local/bin/
-
 # Apple Silicon (M1/M2/M3)
 curl -L https://github.com/imyousuf/agentic-test-runner/releases/download/dev/atr-darwin-arm64.tar.gz | tar xz
 sudo mv atr /usr/local/bin/
 ```
+
+> **Intel Macs:** No pre-built binary is shipped. Build from source with `make build`.
 
 #### Windows
 

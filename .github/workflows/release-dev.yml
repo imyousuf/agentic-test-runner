@@ -20,12 +20,10 @@ jobs:
             goarch: amd64
             ext: ''
             archive: tar.gz
-          - target: darwin-amd64
-            # macos-13 is the last Intel runner image; macos-latest is now
-            # ARM and cannot natively compile robotgo's CGo for amd64.
-            os: macos-13
-            goos: darwin
-            goarch: amd64
+          - target: linux-arm64
+            os: ubuntu-24.04-arm
+            goos: linux
+            goarch: arm64
             ext: ''
             archive: tar.gz
           - target: darwin-arm64
@@ -38,6 +36,12 @@ jobs:
             os: windows-latest
             goos: windows
             goarch: amd64
+            ext: '.exe'
+            archive: zip
+          - target: windows-arm64
+            os: windows-11-arm
+            goos: windows
+            goarch: arm64
             ext: '.exe'
             archive: zip
 
@@ -56,7 +60,7 @@ jobs:
           cache: true
 
       - name: Install Linux runtime dependencies
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.goos == 'linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -178,12 +182,9 @@ jobs:
             **Windows:**
             Extract `atr.exe` from the zip file and add it to your PATH.
 
-            > **Note:** Linux ARM64 is not built in this release because robotgo's
-            > native build chain does not run on the ubuntu-latest x64 runners
-            > without a cross-compile sysroot. Track this as future work if needed.
-            >
-            > Windows ARM64 is omitted for the same reason on macOS/Linux runners.
-            > x64 binaries cover the common case for both platforms.
+            > **Note:** Intel macOS (darwin-amd64) is not built. Apple has fully
+            > transitioned to Apple silicon; Intel-Mac users can build from source
+            > with `make build`.
 
             ---
 
@@ -191,9 +192,10 @@ jobs:
             > For stable releases, please use tagged versions.
           files: |
             dist/atr-linux-amd64.tar.gz
-            dist/atr-darwin-amd64.tar.gz
+            dist/atr-linux-arm64.tar.gz
             dist/atr-darwin-arm64.tar.gz
             dist/atr-windows-amd64.zip
+            dist/atr-windows-arm64.zip
             dist/checksums.txt
           prerelease: true
           make_latest: false
