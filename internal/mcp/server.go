@@ -155,14 +155,21 @@ func (s *Server) handleRequest(ctx context.Context, req *Request) {
 	switch req.Method {
 	case "initialize":
 		s.handleInitialize(req)
-	case "initialized":
-		// Notification, no response needed
+	case "initialized", "notifications/initialized":
+		// JSON-RPC notification — clients post this after init. The
+		// MCP 2024-11-05 spec uses the "notifications/" prefix; the
+		// older bare name is kept for compatibility with older clients.
 	case "tools/list":
 		s.handleToolsList(req)
 	case "tools/call":
 		s.handleToolsCall(ctx, req)
 	default:
-		s.sendError(req.ID, -32601, "Method not found", req.Method)
+		// Per JSON-RPC 2.0, notifications (no id) MUST NOT receive a
+		// response — including for unknown methods. Only send an error
+		// for proper requests.
+		if req.ID != nil {
+			s.sendError(req.ID, -32601, "Method not found", req.Method)
+		}
 	}
 }
 
