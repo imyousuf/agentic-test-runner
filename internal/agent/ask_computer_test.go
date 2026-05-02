@@ -83,6 +83,11 @@ func TestComputerScreenshotImageToolReturnsBytes(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires display")
 	}
+	if runtime.GOOS == "windows" {
+		// screenshot.NumActiveDisplays() itself trips checkptr on
+		// Windows under -race; skip before the call.
+		t.Skip("internal/agent screenshot test skipped on Windows: vcaesar/screenshot checkptr violation under -race")
+	}
 	if screenshot.NumActiveDisplays() == 0 {
 		t.Skip("no displays available (headless environment)")
 	}

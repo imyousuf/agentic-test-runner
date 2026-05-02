@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -284,6 +285,12 @@ func TestBrowserGetComputedStylesDiff(t *testing.T) {
 }
 
 func TestBrowserGetMultipleElementScreenshots(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		// -race overhead + Chromium CDP latency on Windows runners makes
+		// the per-element screenshot context flake; the explicit-timeout
+		// variant below stays green.
+		t.Skip("flaky on Windows under -race: CDP latency causes per-element context deadlines")
+	}
 	resetFixture(t)
 	results, err := testBrowser.GetMultipleElementScreenshots(".card")
 	if err != nil {
