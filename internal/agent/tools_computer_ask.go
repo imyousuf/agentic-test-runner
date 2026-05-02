@@ -74,13 +74,13 @@ func NewComputerAskTools(c *computer.Computer) []Tool {
 		"computer_list_windows":  {},
 		"computer_position":      {},
 		// Actuation
-		"computer_click":         {},
-		"computer_type":          {},
-		"computer_press_key":     {},
-		"computer_key_chord":     {},
-		"computer_focus_window":  {},
-		"computer_window_state":  {},
-		"computer_launch_app":    {},
+		"computer_click":        {},
+		"computer_type":         {},
+		"computer_press_key":    {},
+		"computer_key_chord":    {},
+		"computer_focus_window": {},
+		"computer_window_state": {},
+		"computer_launch_app":   {},
 	}
 
 	out := []Tool{&computerScreenshotImageTool{c: c}}

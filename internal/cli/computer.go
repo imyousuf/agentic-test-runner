@@ -20,28 +20,28 @@ import (
 )
 
 var (
-	computerJSONOutput      bool
-	computerEndpoint        string
-	computerPort            int
-	computerCountdownMode   string
-	computerCountdownSecs   int
-	computerNoGUI           bool
-	computerScreenshotOut   string
-	computerScreenshotDisp  int
-	computerScreenshotRgn   string
-	computerClickButton     string
-	computerClickDouble     bool
-	computerClickDisplay    int
-	computerMoveSmooth      bool
-	computerMoveDisplay     int
-	computerDragFrom        string
-	computerDragTo          string
-	computerDragButton      string
-	computerDragDisplay     int
-	computerHoverDisplay    int
-	computerScrollDX        int
-	computerScrollDY        int
-	computerTypeDelayMs     int
+	computerJSONOutput     bool
+	computerEndpoint       string
+	computerPort           int
+	computerCountdownMode  string
+	computerCountdownSecs  int
+	computerNoGUI          bool
+	computerScreenshotOut  string
+	computerScreenshotDisp int
+	computerScreenshotRgn  string
+	computerClickButton    string
+	computerClickDouble    bool
+	computerClickDisplay   int
+	computerMoveSmooth     bool
+	computerMoveDisplay    int
+	computerDragFrom       string
+	computerDragTo         string
+	computerDragButton     string
+	computerDragDisplay    int
+	computerHoverDisplay   int
+	computerScrollDX       int
+	computerScrollDY       int
+	computerTypeDelayMs    int
 )
 
 // displayBody returns a request body field map for "display" — included

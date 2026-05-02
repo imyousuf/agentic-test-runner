@@ -307,8 +307,8 @@ func ComputerPosition(_ context.Context, c *computer.Computer) (ComputerPosition
 
 // ComputerDisplaysResult lists the attached displays.
 type ComputerDisplaysResult struct {
-	Primary  PrimarySize         `json:"primary"`
-	Displays []computer.Display  `json:"displays"`
+	Primary  PrimarySize        `json:"primary"`
+	Displays []computer.Display `json:"displays"`
 }
 
 // PrimarySize is the size of the primary screen in pixels.
