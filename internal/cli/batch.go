@@ -283,22 +283,22 @@ func dispatchBatchCommand(cmdLine string) (method, path string, body interface{}
 		}
 		doubleClick := containsFlag(args, "--double")
 		return "POST", "/click", map[string]interface{}{
-			"target": args[0], "double_click": doubleClick,
-		}, "clicked", nil
+			"selector": args[0], "double_click": doubleClick,
+		}, "selector", nil
 
 	case "fill":
 		if len(args) < 2 {
 			return "", "", nil, "", fmt.Errorf("fill requires target and value")
 		}
 		return "POST", "/fill", map[string]interface{}{
-			"target": args[0], "value": args[1],
-		}, "filled", nil
+			"selector": args[0], "value": args[1],
+		}, "selector", nil
 
 	case "hover":
 		if len(args) < 1 {
 			return "", "", nil, "", fmt.Errorf("hover requires a target")
 		}
-		return "POST", "/hover", map[string]interface{}{"target": args[0]}, "hovered", nil
+		return "POST", "/hover", map[string]interface{}{"selector": args[0]}, "selector", nil
 
 	case "press-key":
 		if len(args) < 1 {

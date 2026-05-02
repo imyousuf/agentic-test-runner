@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/imyousuf/agentic-test-runner/internal/agent"
 	"github.com/imyousuf/agentic-test-runner/internal/computer"
+	"github.com/imyousuf/agentic-test-runner/internal/ops"
 	"github.com/imyousuf/agentic-test-runner/pkg/llm"
 )
 
@@ -60,9 +62,10 @@ func (s *ComputerServer) gatedContext(parent context.Context) (context.Context, 
 }
 
 // abortStatus maps an action error to an HTTP status: aborted -> 499,
-// other errors -> 500.
+// other errors -> 500. Uses errors.Is so wrapped ErrAborted (e.g. via
+// fmt.Errorf("%w")) still maps to 499.
 func abortStatus(err error) int {
-	if err == computer.ErrAborted {
+	if errors.Is(err, computer.ErrAborted) {
 		return 499
 	}
 	return http.StatusInternalServerError
@@ -73,11 +76,11 @@ func (s *ComputerServer) handleComputerHealth(w http.ResponseWriter, r *http.Req
 		return
 	}
 	writeSuccess(w, map[string]any{
-		"running":              true,
-		"endpoint":             s.endpoint,
-		"mode":                 string(s.mode),
-		"countdown_seconds":    s.computer.CountdownSeconds(),
-		"approved_apps_count":  s.computer.ApprovedAppCount(),
+		"running":             true,
+		"endpoint":            s.endpoint,
+		"mode":                string(s.mode),
+		"countdown_seconds":   s.computer.CountdownSeconds(),
+		"approved_apps_count": s.computer.ApprovedAppCount(),
 	})
 }
 
@@ -97,43 +100,25 @@ func (s *ComputerServer) handleComputerScreenshot(w http.ResponseWriter, r *http
 	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
-	var req struct {
-		Display int  `json:"display"`
-		X       int  `json:"x"`
-		Y       int  `json:"y"`
-		Width   int  `json:"width"`
-		Height  int  `json:"height"`
-		Region  bool `json:"region"`
-	}
+	var req ops.ComputerScreenshotRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	display := req.Display
-	if display == 0 && r.URL.Query().Get("display") == "" {
-		display = -1 // use default
-	}
-	var (
-		png []byte
-		err error
-	)
-	if req.Region {
-		if req.Width <= 0 || req.Height <= 0 {
-			writeError(w, http.StatusBadRequest, "region requires positive width and height")
-			return
-		}
-		png, err = s.computer.ScreenshotRegion(display, req.X, req.Y, req.Width, req.Height)
-	} else {
-		png, err = s.computer.Screenshot(display)
-	}
+	// req.Display is *int: nil means "use the daemon's configured default
+	// display"; explicit display=0 stays as display 0 (display-local coords
+	// on the primary monitor). The ops layer handles the nil → -1 mapping.
+	res, err := ops.ComputerScreenshot(r.Context(), s.computer, req)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		// Screenshot can be gated by the countdown — surface aborts as
+		// HTTP 499 the same way every other gated computer endpoint does.
+		writeError(w, abortStatus(err), err.Error())
 		return
 	}
 	writeSuccess(w, map[string]any{
-		"image_base64": base64.StdEncoding.EncodeToString(png),
-		"size_bytes":   len(png),
-		"format":       "png",
+		"image_base64": base64.StdEncoding.EncodeToString(res.PNG),
+		"size_bytes":   len(res.PNG),
+		"format":       res.Format,
 	})
 }
 
@@ -141,258 +126,219 @@ func (s *ComputerServer) handleComputerClick(w http.ResponseWriter, r *http.Requ
 	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
-	var req struct {
-		X       int    `json:"x"`
-		Y       int    `json:"y"`
-		Button  string `json:"button"`
-		Double  bool   `json:"double"`
-		Display *int   `json:"display,omitempty"`
-	}
+	var req ops.ComputerClickRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if req.Button == "" {
-		req.Button = "left"
-	}
-	display := computer.NoDisplay
-	if req.Display != nil {
-		display = *req.Display
-	}
 	ctx, cancel := s.gatedContext(r.Context())
 	defer cancel()
-	if err := s.computer.Click(ctx, req.X, req.Y, computer.MouseButton(req.Button), req.Double, display); err != nil {
+	res, err := ops.ComputerClick(ctx, s.computer, req)
+	if err != nil {
 		writeError(w, abortStatus(err), err.Error())
 		return
 	}
-	writeSuccess(w, map[string]any{"x": req.X, "y": req.Y, "display": display})
+	writeSuccess(w, res)
 }
 
 func (s *ComputerServer) handleComputerMove(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
-	var req struct {
-		X       int  `json:"x"`
-		Y       int  `json:"y"`
-		Smooth  bool `json:"smooth"`
-		Display *int `json:"display,omitempty"`
-	}
+	var req ops.ComputerMoveRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	display := computer.NoDisplay
-	if req.Display != nil {
-		display = *req.Display
-	}
 	ctx, cancel := s.gatedContext(r.Context())
 	defer cancel()
-	if err := s.computer.MoveTo(ctx, req.X, req.Y, req.Smooth, display); err != nil {
+	res, err := ops.ComputerMove(ctx, s.computer, req)
+	if err != nil {
 		writeError(w, abortStatus(err), err.Error())
 		return
 	}
-	writeSuccess(w, map[string]any{"x": req.X, "y": req.Y, "display": display})
+	writeSuccess(w, res)
 }
 
 func (s *ComputerServer) handleComputerDrag(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
-	var req struct {
-		FromX   int    `json:"from_x"`
-		FromY   int    `json:"from_y"`
-		ToX     int    `json:"to_x"`
-		ToY     int    `json:"to_y"`
-		Button  string `json:"button"`
-		Display *int   `json:"display,omitempty"`
-	}
+	var req ops.ComputerDragRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if req.Button == "" {
-		req.Button = "left"
-	}
-	display := computer.NoDisplay
-	if req.Display != nil {
-		display = *req.Display
-	}
 	ctx, cancel := s.gatedContext(r.Context())
 	defer cancel()
-	if err := s.computer.Drag(ctx, req.FromX, req.FromY, req.ToX, req.ToY, computer.MouseButton(req.Button), display); err != nil {
+	res, err := ops.ComputerDrag(ctx, s.computer, req)
+	if err != nil {
 		writeError(w, abortStatus(err), err.Error())
 		return
 	}
-	writeSuccess(w, map[string]any{"from": [2]int{req.FromX, req.FromY}, "to": [2]int{req.ToX, req.ToY}, "display": display})
+	writeSuccess(w, res)
 }
 
 func (s *ComputerServer) handleComputerScroll(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
-	var req struct {
-		DX int `json:"dx"`
-		DY int `json:"dy"`
-	}
+	var req ops.ComputerScrollRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	ctx, cancel := s.gatedContext(r.Context())
 	defer cancel()
-	if err := s.computer.Scroll(ctx, req.DX, req.DY); err != nil {
+	res, err := ops.ComputerScroll(ctx, s.computer, req)
+	if err != nil {
 		writeError(w, abortStatus(err), err.Error())
 		return
 	}
-	writeSuccess(w, map[string]any{"dx": req.DX, "dy": req.DY})
+	writeSuccess(w, res)
 }
 
 func (s *ComputerServer) handleComputerHover(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
-	var req struct {
-		X       int  `json:"x"`
-		Y       int  `json:"y"`
-		Display *int `json:"display,omitempty"`
-	}
+	var req ops.ComputerHoverRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	display := computer.NoDisplay
-	if req.Display != nil {
-		display = *req.Display
-	}
 	ctx, cancel := s.gatedContext(r.Context())
 	defer cancel()
-	if err := s.computer.Hover(ctx, req.X, req.Y, display); err != nil {
+	res, err := ops.ComputerHover(ctx, s.computer, req)
+	if err != nil {
 		writeError(w, abortStatus(err), err.Error())
 		return
 	}
-	writeSuccess(w, map[string]any{"x": req.X, "y": req.Y, "display": display})
+	writeSuccess(w, res)
 }
 
 func (s *ComputerServer) handleComputerType(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
-	var req struct {
-		Text    string `json:"text"`
-		DelayMs int    `json:"delay_ms"`
-	}
+	var req ops.ComputerTypeRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	ctx, cancel := s.gatedContext(r.Context())
 	defer cancel()
-	if err := s.computer.Type(ctx, req.Text, req.DelayMs); err != nil {
+	res, err := ops.ComputerType(ctx, s.computer, req)
+	if err != nil {
 		writeError(w, abortStatus(err), err.Error())
 		return
 	}
-	writeSuccess(w, map[string]any{"chars": len(req.Text)})
+	writeSuccess(w, res)
 }
 
 func (s *ComputerServer) handleComputerKey(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
-	var req struct {
-		Key string `json:"key"`
-	}
+	var req ops.ComputerPressKeyRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	ctx, cancel := s.gatedContext(r.Context())
 	defer cancel()
-	if err := s.computer.PressKey(ctx, req.Key); err != nil {
+	res, err := ops.ComputerPressKey(ctx, s.computer, req)
+	if err != nil {
 		writeError(w, abortStatus(err), err.Error())
 		return
 	}
-	writeSuccess(w, map[string]any{"key": req.Key})
+	writeSuccess(w, res)
 }
 
 func (s *ComputerServer) handleComputerChord(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
-	var req struct {
-		Chord string `json:"chord"`
-	}
+	var req ops.ComputerKeyChordRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	ctx, cancel := s.gatedContext(r.Context())
 	defer cancel()
-	if err := s.computer.KeyChord(ctx, req.Chord); err != nil {
+	res, err := ops.ComputerKeyChord(ctx, s.computer, req)
+	if err != nil {
 		writeError(w, abortStatus(err), err.Error())
 		return
 	}
-	writeSuccess(w, map[string]any{"chord": req.Chord})
+	writeSuccess(w, res)
 }
 
 func (s *ComputerServer) handleComputerPosition(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
-	x, y := s.computer.Position()
-	writeSuccess(w, map[string]any{"x": x, "y": y})
+	res, err := ops.ComputerPosition(r.Context(), s.computer)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeSuccess(w, res)
 }
 
 func (s *ComputerServer) handleComputerDisplays(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
-	w2, h := s.computer.ScreenSize()
-	writeSuccess(w, map[string]any{
-		"primary":  map[string]int{"width": w2, "height": h},
-		"displays": s.computer.Displays(),
-	})
+	res, err := ops.ComputerDisplays(r.Context(), s.computer)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeSuccess(w, res)
 }
 
 func (s *ComputerServer) handleComputerResetApprovals(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
-	s.computer.ResetApprovals()
-	writeSuccess(w, map[string]any{"cleared": true})
+	res, err := ops.ComputerApprovalsClear(r.Context(), s.computer)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeSuccess(w, res)
 }
 
 func (s *ComputerServer) handleComputerListWindows(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
-	wins, err := s.computer.ListWindows()
+	res, err := ops.ComputerListWindows(r.Context(), s.computer)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeSuccess(w, map[string]any{"windows": wins, "count": len(wins)})
+	writeSuccess(w, res)
 }
 
 func (s *ComputerServer) handleComputerActiveWindow(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodGet) {
 		return
 	}
-	win, err := s.computer.ActiveWindow()
+	res, err := ops.ComputerActiveWindow(r.Context(), s.computer)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeSuccess(w, win)
+	writeSuccess(w, res)
 }
 
 func (s *ComputerServer) handleComputerFocusWindow(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
-	var req struct {
-		ID uint32 `json:"id"`
-	}
+	var req ops.ComputerFocusWindowRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -403,21 +349,19 @@ func (s *ComputerServer) handleComputerFocusWindow(w http.ResponseWriter, r *htt
 	}
 	ctx, cancel := s.gatedContext(r.Context())
 	defer cancel()
-	if err := s.computer.FocusWindow(ctx, req.ID); err != nil {
+	res, err := ops.ComputerFocusWindow(ctx, s.computer, req)
+	if err != nil {
 		writeError(w, abortStatus(err), err.Error())
 		return
 	}
-	writeSuccess(w, map[string]any{"id": req.ID})
+	writeSuccess(w, res)
 }
 
 func (s *ComputerServer) handleComputerWindowState(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
-	var req struct {
-		ID    uint32 `json:"id"`
-		State string `json:"state"`
-	}
+	var req ops.ComputerWindowStateRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -428,22 +372,19 @@ func (s *ComputerServer) handleComputerWindowState(w http.ResponseWriter, r *htt
 	}
 	ctx, cancel := s.gatedContext(r.Context())
 	defer cancel()
-	if err := s.computer.SetWindowState(ctx, req.ID, computer.WindowState(req.State)); err != nil {
+	res, err := ops.ComputerWindowState(ctx, s.computer, req)
+	if err != nil {
 		writeError(w, abortStatus(err), err.Error())
 		return
 	}
-	writeSuccess(w, map[string]any{"id": req.ID, "state": req.State})
+	writeSuccess(w, res)
 }
 
 func (s *ComputerServer) handleComputerMoveWindow(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
-	var req struct {
-		ID uint32 `json:"id"`
-		X  int    `json:"x"`
-		Y  int    `json:"y"`
-	}
+	var req ops.ComputerMoveWindowRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -454,22 +395,19 @@ func (s *ComputerServer) handleComputerMoveWindow(w http.ResponseWriter, r *http
 	}
 	ctx, cancel := s.gatedContext(r.Context())
 	defer cancel()
-	if err := s.computer.MoveWindow(ctx, req.ID, req.X, req.Y); err != nil {
+	res, err := ops.ComputerMoveWindow(ctx, s.computer, req)
+	if err != nil {
 		writeError(w, abortStatus(err), err.Error())
 		return
 	}
-	writeSuccess(w, map[string]any{"id": req.ID, "x": req.X, "y": req.Y})
+	writeSuccess(w, res)
 }
 
 func (s *ComputerServer) handleComputerResizeWindow(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
-	var req struct {
-		ID     uint32 `json:"id"`
-		Width  int    `json:"width"`
-		Height int    `json:"height"`
-	}
+	var req ops.ComputerResizeWindowRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -480,51 +418,50 @@ func (s *ComputerServer) handleComputerResizeWindow(w http.ResponseWriter, r *ht
 	}
 	ctx, cancel := s.gatedContext(r.Context())
 	defer cancel()
-	if err := s.computer.ResizeWindow(ctx, req.ID, req.Width, req.Height); err != nil {
+	res, err := ops.ComputerResizeWindow(ctx, s.computer, req)
+	if err != nil {
 		writeError(w, abortStatus(err), err.Error())
 		return
 	}
-	writeSuccess(w, map[string]any{"id": req.ID, "width": req.Width, "height": req.Height})
+	writeSuccess(w, res)
 }
 
 func (s *ComputerServer) handleComputerLaunchApp(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
-	var req struct {
-		Name string `json:"name"`
-	}
+	var req ops.ComputerLaunchAppRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	ctx, cancel := s.gatedContext(r.Context())
 	defer cancel()
-	if err := s.computer.LaunchApp(ctx, req.Name); err != nil {
+	res, err := ops.ComputerLaunchApp(ctx, s.computer, req)
+	if err != nil {
 		writeError(w, abortStatus(err), err.Error())
 		return
 	}
-	writeSuccess(w, map[string]any{"launched": req.Name})
+	writeSuccess(w, res)
 }
 
 func (s *ComputerServer) handleComputerQuitApp(w http.ResponseWriter, r *http.Request) {
 	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
-	var req struct {
-		Name string `json:"name"`
-	}
+	var req ops.ComputerQuitAppRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	ctx, cancel := s.gatedContext(r.Context())
 	defer cancel()
-	if err := s.computer.QuitApp(ctx, req.Name); err != nil {
+	res, err := ops.ComputerQuitApp(ctx, s.computer, req)
+	if err != nil {
 		writeError(w, abortStatus(err), err.Error())
 		return
 	}
-	writeSuccess(w, map[string]any{"quit": req.Name})
+	writeSuccess(w, res)
 }
 
 // handleComputerAsk runs an in-process agent loop that drives the desktop
@@ -534,11 +471,7 @@ func (s *ComputerServer) handleComputerAsk(w http.ResponseWriter, r *http.Reques
 	if !requireMethod(w, r, http.MethodPost) {
 		return
 	}
-	var req struct {
-		Instruction    string `json:"instruction"`
-		MaxSteps       int    `json:"max_steps,omitempty"`
-		TimeoutSeconds int    `json:"timeout_seconds,omitempty"`
-	}
+	var req ops.ComputerAskRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -579,17 +512,21 @@ func (s *ComputerServer) handleComputerAsk(w http.ResponseWriter, r *http.Reques
 		Verbose:       true,
 	})
 
+	runner := func(ctx context.Context, instruction string) (string, error) {
+		return askAgent.ComputerAsk(ctx, instruction)
+	}
+
 	start := time.Now()
-	answer, err := askAgent.ComputerAsk(ctx, req.Instruction)
+	res, err := ops.ComputerAsk(ctx, runner, req)
 	duration := time.Since(start)
 
 	if err != nil {
-		writeError(w, abortStatus(err), fmt.Sprintf("computer ask failed: %v", err))
+		writeError(w, abortStatus(err), err.Error())
 		return
 	}
 
 	writeSuccess(w, map[string]any{
-		"answer":      answer,
+		"answer":      res.Answer,
 		"duration_ms": duration.Milliseconds(),
 		"backend":     string(llmClient.Provider()),
 		"model":       llmClient.Model(),

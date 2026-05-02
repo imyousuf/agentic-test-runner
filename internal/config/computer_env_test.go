@@ -6,11 +6,12 @@ import "testing"
 // propagate through Viper into the unmarshalled Config.
 //
 // This is the contract the daemon spawn relies on:
-//   atr computer start --no-gui
-//     -> os.Setenv("ATR_COMPUTER_GUI_ENABLED", "false")
-//     -> exec.Command("atr computer serve") (env inherited)
-//     -> config.Load() in the child
-//     -> cfg.Computer.GUI.Enabled == false
+//
+//	atr computer start --no-gui
+//	  -> os.Setenv("ATR_COMPUTER_GUI_ENABLED", "false")
+//	  -> exec.Command("atr computer serve") (env inherited)
+//	  -> config.Load() in the child
+//	  -> cfg.Computer.GUI.Enabled == false
 //
 // If this drifts (Viper version change, key rename, missing BindEnv),
 // CLI flags would be silently dropped at the daemon boundary.

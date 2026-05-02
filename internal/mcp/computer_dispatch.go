@@ -11,6 +11,7 @@ import (
 
 	"github.com/imyousuf/agentic-test-runner/internal/agent"
 	"github.com/imyousuf/agentic-test-runner/internal/computer"
+	"github.com/imyousuf/agentic-test-runner/internal/ops"
 	"github.com/imyousuf/agentic-test-runner/pkg/llm"
 )
 
@@ -56,149 +57,224 @@ func (s *Server) executeComputerTool(ctx context.Context, name string, args map[
 
 	switch name {
 	case "computer_screenshot":
-		return computerScreenshot(c, args)
+		return computerScreenshotMCP(ctx, c, args)
 
 	case "computer_click":
-		x, y := getInt(args, "x"), getInt(args, "y")
-		button := computer.MouseButton(getStringOrDefault(args, "button", "left"))
-		double := getBool(args, "double")
-		if err := c.Click(ctx, x, y, button, double, getDisplay(args)); err != nil {
+		var req ops.ComputerClickRequest
+		if err := ops.MapToStruct(args, &req); err != nil {
 			return "", err
 		}
-		return fmt.Sprintf("Clicked (%s%s) at (%d, %d)", button, doubleSuffix(double), x, y), nil
-
-	case "computer_double_click":
-		x, y := getInt(args, "x"), getInt(args, "y")
-		if err := c.Click(ctx, x, y, computer.ButtonLeft, true, getDisplay(args)); err != nil {
-			return "", err
+		button := req.Button
+		if button == "" {
+			button = "left"
 		}
-		return fmt.Sprintf("Double-clicked at (%d, %d)", x, y), nil
-
-	case "computer_right_click":
-		x, y := getInt(args, "x"), getInt(args, "y")
-		if err := c.Click(ctx, x, y, computer.ButtonRight, false, getDisplay(args)); err != nil {
-			return "", err
-		}
-		return fmt.Sprintf("Right-clicked at (%d, %d)", x, y), nil
-
-	case "computer_move":
-		x, y := getInt(args, "x"), getInt(args, "y")
-		if err := c.MoveTo(ctx, x, y, getBool(args, "smooth"), getDisplay(args)); err != nil {
-			return "", err
-		}
-		return fmt.Sprintf("Moved to (%d, %d)", x, y), nil
-
-	case "computer_drag":
-		fx, fy := getInt(args, "from_x"), getInt(args, "from_y")
-		tx, ty := getInt(args, "to_x"), getInt(args, "to_y")
-		btn := computer.MouseButton(getStringOrDefault(args, "button", "left"))
-		if err := c.Drag(ctx, fx, fy, tx, ty, btn, getDisplay(args)); err != nil {
-			return "", err
-		}
-		return fmt.Sprintf("Dragged from (%d, %d) to (%d, %d)", fx, fy, tx, ty), nil
-
-	case "computer_scroll":
-		dx, dy := getInt(args, "dx"), getInt(args, "dy")
-		if err := c.Scroll(ctx, dx, dy); err != nil {
-			return "", err
-		}
-		return fmt.Sprintf("Scrolled (%d, %d)", dx, dy), nil
-
-	case "computer_hover":
-		x, y := getInt(args, "x"), getInt(args, "y")
-		if err := c.Hover(ctx, x, y, getDisplay(args)); err != nil {
-			return "", err
-		}
-		return fmt.Sprintf("Hovered at (%d, %d)", x, y), nil
-
-	case "computer_type":
-		text := getString(args, "text")
-		if err := c.Type(ctx, text, getInt(args, "delay_ms")); err != nil {
-			return "", err
-		}
-		return fmt.Sprintf("Typed %d characters", len(text)), nil
-
-	case "computer_press_key":
-		key := getString(args, "key")
-		if err := c.PressKey(ctx, key); err != nil {
-			return "", err
-		}
-		return fmt.Sprintf("Pressed %q", key), nil
-
-	case "computer_key_chord":
-		chord := getString(args, "chord")
-		if err := c.KeyChord(ctx, chord); err != nil {
-			return "", err
-		}
-		return fmt.Sprintf("Pressed %q", chord), nil
-
-	case "computer_position":
-		x, y := c.Position()
-		return fmt.Sprintf("Mouse position: (%d, %d)", x, y), nil
-
-	case "computer_displays":
-		w, h := c.ScreenSize()
-		displays := c.Displays()
-		return fmt.Sprintf("Primary: %dx%d. Displays: %s", w, h, jsonOrEmpty(displays)), nil
-
-	case "computer_list_windows":
-		wins, err := c.ListWindows()
+		res, err := ops.ComputerClick(ctx, c, req)
 		if err != nil {
 			return "", err
 		}
-		return jsonOrEmpty(wins), nil
+		return fmt.Sprintf("Clicked (%s%s) at (%d, %d)", button, doubleSuffix(req.DoubleClick), res.X, res.Y), nil
+
+	case "computer_double_click":
+		var req ops.ComputerClickRequest
+		if err := ops.MapToStruct(args, &req); err != nil {
+			return "", err
+		}
+		req.DoubleClick = true
+		res, err := ops.ComputerClick(ctx, c, req)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("Double-clicked at (%d, %d)", res.X, res.Y), nil
+
+	case "computer_right_click":
+		var req ops.ComputerClickRequest
+		if err := ops.MapToStruct(args, &req); err != nil {
+			return "", err
+		}
+		req.RightClick = true
+		req.DoubleClick = false
+		res, err := ops.ComputerClick(ctx, c, req)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("Right-clicked at (%d, %d)", res.X, res.Y), nil
+
+	case "computer_move":
+		var req ops.ComputerMoveRequest
+		if err := ops.MapToStruct(args, &req); err != nil {
+			return "", err
+		}
+		res, err := ops.ComputerMove(ctx, c, req)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("Moved to (%d, %d)", res.X, res.Y), nil
+
+	case "computer_drag":
+		var req ops.ComputerDragRequest
+		if err := ops.MapToStruct(args, &req); err != nil {
+			return "", err
+		}
+		res, err := ops.ComputerDrag(ctx, c, req)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("Dragged from (%d, %d) to (%d, %d)", res.From[0], res.From[1], res.To[0], res.To[1]), nil
+
+	case "computer_scroll":
+		var req ops.ComputerScrollRequest
+		if err := ops.MapToStruct(args, &req); err != nil {
+			return "", err
+		}
+		res, err := ops.ComputerScroll(ctx, c, req)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("Scrolled (%d, %d)", res.DX, res.DY), nil
+
+	case "computer_hover":
+		var req ops.ComputerHoverRequest
+		if err := ops.MapToStruct(args, &req); err != nil {
+			return "", err
+		}
+		res, err := ops.ComputerHover(ctx, c, req)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("Hovered at (%d, %d)", res.X, res.Y), nil
+
+	case "computer_type":
+		var req ops.ComputerTypeRequest
+		if err := ops.MapToStruct(args, &req); err != nil {
+			return "", err
+		}
+		res, err := ops.ComputerType(ctx, c, req)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("Typed %d characters", res.Chars), nil
+
+	case "computer_press_key":
+		var req ops.ComputerPressKeyRequest
+		if err := ops.MapToStruct(args, &req); err != nil {
+			return "", err
+		}
+		res, err := ops.ComputerPressKey(ctx, c, req)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("Pressed %q", res.Key), nil
+
+	case "computer_key_chord":
+		var req ops.ComputerKeyChordRequest
+		if err := ops.MapToStruct(args, &req); err != nil {
+			return "", err
+		}
+		res, err := ops.ComputerKeyChord(ctx, c, req)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("Pressed %q", res.Chord), nil
+
+	case "computer_position":
+		res, err := ops.ComputerPosition(ctx, c)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("Mouse position: (%d, %d)", res.X, res.Y), nil
+
+	case "computer_displays":
+		res, err := ops.ComputerDisplays(ctx, c)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("Primary: %dx%d. Displays: %s", res.Primary.Width, res.Primary.Height, jsonOrEmpty(res.Displays)), nil
+
+	case "computer_approvals_clear":
+		if _, err := ops.ComputerApprovalsClear(ctx, c); err != nil {
+			return "", err
+		}
+		return "Cleared per-app approval cache", nil
+
+	case "computer_list_windows":
+		res, err := ops.ComputerListWindows(ctx, c)
+		if err != nil {
+			return "", err
+		}
+		return jsonOrEmpty(res.Windows), nil
 
 	case "computer_active_window":
-		win, err := c.ActiveWindow()
+		win, err := ops.ComputerActiveWindow(ctx, c)
 		if err != nil {
 			return "", err
 		}
 		return jsonOrEmpty(win), nil
 
 	case "computer_focus_window":
-		id := uint32(getInt(args, "id"))
-		if err := c.FocusWindow(ctx, id); err != nil {
+		var req ops.ComputerFocusWindowRequest
+		if err := ops.MapToStruct(args, &req); err != nil {
 			return "", err
 		}
-		return fmt.Sprintf("Focused window %d", id), nil
+		res, err := ops.ComputerFocusWindow(ctx, c, req)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("Focused window %d", res.ID), nil
 
 	case "computer_window_state":
-		id := uint32(getInt(args, "id"))
-		state := computer.WindowState(getString(args, "state"))
-		if err := c.SetWindowState(ctx, id, state); err != nil {
+		var req ops.ComputerWindowStateRequest
+		if err := ops.MapToStruct(args, &req); err != nil {
 			return "", err
 		}
-		return fmt.Sprintf("Window %d state -> %s", id, state), nil
+		res, err := ops.ComputerWindowState(ctx, c, req)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("Window %d state -> %s", res.ID, res.State), nil
 
 	case "computer_move_window":
-		id := uint32(getInt(args, "id"))
-		x, y := getInt(args, "x"), getInt(args, "y")
-		if err := c.MoveWindow(ctx, id, x, y); err != nil {
+		var req ops.ComputerMoveWindowRequest
+		if err := ops.MapToStruct(args, &req); err != nil {
 			return "", err
 		}
-		return fmt.Sprintf("Moved window %d to (%d, %d)", id, x, y), nil
+		res, err := ops.ComputerMoveWindow(ctx, c, req)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("Moved window %d to (%d, %d)", res.ID, res.X, res.Y), nil
 
 	case "computer_resize_window":
-		id := uint32(getInt(args, "id"))
-		w, h := getInt(args, "width"), getInt(args, "height")
-		if err := c.ResizeWindow(ctx, id, w, h); err != nil {
+		var req ops.ComputerResizeWindowRequest
+		if err := ops.MapToStruct(args, &req); err != nil {
 			return "", err
 		}
-		return fmt.Sprintf("Resized window %d to %dx%d", id, w, h), nil
+		res, err := ops.ComputerResizeWindow(ctx, c, req)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("Resized window %d to %dx%d", res.ID, res.Width, res.Height), nil
 
 	case "computer_launch_app":
-		appName := getString(args, "name")
-		if err := c.LaunchApp(ctx, appName); err != nil {
+		var req ops.ComputerLaunchAppRequest
+		if err := ops.MapToStruct(args, &req); err != nil {
 			return "", err
 		}
-		return fmt.Sprintf("Launched %q", appName), nil
+		res, err := ops.ComputerLaunchApp(ctx, c, req)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("Launched %q", res.Launched), nil
 
 	case "computer_quit_app":
-		appName := getString(args, "name")
-		if err := c.QuitApp(ctx, appName); err != nil {
+		var req ops.ComputerQuitAppRequest
+		if err := ops.MapToStruct(args, &req); err != nil {
 			return "", err
 		}
-		return fmt.Sprintf("Quit %q", appName), nil
+		res, err := ops.ComputerQuitApp(ctx, c, req)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("Quit %q", res.Quit), nil
 
 	case "computer_ask":
 		return s.executeComputerAsk(ctx, args)
@@ -212,8 +288,11 @@ func (s *Server) executeComputerTool(ctx context.Context, name string, args map[
 // configured LLM. Mirrors handleComputerAsk in internal/api but reachable
 // from MCP clients (e.g., Claude Code).
 func (s *Server) executeComputerAsk(ctx context.Context, args map[string]any) (string, error) {
-	instruction := getString(args, "instruction")
-	if instruction == "" {
+	var req ops.ComputerAskRequest
+	if err := ops.MapToStruct(args, &req); err != nil {
+		return "", err
+	}
+	if req.Instruction == "" {
 		return "", fmt.Errorf("instruction is required")
 	}
 	if s.appConfig == nil {
@@ -235,107 +314,51 @@ func (s *Server) executeComputerAsk(ctx context.Context, args map[string]any) (s
 	}
 	defer llmClient.Close()
 
-	timeout := time.Duration(getInt(args, "timeout_seconds")) * time.Second
+	timeout := time.Duration(req.TimeoutSeconds) * time.Second
 	askAgent := agent.NewComputerAskAgent(agent.ComputerAskConfig{
 		LLMClient:     llmClient,
 		Computer:      c,
-		MaxIterations: getInt(args, "max_steps"),
+		MaxIterations: req.MaxSteps,
 		Timeout:       timeout,
 		Verbose:       true,
 	})
 
-	answer, err := askAgent.ComputerAsk(ctx, instruction)
+	runner := func(ctx context.Context, instruction string) (string, error) {
+		return askAgent.ComputerAsk(ctx, instruction)
+	}
+	res, err := ops.ComputerAsk(ctx, runner, req)
 	if err != nil {
 		return "", err
 	}
-	return answer, nil
+	return res.Answer, nil
 }
 
-func computerScreenshot(c *computer.Computer, args map[string]any) (string, error) {
-	display := -1
-	if v, ok := args["display"]; ok {
-		if n, err := toInt(v); err == nil {
-			display = n
-		}
+// computerScreenshotMCP wraps ops.ComputerScreenshot for the MCP surface,
+// which writes the PNG to disk and returns the file path. The MCP-only
+// "output" arg controls the destination.
+func computerScreenshotMCP(ctx context.Context, c *computer.Computer, args map[string]any) (string, error) {
+	var req ops.ComputerScreenshotRequest
+	if err := ops.MapToStruct(args, &req); err != nil {
+		return "", err
 	}
-	out := getString(args, "output")
+	// req.Display is *int: a missing args["display"] decodes to nil, which
+	// the ops layer interprets as "use the daemon's configured default";
+	// explicit display=0 round-trips to *0.
+	res, err := ops.ComputerScreenshot(ctx, c, req)
+	if err != nil {
+		return "", err
+	}
+	out := req.Output
 	if out == "" {
 		out = filepath.Join(os.TempDir(), fmt.Sprintf("atr-screenshot-%d.png", time.Now().UnixNano()))
 	}
-	png, err := c.Screenshot(display)
-	if err != nil {
-		return "", err
-	}
-	if err := os.WriteFile(out, png, 0o644); err != nil {
+	if err := os.WriteFile(out, res.PNG, 0o644); err != nil {
 		return "", fmt.Errorf("write screenshot: %w", err)
 	}
-	return fmt.Sprintf("Screenshot saved to %s (%d bytes)", out, len(png)), nil
+	return fmt.Sprintf("Screenshot saved to %s (%d bytes)", out, len(res.PNG)), nil
 }
 
 // ----- helpers -----
-
-// getDisplay returns the display index from args, or computer.NoDisplay if
-// absent or null. Distinguishes "missing" from "0" (display 0 is valid).
-func getDisplay(args map[string]any) int {
-	v, ok := args["display"]
-	if !ok || v == nil {
-		return computer.NoDisplay
-	}
-	if n, err := toInt(v); err == nil {
-		return n
-	}
-	return computer.NoDisplay
-}
-
-func getInt(args map[string]any, key string) int {
-	v, ok := args[key]
-	if !ok {
-		return 0
-	}
-	n, _ := toInt(v)
-	return n
-}
-
-func getBool(args map[string]any, key string) bool {
-	v, ok := args[key]
-	if !ok {
-		return false
-	}
-	b, _ := v.(bool)
-	return b
-}
-
-func getString(args map[string]any, key string) string {
-	v, ok := args[key]
-	if !ok {
-		return ""
-	}
-	s, _ := v.(string)
-	return s
-}
-
-func getStringOrDefault(args map[string]any, key, def string) string {
-	if v := getString(args, key); v != "" {
-		return v
-	}
-	return def
-}
-
-func toInt(v any) (int, error) {
-	switch n := v.(type) {
-	case int:
-		return n, nil
-	case int64:
-		return int(n), nil
-	case float64:
-		return int(n), nil
-	case string:
-		var x int
-		_, err := fmt.Sscanf(n, "%d", &x)
-		return x, err
-	}
-	return 0, fmt.Errorf("not an integer: %v", v)
-}
 
 func doubleSuffix(double bool) string {
 	if double {

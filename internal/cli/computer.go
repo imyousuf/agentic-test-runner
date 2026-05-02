@@ -20,28 +20,28 @@ import (
 )
 
 var (
-	computerJSONOutput      bool
-	computerEndpoint        string
-	computerPort            int
-	computerCountdownMode   string
-	computerCountdownSecs   int
-	computerNoGUI           bool
-	computerScreenshotOut   string
-	computerScreenshotDisp  int
-	computerScreenshotRgn   string
-	computerClickButton     string
-	computerClickDouble     bool
-	computerClickDisplay    int
-	computerMoveSmooth      bool
-	computerMoveDisplay     int
-	computerDragFrom        string
-	computerDragTo          string
-	computerDragButton      string
-	computerDragDisplay     int
-	computerHoverDisplay    int
-	computerScrollDX        int
-	computerScrollDY        int
-	computerTypeDelayMs     int
+	computerJSONOutput     bool
+	computerEndpoint       string
+	computerPort           int
+	computerCountdownMode  string
+	computerCountdownSecs  int
+	computerNoGUI          bool
+	computerScreenshotOut  string
+	computerScreenshotDisp int
+	computerScreenshotRgn  string
+	computerClickButton    string
+	computerClickDouble    bool
+	computerClickDisplay   int
+	computerMoveSmooth     bool
+	computerMoveDisplay    int
+	computerDragFrom       string
+	computerDragTo         string
+	computerDragButton     string
+	computerDragDisplay    int
+	computerHoverDisplay   int
+	computerScrollDX       int
+	computerScrollDY       int
+	computerTypeDelayMs    int
 )
 
 // displayBody returns a request body field map for "display" — included
@@ -328,8 +328,12 @@ func newComputerScreenshotCmd() *cobra.Command {
 }
 
 func runComputerScreenshot(cmd *cobra.Command, args []string) error {
-	body := map[string]any{
-		"display": computerScreenshotDisp,
+	// Only include display in the body when the user passed --display, so
+	// the daemon can distinguish "use default display" (omitted) from
+	// "display 0" (explicit). Mirrors displayBody used by click/move/etc.
+	body := map[string]any{}
+	if computerScreenshotDisp >= 0 {
+		body["display"] = computerScreenshotDisp
 	}
 	if computerScreenshotRgn != "" {
 		x, y, w, h, err := parseRegion(computerScreenshotRgn)
@@ -397,10 +401,10 @@ func runComputerClick(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	body := mergeBody(map[string]any{
-		"x":      x,
-		"y":      y,
-		"button": computerClickButton,
-		"double": computerClickDouble,
+		"x":            x,
+		"y":            y,
+		"button":       computerClickButton,
+		"double_click": computerClickDouble,
 	}, displayBody(computerClickDisplay))
 	return computerAPIPost("/computer/click", body)
 }

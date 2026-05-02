@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -15,6 +16,13 @@ import (
 // doesn't block, suitable for unit tests of the routing/wiring.
 func newTestComputerServer(t *testing.T) *ComputerServer {
 	t.Helper()
+	if runtime.GOOS == "windows" {
+		// vcaesar/screenshot's NumActiveDisplays() trips a checkptr
+		// pointer-arithmetic violation under `go test -race` on the
+		// Windows GitHub runner. Computer is documented as Linux-X11
+		// only in v1, so skip rather than chase the upstream bug.
+		t.Skip("internal/api computer-using tests skipped on Windows: vcaesar/screenshot checkptr violation under -race")
+	}
 	c, err := computer.New(computer.Config{
 		CountdownMode:    computer.ModeOff,
 		CountdownSeconds: 0,

@@ -22,9 +22,9 @@ type computerTool struct {
 	exec        func(ctx context.Context, args map[string]any) (string, bool)
 }
 
-func (t *computerTool) Name() string                 { return t.name }
-func (t *computerTool) Description() string          { return t.description }
-func (t *computerTool) Parameters() map[string]any   { return t.parameters }
+func (t *computerTool) Name() string               { return t.name }
+func (t *computerTool) Description() string        { return t.description }
+func (t *computerTool) Parameters() map[string]any { return t.parameters }
 func (t *computerTool) Execute(ctx context.Context, args map[string]any) (string, bool) {
 	return t.exec(ctx, args)
 }

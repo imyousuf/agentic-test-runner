@@ -146,7 +146,7 @@ func TestHandleNavigate_MissingURL(t *testing.T) {
 func TestHandleClick(t *testing.T) {
 	resetPage(t)
 	rr := doPost(testServer, "/click", map[string]any{
-		"target": "#test-button",
+		"selector": "#test-button",
 	})
 	if rr.Code != http.StatusOK {
 		t.Errorf("status = %d, want %d (body: %s)", rr.Code, http.StatusOK, rr.Body.String())

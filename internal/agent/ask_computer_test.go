@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"runtime"
 	"testing"
 
 	"github.com/vcaesar/screenshot"
@@ -12,6 +13,13 @@ import (
 
 func newTestComputerForAsk(t *testing.T) *computer.Computer {
 	t.Helper()
+	if runtime.GOOS == "windows" {
+		// vcaesar/screenshot's NumActiveDisplays() trips a checkptr
+		// pointer-arithmetic violation under `go test -race` on the
+		// Windows GitHub runner. Computer is documented as Linux-X11
+		// only in v1, so skip rather than chase the upstream bug.
+		t.Skip("internal/agent computer-using tests skipped on Windows: vcaesar/screenshot checkptr violation under -race")
+	}
 	c, err := computer.New(computer.Config{
 		CountdownMode:    computer.ModeOff,
 		CountdownSeconds: 0,
@@ -74,6 +82,11 @@ func TestComputerScreenshotImageToolImplementsImageResultTool(t *testing.T) {
 func TestComputerScreenshotImageToolReturnsBytes(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires display")
+	}
+	if runtime.GOOS == "windows" {
+		// screenshot.NumActiveDisplays() itself trips checkptr on
+		// Windows under -race; skip before the call.
+		t.Skip("internal/agent screenshot test skipped on Windows: vcaesar/screenshot checkptr violation under -race")
 	}
 	if screenshot.NumActiveDisplays() == 0 {
 		t.Skip("no displays available (headless environment)")
