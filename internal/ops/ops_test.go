@@ -194,3 +194,50 @@ func TestSchemaReflection_ClickRequestContract(t *testing.T) {
 		t.Error("schema leaks legacy 'target' property — field-name normalization regressed")
 	}
 }
+
+// Several computer ops use *int for display so callers can distinguish
+// "no display" from "display 0". The struct tags carry json:"display,omitempty"
+// and a jsonschema_description. Some Reflector configurations drop pointer
+// fields with `omitempty` from the emitted `properties` entirely — which
+// would silently hide the display field from MCP clients. Pin that the field
+// IS reflected and IS NOT marked required.
+func TestSchemaReflection_PointerOmitemptyDisplayIsReflected(t *testing.T) {
+	r := &jsonschema.Reflector{
+		DoNotReference:             true,
+		AllowAdditionalProperties:  true,
+		ExpandedStruct:             true,
+		RequiredFromJSONSchemaTags: true,
+	}
+	for _, tc := range []struct {
+		name string
+		v    any
+	}{
+		{"ComputerClickRequest", &ComputerClickRequest{}},
+		{"ComputerScreenshotRequest", &ComputerScreenshotRequest{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw, err := json.Marshal(r.Reflect(tc.v))
+			if err != nil {
+				t.Fatalf("marshal: %v", err)
+			}
+			var s map[string]any
+			if err := json.Unmarshal(raw, &s); err != nil {
+				t.Fatalf("unmarshal: %v", err)
+			}
+			props, _ := s["properties"].(map[string]any)
+			disp, ok := props["display"].(map[string]any)
+			if !ok {
+				t.Fatalf("schema missing 'display' property; properties=%v", props)
+			}
+			if disp["description"] == "" || disp["description"] == nil {
+				t.Errorf("display property missing description; got %+v", disp)
+			}
+			required, _ := s["required"].([]any)
+			for _, r := range required {
+				if r == "display" {
+					t.Error("display should not be required (it's optional via *int)")
+				}
+			}
+		})
+	}
+}

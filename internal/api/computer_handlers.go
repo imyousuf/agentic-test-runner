@@ -110,7 +110,9 @@ func (s *ComputerServer) handleComputerScreenshot(w http.ResponseWriter, r *http
 	// on the primary monitor). The ops layer handles the nil → -1 mapping.
 	res, err := ops.ComputerScreenshot(r.Context(), s.computer, req)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		// Screenshot can be gated by the countdown — surface aborts as
+		// HTTP 499 the same way every other gated computer endpoint does.
+		writeError(w, abortStatus(err), err.Error())
 		return
 	}
 	writeSuccess(w, map[string]any{
