@@ -628,7 +628,7 @@ func newBrowserClickCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return apiPost("/click", map[string]interface{}{
-				"target":       args[0],
+				"selector":     args[0],
 				"double_click": doubleClick,
 			})
 		},
@@ -645,8 +645,8 @@ func newBrowserFillCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return apiPost("/fill", map[string]interface{}{
-				"target": args[0],
-				"value":  args[1],
+				"selector": args[0],
+				"value":    args[1],
 			})
 		},
 	}
@@ -658,7 +658,7 @@ func newBrowserHoverCmd() *cobra.Command {
 		Short: "Hover over element",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return apiPost("/hover", map[string]interface{}{"target": args[0]})
+			return apiPost("/hover", map[string]interface{}{"selector": args[0]})
 		},
 	}
 }

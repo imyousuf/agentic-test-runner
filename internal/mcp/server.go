@@ -17,6 +17,7 @@ import (
 	"github.com/imyousuf/agentic-test-runner/internal/browser"
 	"github.com/imyousuf/agentic-test-runner/internal/computer"
 	"github.com/imyousuf/agentic-test-runner/internal/config"
+	"github.com/imyousuf/agentic-test-runner/internal/ops"
 	"github.com/imyousuf/agentic-test-runner/pkg/llm"
 )
 
@@ -251,73 +252,63 @@ func (s *Server) executeTool(ctx context.Context, name string, args map[string]a
 
 	switch name {
 	case "browser_navigate":
-		url, _ := args["url"].(string)
-		if url == "" {
-			return "", fmt.Errorf("url is required")
-		}
-		mcpLog("browser_navigate: url=%s, hasPage=%v", url, s.browser.HasPage())
-		// Use NewPage if no page exists, otherwise Navigate
-		if !s.browser.HasPage() {
-			mcpLog("browser_navigate: calling NewPage...")
-			if err := s.browser.NewPage(ctx, url); err != nil {
-				mcpLog("browser_navigate: NewPage failed: %v", err)
-				return "", err
-			}
-			mcpLog("browser_navigate: NewPage completed")
-		} else {
-			mcpLog("browser_navigate: calling Navigate...")
-			if err := s.browser.Navigate(ctx, url); err != nil {
-				mcpLog("browser_navigate: Navigate failed: %v", err)
-				return "", err
-			}
-			mcpLog("browser_navigate: Navigate completed")
-		}
-		mcpLog("browser_navigate: success")
-		return fmt.Sprintf("Navigated to %s", url), nil
-
-	case "browser_click":
-		selector, _ := args["selector"].(string)
-		if selector == "" {
-			return "", fmt.Errorf("selector is required")
-		}
-		doubleClick, _ := args["double"].(bool)
-		mcpLog("browser_click: selector=%q, doubleClick=%v", selector, doubleClick)
-		if err := s.browser.Click(ctx, selector, doubleClick); err != nil {
-			mcpLog("browser_click: FAILED: %v", err)
-			return "", fmt.Errorf("click failed on %q: %w", selector, err)
-		}
-		mcpLog("browser_click: success")
-		return fmt.Sprintf("Clicked on %s", selector), nil
-
-	case "browser_fill":
-		selector, _ := args["selector"].(string)
-		value, _ := args["value"].(string)
-		if selector == "" {
-			return "", fmt.Errorf("selector is required")
-		}
-		if err := s.browser.Fill(ctx, selector, value); err != nil {
+		var req ops.NavigateRequest
+		if err := ops.MapToStruct(args, &req); err != nil {
 			return "", err
 		}
-		return fmt.Sprintf("Filled %s with value", selector), nil
+		mcpLog("browser_navigate: url=%s, hasPage=%v", req.URL, s.browser.HasPage())
+		res, err := ops.Navigate(ctx, s.browser, req)
+		if err != nil {
+			mcpLog("browser_navigate: FAILED: %v", err)
+			return "", err
+		}
+		mcpLog("browser_navigate: success url=%s", res.URL)
+		return fmt.Sprintf("Navigated to %s", res.URL), nil
+
+	case "browser_click":
+		var req ops.ClickRequest
+		if err := ops.MapToStruct(args, &req); err != nil {
+			return "", err
+		}
+		mcpLog("browser_click: selector=%q, doubleClick=%v", req.Selector, req.DoubleClick)
+		res, err := ops.Click(ctx, s.browser, req)
+		if err != nil {
+			mcpLog("browser_click: FAILED: %v", err)
+			return "", err
+		}
+		mcpLog("browser_click: success")
+		return fmt.Sprintf("Clicked on %s", res.Selector), nil
+
+	case "browser_fill":
+		var req ops.FillRequest
+		if err := ops.MapToStruct(args, &req); err != nil {
+			return "", err
+		}
+		res, err := ops.Fill(ctx, s.browser, req)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("Filled %s with value", res.Selector), nil
 
 	case "browser_screenshot":
-		fullPage, _ := args["full_page"].(bool)
-		selector, _ := args["selector"].(string)
-		selectorAll, _ := args["selector_all"].(string)
+		// MCP carries an extra "file" argument for the destination path.
 		filename, _ := args["file"].(string)
+		var req ops.ScreenshotRequest
+		if err := ops.MapToStruct(args, &req); err != nil {
+			return "", err
+		}
+		res, err := ops.Screenshot(ctx, s.browser, req)
+		if err != nil {
+			return "", err
+		}
 
-		// Multiple element screenshots
-		if selectorAll != "" {
-			outputDir, _ := args["output_dir"].(string)
+		if res.IsMulti() {
+			outputDir := req.OutputDir
 			if outputDir == "" {
 				outputDir = "/tmp"
 			}
-			results, err := s.browser.GetMultipleElementScreenshots(selectorAll)
-			if err != nil {
-				return "", fmt.Errorf("multi-screenshot failed: %w", err)
-			}
 			var saved []string
-			for _, r := range results {
+			for _, r := range res.Multi {
 				if r.Error != "" {
 					continue
 				}
@@ -334,133 +325,128 @@ func (s *Server) executeTool(ctx context.Context, name string, args map[string]a
 			return string(data), nil
 		}
 
-		// Single element screenshot
-		if selector != "" {
-			var data []byte
-			var err error
-			if fullPage {
-				data, err = s.browser.GetElementFullHeightScreenshot(selector)
-			} else {
-				data, err = s.browser.GetElementScreenshotByCSS(selector)
-			}
-			if err != nil {
-				return "", err
-			}
-			if filename == "" {
-				filename = fmt.Sprintf("/tmp/element-screenshot-%d.png", os.Getpid())
-			}
-			if err := os.WriteFile(filename, data, 0644); err != nil {
-				return "", err
-			}
-			return fmt.Sprintf("Screenshot saved to %s", filename), nil
-		}
-
-		// Full page or viewport screenshot
-		data, err := s.browser.Screenshot(fullPage)
-		if err != nil {
-			return "", err
-		}
 		if filename == "" {
-			filename = fmt.Sprintf("/tmp/screenshot-%d.png", os.Getpid())
+			if req.Selector != "" {
+				filename = fmt.Sprintf("/tmp/element-screenshot-%d.png", os.Getpid())
+			} else {
+				filename = fmt.Sprintf("/tmp/screenshot-%d.png", os.Getpid())
+			}
 		}
-		if err := os.WriteFile(filename, data, 0644); err != nil {
+		if err := os.WriteFile(filename, res.Data, 0644); err != nil {
 			return "", err
 		}
 		return fmt.Sprintf("Screenshot saved to %s", filename), nil
 
 	case "browser_get_url":
-		url := s.browser.CurrentURL()
-		return url, nil
+		res, err := ops.URL(ctx, s.browser)
+		if err != nil {
+			return "", err
+		}
+		return res.URL, nil
 
 	case "browser_get_title":
-		title := s.browser.PageTitle()
-		return title, nil
+		res, err := ops.Title(ctx, s.browser)
+		if err != nil {
+			return "", err
+		}
+		return res.Title, nil
 
 	case "browser_get_html":
-		html, err := s.browser.HTML()
+		res, err := ops.HTML(ctx, s.browser)
 		if err != nil {
 			return "", err
 		}
-		return html, nil
+		return res.HTML, nil
 
 	case "browser_snapshot":
-		verbose, _ := args["verbose"].(bool)
-		infos, err := s.browser.Snapshot(verbose)
+		var req ops.SnapshotRequest
+		if err := ops.MapToStruct(args, &req); err != nil {
+			return "", err
+		}
+		res, err := ops.Snapshot(ctx, s.browser, req)
 		if err != nil {
 			return "", err
 		}
-		data, err := json.MarshalIndent(infos, "", "  ")
+		data, err := json.MarshalIndent(res.Elements, "", "  ")
 		if err != nil {
 			return "", err
 		}
 		return string(data), nil
 
 	case "browser_console":
-		limit := 50
-		if l, ok := args["limit"].(float64); ok {
-			limit = int(l)
+		var req ops.ConsoleRequest
+		if err := ops.MapToStruct(args, &req); err != nil {
+			return "", err
 		}
-		messages := s.browser.GetConsoleMessages(limit)
-		data, err := json.MarshalIndent(messages, "", "  ")
+		res, err := ops.Console(ctx, s.browser, req)
+		if err != nil {
+			return "", err
+		}
+		data, err := json.MarshalIndent(res.Messages, "", "  ")
 		if err != nil {
 			return "", err
 		}
 		return string(data), nil
 
 	case "browser_network":
-		limit := 50
-		if l, ok := args["limit"].(float64); ok {
-			limit = int(l)
+		var req ops.NetworkRequestArgs
+		if err := ops.MapToStruct(args, &req); err != nil {
+			return "", err
 		}
-		requests := s.browser.GetNetworkRequests(limit)
-		data, err := json.MarshalIndent(requests, "", "  ")
+		res, err := ops.Network(ctx, s.browser, req)
+		if err != nil {
+			return "", err
+		}
+		data, err := json.MarshalIndent(res.Requests, "", "  ")
 		if err != nil {
 			return "", err
 		}
 		return string(data), nil
 
 	case "browser_press_key":
-		key, _ := args["key"].(string)
-		if key == "" {
-			return "", fmt.Errorf("key is required")
-		}
-		if err := s.browser.PressKey(key); err != nil {
+		var req ops.PressKeyRequest
+		if err := ops.MapToStruct(args, &req); err != nil {
 			return "", err
 		}
-		return fmt.Sprintf("Pressed %s", key), nil
+		res, err := ops.PressKey(ctx, s.browser, req)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("Pressed %s", res.Key), nil
 
 	case "browser_hover":
-		selector, _ := args["selector"].(string)
-		if selector == "" {
-			return "", fmt.Errorf("selector is required")
-		}
-		if err := s.browser.Hover(ctx, selector); err != nil {
+		var req ops.HoverRequest
+		if err := ops.MapToStruct(args, &req); err != nil {
 			return "", err
 		}
-		return fmt.Sprintf("Hovered over %s", selector), nil
+		res, err := ops.Hover(ctx, s.browser, req)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("Hovered over %s", res.Selector), nil
 
 	case "browser_go_back":
-		if err := s.browser.GoBack(); err != nil {
+		if _, err := ops.Back(ctx, s.browser); err != nil {
 			return "", err
 		}
 		return "Navigated back", nil
 
 	case "browser_go_forward":
-		if err := s.browser.GoForward(); err != nil {
+		if _, err := ops.Forward(ctx, s.browser); err != nil {
 			return "", err
 		}
 		return "Navigated forward", nil
 
 	case "browser_reload":
-		if err := s.browser.Reload(); err != nil {
+		if _, err := ops.Reload(ctx, s.browser); err != nil {
 			return "", err
 		}
 		return "Reloaded page", nil
 
 	case "browser_ask":
-		question, _ := args["question"].(string)
-		if question == "" {
-			return "", fmt.Errorf("question is required")
+		var req ops.AskRequest
+		if err := ops.MapToStruct(args, &req); err != nil {
+			return "", err
 		}
 		if s.appConfig == nil {
 			return "", fmt.Errorf("LLM not configured: app config not provided to MCP server")
@@ -479,259 +465,265 @@ func (s *Server) executeTool(ctx context.Context, name string, args map[string]a
 			LLMClient: llmClient,
 			Browser:   s.browser,
 		})
-		answer, err := askAgent.Ask(ctx, question)
-		if err != nil {
-			return "", fmt.Errorf("ask failed: %w", err)
+		runner := func(ctx context.Context, q string) (string, error) {
+			return askAgent.Ask(ctx, q)
 		}
-		return answer, nil
+		res, err := ops.Ask(ctx, runner, req)
+		if err != nil {
+			return "", err
+		}
+		return res.Answer, nil
 
 	// --- Pre-v1.2.0 gap tools ---
 
 	case "browser_eval":
-		script, _ := args["script"].(string)
-		if script == "" {
-			return "", fmt.Errorf("script is required")
+		var req ops.EvalRequest
+		if err := ops.MapToStruct(args, &req); err != nil {
+			return "", err
 		}
-		result, err := s.browser.Evaluate(script)
+		res, err := ops.Eval(ctx, s.browser, req)
 		if err != nil {
-			return "", fmt.Errorf("eval failed: %w", err)
+			return "", err
 		}
-		data, err := json.MarshalIndent(result, "", "  ")
+		data, err := json.MarshalIndent(res.Result, "", "  ")
 		if err != nil {
 			return "", err
 		}
 		return string(data), nil
 
 	case "browser_drag":
-		from, _ := args["from"].(string)
-		to, _ := args["to"].(string)
-		if from == "" || to == "" {
-			return "", fmt.Errorf("from and to are required")
+		var req ops.DragRequest
+		if err := ops.MapToStruct(args, &req); err != nil {
+			return "", err
 		}
-		if err := s.browser.Drag(ctx, from, to); err != nil {
-			return "", fmt.Errorf("drag failed: %w", err)
+		res, err := ops.Drag(ctx, s.browser, req)
+		if err != nil {
+			return "", err
 		}
-		return fmt.Sprintf("Dragged from %s to %s", from, to), nil
+		return fmt.Sprintf("Dragged from %s to %s", res.From, res.To), nil
 
 	case "browser_errors":
-		requests := s.browser.GetFailedRequests()
-		data, err := json.MarshalIndent(requests, "", "  ")
+		res, err := ops.Errors(ctx, s.browser)
+		if err != nil {
+			return "", err
+		}
+		data, err := json.MarshalIndent(res.FailedRequests, "", "  ")
 		if err != nil {
 			return "", err
 		}
 		return string(data), nil
 
 	case "browser_new_page":
-		url, _ := args["url"].(string)
-		if err := s.browser.NewPage(ctx, url); err != nil {
-			return "", fmt.Errorf("new page failed: %w", err)
+		var req ops.NewPageRequest
+		if err := ops.MapToStruct(args, &req); err != nil {
+			return "", err
 		}
-		if url != "" {
-			return fmt.Sprintf("Opened new tab at %s", url), nil
+		if _, err := ops.NewPage(ctx, s.browser, req); err != nil {
+			return "", err
+		}
+		if req.URL != "" {
+			return fmt.Sprintf("Opened new tab at %s", req.URL), nil
 		}
 		return "Opened new blank tab", nil
 
 	case "browser_list_pages":
-		pages := s.browser.ListPages()
-		data, err := json.MarshalIndent(pages, "", "  ")
+		res, err := ops.ListPages(ctx, s.browser)
+		if err != nil {
+			return "", err
+		}
+		data, err := json.MarshalIndent(res.Pages, "", "  ")
 		if err != nil {
 			return "", err
 		}
 		return string(data), nil
 
 	case "browser_select_page":
-		index, ok := args["index"].(float64)
-		if !ok {
-			return "", fmt.Errorf("index is required")
+		var req ops.SelectPageRequest
+		if err := ops.MapToStruct(args, &req); err != nil {
+			return "", err
 		}
-		if err := s.browser.SelectPage(int(index)); err != nil {
-			return "", fmt.Errorf("select page failed: %w", err)
+		if _, err := ops.SelectPage(ctx, s.browser, req); err != nil {
+			return "", err
 		}
-		return fmt.Sprintf("Switched to tab %d", int(index)), nil
+		return fmt.Sprintf("Switched to tab %d", req.Index), nil
 
 	case "browser_close_page":
-		index, ok := args["index"].(float64)
-		if !ok {
-			return "", fmt.Errorf("index is required")
+		var req ops.ClosePageRequest
+		if err := ops.MapToStruct(args, &req); err != nil {
+			return "", err
 		}
-		if err := s.browser.ClosePage(int(index)); err != nil {
-			return "", fmt.Errorf("close page failed: %w", err)
+		if _, err := ops.ClosePage(ctx, s.browser, req); err != nil {
+			return "", err
 		}
-		return fmt.Sprintf("Closed tab %d", int(index)), nil
+		return fmt.Sprintf("Closed tab %d", req.Index), nil
 
 	// --- v1.2.0 gap tools ---
 
 	case "browser_wait":
-		selector, _ := args["selector"].(string)
-		if selector == "" {
-			return "", fmt.Errorf("selector is required")
+		// MCP arg is named "timeout" not "timeout_ms"; map manually.
+		var raw struct {
+			Selector string  `json:"selector"`
+			Timeout  float64 `json:"timeout"`
+			Visible  bool    `json:"visible"`
 		}
-		timeout := 5000 * time.Millisecond
-		if t, ok := args["timeout"].(float64); ok && t > 0 {
-			timeout = time.Duration(t) * time.Millisecond
+		if err := ops.MapToStruct(args, &raw); err != nil {
+			return "", err
 		}
-		visible, _ := args["visible"].(bool)
-		if visible {
-			if err := s.browser.WaitForElementVisible(ctx, selector, timeout); err != nil {
-				return "", fmt.Errorf("wait visible failed: %w", err)
-			}
-			return fmt.Sprintf("Element %s is visible", selector), nil
+		req := ops.WaitRequest{Selector: raw.Selector, TimeoutMs: int(raw.Timeout), Visible: raw.Visible}
+		res, err := ops.Wait(ctx, s.browser, req)
+		if err != nil {
+			return "", err
 		}
-		if err := s.browser.WaitForElement(ctx, selector, timeout); err != nil {
-			return "", fmt.Errorf("wait failed: %w", err)
+		if res.Visible {
+			return fmt.Sprintf("Element %s is visible", res.Selector), nil
 		}
-		return fmt.Sprintf("Element %s found", selector), nil
+		return fmt.Sprintf("Element %s found", res.Selector), nil
 
 	case "browser_scroll":
-		selector, _ := args["selector"].(string)
-		if selector == "" {
-			return "", fmt.Errorf("selector is required")
+		var req ops.ScrollRequest
+		if err := ops.MapToStruct(args, &req); err != nil {
+			return "", err
 		}
-		var x, y int
-		if v, ok := args["x"].(float64); ok {
-			x = int(v)
-		}
-		if v, ok := args["y"].(float64); ok {
-			y = int(v)
-		}
-		toBottom, _ := args["to_bottom"].(bool)
-		toTop, _ := args["to_top"].(bool)
-		result, err := s.browser.ScrollElement(selector, x, y, toBottom, toTop)
+		res, err := ops.Scroll(ctx, s.browser, req)
 		if err != nil {
-			return "", fmt.Errorf("scroll failed: %w", err)
+			return "", err
 		}
-		data, err := json.MarshalIndent(result, "", "  ")
+		data, err := json.MarshalIndent(res, "", "  ")
 		if err != nil {
 			return "", err
 		}
 		return string(data), nil
 
 	case "browser_computed_styles":
-		selector, _ := args["selector"].(string)
-		if selector == "" {
-			return "", fmt.Errorf("selector is required")
+		// Properties is comma-separated string in the wire form.
+		var raw struct {
+			Selector    string `json:"selector"`
+			SelectorAll string `json:"selector_all"`
+			Properties  string `json:"properties"`
 		}
-		var properties []string
-		if p, ok := args["properties"].(string); ok && p != "" {
-			properties = strings.Split(p, ",")
+		if err := ops.MapToStruct(args, &raw); err != nil {
+			return "", err
 		}
-		styles, err := s.browser.GetComputedStyles(selector, properties)
+		req := ops.ComputedStylesRequest{Selector: raw.Selector, SelectorAll: raw.SelectorAll}
+		if raw.Properties != "" {
+			req.Properties = strings.Split(raw.Properties, ",")
+		}
+		res, err := ops.ComputedStyles(ctx, s.browser, req)
 		if err != nil {
-			return "", fmt.Errorf("computed styles failed: %w", err)
+			return "", err
 		}
-		data, err := json.MarshalIndent(styles, "", "  ")
+		// Match historical MCP shape (raw styles map for single, array for multi).
+		var payload any = res.Styles
+		if res.Mode == "all" {
+			payload = res.Elements
+		}
+		data, err := json.MarshalIndent(payload, "", "  ")
 		if err != nil {
 			return "", err
 		}
 		return string(data), nil
 
 	case "browser_computed_styles_diff":
-		selector, _ := args["selector"].(string)
-		if selector == "" {
-			return "", fmt.Errorf("selector is required")
+		var raw struct {
+			Selector       string  `json:"selector"`
+			Against        float64 `json:"against"`
+			Properties     string  `json:"properties"`
+			SelectorTarget string  `json:"selector_target"`
 		}
-		against, ok := args["against"].(float64)
-		if !ok {
+		if err := ops.MapToStruct(args, &raw); err != nil {
+			return "", err
+		}
+		if _, ok := args["against"]; !ok {
 			return "", fmt.Errorf("against page index is required")
 		}
-		var properties []string
-		if p, ok := args["properties"].(string); ok && p != "" {
-			properties = strings.Split(p, ",")
+		req := ops.ComputedStylesDiffRequest{
+			Selector:       raw.Selector,
+			Against:        int(raw.Against),
+			SelectorTarget: raw.SelectorTarget,
 		}
-		selectorTarget, _ := args["selector_target"].(string)
-		result, err := s.browser.GetComputedStylesDiff(selector, int(against), properties, selectorTarget)
+		if raw.Properties != "" {
+			req.Properties = strings.Split(raw.Properties, ",")
+		}
+		res, err := ops.ComputedStylesDiff(ctx, s.browser, req)
 		if err != nil {
-			return "", fmt.Errorf("style diff failed: %w", err)
+			return "", err
 		}
-		data, err := json.MarshalIndent(result, "", "  ")
+		// Preserve historical raw StyleDiffResult shape.
+		payload := map[string]interface{}{
+			"selector":      res.Selector,
+			"matches":       res.Matches,
+			"mismatches":    res.Mismatches,
+			"matchCount":    res.MatchCount,
+			"mismatchCount": res.MismatchCount,
+			"score":         res.Score,
+		}
+		data, err := json.MarshalIndent(payload, "", "  ")
 		if err != nil {
 			return "", err
 		}
 		return string(data), nil
 
 	case "browser_text":
-		selector, _ := args["selector"].(string)
-		if selector == "" {
-			return "", fmt.Errorf("selector is required")
+		var req ops.TextRequest
+		if err := ops.MapToStruct(args, &req); err != nil {
+			return "", err
 		}
-		mode, _ := args["mode"].(string)
-		if mode == "" {
-			mode = "structured"
+		if req.Mode == "" {
+			req.Mode = "structured"
 		}
-		result, err := s.browser.GetTextContent(selector, mode)
+		res, err := ops.Text(ctx, s.browser, req)
 		if err != nil {
-			return "", fmt.Errorf("text extraction failed: %w", err)
+			return "", err
 		}
-		data, err := json.MarshalIndent(result, "", "  ")
+		data, err := json.MarshalIndent(res, "", "  ")
 		if err != nil {
 			return "", err
 		}
 		return string(data), nil
 
 	case "browser_font_check":
-		family, _ := args["family"].(string)
-		if family == "" {
-			return "", fmt.Errorf("family is required")
+		var req ops.FontCheckRequest
+		if err := ops.MapToStruct(args, &req); err != nil {
+			return "", err
 		}
-		result, err := s.browser.CheckFont(family)
+		res, err := ops.FontCheck(ctx, s.browser, req)
 		if err != nil {
-			return "", fmt.Errorf("font check failed: %w", err)
+			return "", err
 		}
-		data, err := json.MarshalIndent(result, "", "  ")
+		data, err := json.MarshalIndent(res, "", "  ")
 		if err != nil {
 			return "", err
 		}
 		return string(data), nil
 
 	case "browser_viewport":
-		preset, _ := args["preset"].(string)
-		width, hasWidth := args["width"].(float64)
-		height, hasHeight := args["height"].(float64)
-
-		// GET: no args → return current viewport
-		if preset == "" && !hasWidth && !hasHeight {
-			vp, err := s.browser.GetViewport()
+		var req ops.ViewportRequest
+		if err := ops.MapToStruct(args, &req); err != nil {
+			return "", err
+		}
+		// GET when no preset, no width, no height.
+		if req.Preset == "" && req.Width == 0 && req.Height == 0 {
+			res, err := ops.GetViewport(ctx, s.browser)
 			if err != nil {
 				return "", err
 			}
-			data, err := json.MarshalIndent(vp, "", "  ")
+			data, err := json.MarshalIndent(map[string]interface{}{
+				"width":             res.Width,
+				"height":            res.Height,
+				"deviceScaleFactor": res.DPR,
+			}, "", "  ")
 			if err != nil {
 				return "", err
 			}
 			return string(data), nil
 		}
-
-		// Resolve preset
-		if preset != "" {
-			switch preset {
-			case "mobile":
-				width, height = 375, 812
-			case "tablet":
-				width, height = 768, 1024
-			case "desktop":
-				width, height = 1440, 900
-			case "wide":
-				width, height = 1920, 1080
-			default:
-				return "", fmt.Errorf("unknown preset: %s (use mobile, tablet, desktop, or wide)", preset)
-			}
-		}
-
-		if width == 0 || height == 0 {
-			return "", fmt.Errorf("width and height are required")
-		}
-
-		var dprArgs []float64
-		if d, ok := args["dpr"].(float64); ok && d > 0 {
-			dprArgs = []float64{d}
-		}
-		prev, current, err := s.browser.SetViewport(int(width), int(height), dprArgs...)
+		res, err := ops.SetViewport(ctx, s.browser, req)
 		if err != nil {
-			return "", fmt.Errorf("viewport resize failed: %w", err)
+			return "", err
 		}
 		data, err := json.MarshalIndent(map[string]interface{}{
-			"previous": prev,
-			"current":  current,
+			"previous": res.Previous,
+			"current":  res.Current,
 		}, "", "  ")
 		if err != nil {
 			return "", err
@@ -739,50 +731,38 @@ func (s *Server) executeTool(ctx context.Context, name string, args map[string]a
 		return string(data), nil
 
 	case "browser_clean_snapshot":
-		selector, _ := args["selector"].(string)
-		if selector == "" {
-			return "", fmt.Errorf("selector is required")
+		// MCP uses "json" bool to switch output format (matches existing tools.go schema).
+		var req ops.CleanSnapshotRequest
+		if err := ops.MapToStruct(args, &req); err != nil {
+			return "", err
 		}
-		opts := browser.CleanSnapshotOptions{}
-		if d, ok := args["depth"].(float64); ok {
-			opts.Depth = int(d)
-		}
-		if m, ok := args["max_length"].(float64); ok {
-			opts.MaxLength = int(m)
-		}
-		if sv, ok := args["svg_full"].(bool); ok {
-			opts.SVGFull = sv
-		}
-		jsonOutput, _ := args["json"].(bool)
-		htmlStr, jsonNode, err := s.browser.GetCleanSnapshot(selector, opts)
+		res, err := ops.CleanSnapshot(ctx, s.browser, req)
 		if err != nil {
-			return "", fmt.Errorf("clean snapshot failed: %w", err)
+			return "", err
 		}
-		if jsonOutput && jsonNode != nil {
-			data, err := json.MarshalIndent(jsonNode, "", "  ")
+		if req.JSON && res.Tree != nil {
+			data, err := json.MarshalIndent(res.Tree, "", "  ")
 			if err != nil {
 				return "", err
 			}
 			return string(data), nil
 		}
-		return htmlStr, nil
+		return res.HTML, nil
 
 	case "browser_download_images":
-		selector, _ := args["selector"].(string)
-		if selector == "" {
-			return "", fmt.Errorf("selector is required")
+		var req ops.DownloadImagesRequest
+		if err := ops.MapToStruct(args, &req); err != nil {
+			return "", err
 		}
-		fallbackScreenshot, _ := args["fallback_screenshot"].(bool)
-		outputDir, _ := args["output_dir"].(string)
-		if outputDir == "" {
-			outputDir = "/tmp"
+		if req.OutputDir == "" {
+			req.OutputDir = "/tmp"
 		}
-		images, err := s.browser.DownloadImages(selector, fallbackScreenshot)
+		res, err := ops.DownloadImages(ctx, s.browser, req)
 		if err != nil {
-			return "", fmt.Errorf("download images failed: %w", err)
+			return "", err
 		}
 		var saved []map[string]interface{}
-		for i, img := range images {
+		for i, img := range res.Images {
 			if img.Error != "" {
 				saved = append(saved, map[string]interface{}{
 					"index": i,
@@ -796,7 +776,7 @@ func (s *Server) executeTool(ctx context.Context, name string, args map[string]a
 					ext = ".jpg"
 				}
 			}
-			path := filepath.Join(outputDir, fmt.Sprintf("image-%d%s", i, ext))
+			path := filepath.Join(req.OutputDir, fmt.Sprintf("image-%d%s", i, ext))
 			if err := os.WriteFile(path, img.Data, 0644); err != nil {
 				saved = append(saved, map[string]interface{}{
 					"index": i,

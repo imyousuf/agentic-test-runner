@@ -12,9 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/imyousuf/agentic-test-runner/internal/browser"
-
 	"github.com/imyousuf/agentic-test-runner/internal/agent"
+	"github.com/imyousuf/agentic-test-runner/internal/ops"
 	"github.com/imyousuf/agentic-test-runner/pkg/llm"
 )
 
@@ -121,40 +120,21 @@ func (s *Server) handleNavigate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-
-	var req struct {
-		URL string `json:"url"`
-	}
+	var req ops.NavigateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-
 	if req.URL == "" {
 		writeError(w, http.StatusBadRequest, "url is required")
 		return
 	}
-
-	ctx := context.Background()
-
-	// Check if we need to create a new page first
-	pages := s.browser.ListPages()
-	if len(pages) == 0 {
-		if err := s.browser.NewPage(ctx, req.URL); err != nil {
-			writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to create page: %v", err))
-			return
-		}
-	} else {
-		if err := s.browser.Navigate(ctx, req.URL); err != nil {
-			writeError(w, http.StatusInternalServerError, fmt.Sprintf("navigation failed: %v", err))
-			return
-		}
+	res, err := ops.Navigate(r.Context(), s.browser, req)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
 	}
-
-	writeSuccess(w, map[string]interface{}{
-		"url":   s.browser.CurrentURL(),
-		"title": s.browser.PageTitle(),
-	})
+	writeSuccess(w, res)
 }
 
 // handleBack handles POST /api/v1/back
@@ -163,16 +143,12 @@ func (s *Server) handleBack(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-
-	if err := s.browser.GoBack(); err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to go back: %v", err))
+	res, err := ops.Back(r.Context(), s.browser)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-
-	writeSuccess(w, map[string]interface{}{
-		"url":   s.browser.CurrentURL(),
-		"title": s.browser.PageTitle(),
-	})
+	writeSuccess(w, res)
 }
 
 // handleForward handles POST /api/v1/forward
@@ -181,16 +157,12 @@ func (s *Server) handleForward(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-
-	if err := s.browser.GoForward(); err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to go forward: %v", err))
+	res, err := ops.Forward(r.Context(), s.browser)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-
-	writeSuccess(w, map[string]interface{}{
-		"url":   s.browser.CurrentURL(),
-		"title": s.browser.PageTitle(),
-	})
+	writeSuccess(w, res)
 }
 
 // handleReload handles POST /api/v1/reload
@@ -199,47 +171,36 @@ func (s *Server) handleReload(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-
-	if err := s.browser.Reload(); err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to reload: %v", err))
+	res, err := ops.Reload(r.Context(), s.browser)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-
-	writeSuccess(w, map[string]interface{}{
-		"url":   s.browser.CurrentURL(),
-		"title": s.browser.PageTitle(),
-	})
+	writeSuccess(w, res)
 }
 
 // handlePages handles GET/POST /api/v1/pages
 func (s *Server) handlePages(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		pages := s.browser.ListPages()
-		writeSuccess(w, map[string]interface{}{
-			"pages": pages,
-			"count": len(pages),
-		})
+		res, err := ops.ListPages(r.Context(), s.browser)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeSuccess(w, res)
 
 	case http.MethodPost:
-		var req struct {
-			URL string `json:"url"`
-		}
+		var req ops.NewPageRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			req.URL = "about:blank"
 		}
-
-		ctx := context.Background()
-		if err := s.browser.NewPage(ctx, req.URL); err != nil {
-			writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to create page: %v", err))
+		res, err := ops.NewPage(r.Context(), s.browser, req)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-
-		pages := s.browser.ListPages()
-		writeSuccess(w, map[string]interface{}{
-			"pages": pages,
-			"count": len(pages),
-		})
+		writeSuccess(w, res)
 
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -258,28 +219,20 @@ func (s *Server) handlePageByIndex(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case http.MethodPut:
-		if err := s.browser.SelectPage(index); err != nil {
-			writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to select page: %v", err))
+		res, err := ops.SelectPage(r.Context(), s.browser, ops.SelectPageRequest{Index: index})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-
-		pages := s.browser.ListPages()
-		writeSuccess(w, map[string]interface{}{
-			"pages":   pages,
-			"current": index,
-		})
+		writeSuccess(w, res)
 
 	case http.MethodDelete:
-		if err := s.browser.ClosePage(index); err != nil {
-			writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to close page: %v", err))
+		res, err := ops.ClosePage(r.Context(), s.browser, ops.ClosePageRequest{Index: index})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-
-		pages := s.browser.ListPages()
-		writeSuccess(w, map[string]interface{}{
-			"pages": pages,
-			"count": len(pages),
-		})
+		writeSuccess(w, res)
 
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -292,32 +245,21 @@ func (s *Server) handleClick(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-
-	var req struct {
-		Target      string `json:"target"`
-		DoubleClick bool   `json:"double_click"`
-	}
+	var req ops.ClickRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-
-	if req.Target == "" {
-		writeError(w, http.StatusBadRequest, "target is required")
+	if req.Selector == "" {
+		writeError(w, http.StatusBadRequest, "selector is required")
 		return
 	}
-
-	ctx := context.Background()
-	if err := s.browser.Click(ctx, req.Target, req.DoubleClick); err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("click failed: %v", err))
+	res, err := ops.Click(r.Context(), s.browser, req)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-
-	writeSuccess(w, map[string]interface{}{
-		"clicked": req.Target,
-		"url":     s.browser.CurrentURL(),
-		"title":   s.browser.PageTitle(),
-	})
+	writeSuccess(w, res)
 }
 
 // handleFill handles POST /api/v1/fill
@@ -326,31 +268,21 @@ func (s *Server) handleFill(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-
-	var req struct {
-		Target string `json:"target"`
-		Value  string `json:"value"`
-	}
+	var req ops.FillRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-
-	if req.Target == "" {
-		writeError(w, http.StatusBadRequest, "target is required")
+	if req.Selector == "" {
+		writeError(w, http.StatusBadRequest, "selector is required")
 		return
 	}
-
-	ctx := context.Background()
-	if err := s.browser.Fill(ctx, req.Target, req.Value); err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("fill failed: %v", err))
+	res, err := ops.Fill(r.Context(), s.browser, req)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-
-	writeSuccess(w, map[string]interface{}{
-		"filled": req.Target,
-		"value":  req.Value,
-	})
+	writeSuccess(w, res)
 }
 
 // handleHover handles POST /api/v1/hover
@@ -359,29 +291,21 @@ func (s *Server) handleHover(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-
-	var req struct {
-		Target string `json:"target"`
-	}
+	var req ops.HoverRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-
-	if req.Target == "" {
-		writeError(w, http.StatusBadRequest, "target is required")
+	if req.Selector == "" {
+		writeError(w, http.StatusBadRequest, "selector is required")
 		return
 	}
-
-	ctx := context.Background()
-	if err := s.browser.Hover(ctx, req.Target); err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("hover failed: %v", err))
+	res, err := ops.Hover(r.Context(), s.browser, req)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-
-	writeSuccess(w, map[string]interface{}{
-		"hovered": req.Target,
-	})
+	writeSuccess(w, res)
 }
 
 // handlePressKey handles POST /api/v1/press-key
@@ -390,28 +314,21 @@ func (s *Server) handlePressKey(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-
-	var req struct {
-		Key string `json:"key"`
-	}
+	var req ops.PressKeyRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-
 	if req.Key == "" {
 		writeError(w, http.StatusBadRequest, "key is required")
 		return
 	}
-
-	if err := s.browser.PressKey(req.Key); err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("press key failed: %v", err))
+	res, err := ops.PressKey(r.Context(), s.browser, req)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-
-	writeSuccess(w, map[string]interface{}{
-		"pressed": req.Key,
-	})
+	writeSuccess(w, res)
 }
 
 // handleDrag handles POST /api/v1/drag
@@ -420,31 +337,21 @@ func (s *Server) handleDrag(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-
-	var req struct {
-		From string `json:"from"`
-		To   string `json:"to"`
-	}
+	var req ops.DragRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-
 	if req.From == "" || req.To == "" {
 		writeError(w, http.StatusBadRequest, "from and to are required")
 		return
 	}
-
-	ctx := context.Background()
-	if err := s.browser.Drag(ctx, req.From, req.To); err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("drag failed: %v", err))
+	res, err := ops.Drag(r.Context(), s.browser, req)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-
-	writeSuccess(w, map[string]interface{}{
-		"from": req.From,
-		"to":   req.To,
-	})
+	writeSuccess(w, res)
 }
 
 // handleSnapshot handles GET /api/v1/snapshot
@@ -453,21 +360,13 @@ func (s *Server) handleSnapshot(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-
-	verbose := r.URL.Query().Get("verbose") == "true"
-
-	elements, err := s.browser.Snapshot(verbose)
+	req := ops.SnapshotRequest{Verbose: r.URL.Query().Get("verbose") == "true"}
+	res, err := ops.Snapshot(r.Context(), s.browser, req)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("snapshot failed: %v", err))
+		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-
-	writeSuccess(w, map[string]interface{}{
-		"elements": elements,
-		"count":    len(elements),
-		"url":      s.browser.CurrentURL(),
-		"title":    s.browser.PageTitle(),
-	})
+	writeSuccess(w, res)
 }
 
 // handleScreenshot handles GET /api/v1/screenshot
@@ -476,29 +375,29 @@ func (s *Server) handleScreenshot(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-
-	fullPage := r.URL.Query().Get("full") == "true"
-	selector := r.URL.Query().Get("selector")
-	selectorAll := r.URL.Query().Get("selector_all")
-	outputDir := r.URL.Query().Get("output_dir")
-	format := r.URL.Query().Get("format") // "file" or "base64", default base64
-
-	// Multiple element screenshots
-	if selectorAll != "" {
-		timeoutMs := 30000
-		if t := r.URL.Query().Get("timeout"); t != "" {
-			if n, err := strconv.Atoi(t); err == nil && n > 0 {
-				timeoutMs = n
-			}
+	q := r.URL.Query()
+	req := ops.ScreenshotRequest{
+		Selector:    q.Get("selector"),
+		SelectorAll: q.Get("selector_all"),
+		FullPage:    q.Get("full") == "true",
+		OutputDir:   q.Get("output_dir"),
+	}
+	if t := q.Get("timeout"); t != "" {
+		if n, err := strconv.Atoi(t); err == nil && n > 0 {
+			req.TimeoutMs = n
 		}
+	}
+	format := q.Get("format") // "file" or default base64
 
-		results, err := s.browser.GetMultipleElementScreenshots(selectorAll, time.Duration(timeoutMs)*time.Millisecond)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, fmt.Sprintf("screenshot failed: %v", err))
-			return
-		}
+	res, err := ops.Screenshot(r.Context(), s.browser, req)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 
-		dir := outputDir
+	// Multi-element capture: persist all bytes to disk and return a manifest.
+	if res.IsMulti() {
+		dir := req.OutputDir
 		if dir == "" {
 			dir = os.TempDir()
 		} else {
@@ -511,7 +410,7 @@ func (s *Server) handleScreenshot(w http.ResponseWriter, r *http.Request) {
 
 		var files []map[string]interface{}
 		var skipped []map[string]interface{}
-		for _, sr := range results {
+		for _, sr := range res.Multi {
 			if sr.Error != "" {
 				skipped = append(skipped, map[string]interface{}{
 					"index": sr.Index + 1,
@@ -537,53 +436,35 @@ func (s *Server) handleScreenshot(w http.ResponseWriter, r *http.Request) {
 
 		resp := map[string]interface{}{
 			"captured": len(files),
-			"total":    len(results),
+			"total":    len(res.Multi),
 			"files":    files,
 		}
 		if len(skipped) > 0 {
 			resp["skipped"] = skipped
 		}
-
 		writeSuccess(w, resp)
 		return
 	}
 
-	var data []byte
-	var err error
-
-	if selector != "" && fullPage {
-		data, err = s.browser.GetElementFullHeightScreenshot(selector)
-	} else if selector != "" {
-		data, err = s.browser.GetElementScreenshotByCSS(selector)
-	} else {
-		data, err = s.browser.Screenshot(fullPage)
-	}
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("screenshot failed: %v", err))
-		return
-	}
-
 	if format == "file" {
-		// Save to temp file
 		filename := fmt.Sprintf("atr-screenshot-%s.png", time.Now().Format("20060102-150405"))
-		filepath := filepath.Join(os.TempDir(), filename)
-		if err := os.WriteFile(filepath, data, 0644); err != nil {
+		fp := filepath.Join(os.TempDir(), filename)
+		if err := os.WriteFile(fp, res.Data, 0644); err != nil {
 			writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to save screenshot: %v", err))
 			return
 		}
-
 		writeSuccess(w, map[string]interface{}{
-			"path": filepath,
-			"size": len(data),
+			"path": fp,
+			"size": len(res.Data),
 		})
-	} else {
-		// Return base64 encoded
-		writeSuccess(w, map[string]interface{}{
-			"data":   base64.StdEncoding.EncodeToString(data),
-			"format": "png",
-			"size":   len(data),
-		})
+		return
 	}
+
+	writeSuccess(w, map[string]interface{}{
+		"data":   base64.StdEncoding.EncodeToString(res.Data),
+		"format": "png",
+		"size":   len(res.Data),
+	})
 }
 
 // handleHTML handles GET /api/v1/html
@@ -592,17 +473,12 @@ func (s *Server) handleHTML(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-
-	html, err := s.browser.HTML()
+	res, err := ops.HTML(r.Context(), s.browser)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to get HTML: %v", err))
+		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-
-	writeSuccess(w, map[string]interface{}{
-		"html": html,
-		"url":  s.browser.CurrentURL(),
-	})
+	writeSuccess(w, res)
 }
 
 // handleURL handles GET /api/v1/url
@@ -611,10 +487,12 @@ func (s *Server) handleURL(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-
-	writeSuccess(w, map[string]interface{}{
-		"url": s.browser.CurrentURL(),
-	})
+	res, err := ops.URL(r.Context(), s.browser)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeSuccess(w, res)
 }
 
 // handleTitle handles GET /api/v1/title
@@ -623,10 +501,12 @@ func (s *Server) handleTitle(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-
-	writeSuccess(w, map[string]interface{}{
-		"title": s.browser.PageTitle(),
-	})
+	res, err := ops.Title(r.Context(), s.browser)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeSuccess(w, res)
 }
 
 // handleEval handles POST /api/v1/eval
@@ -635,29 +515,21 @@ func (s *Server) handleEval(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-
-	var req struct {
-		Script string `json:"script"`
-	}
+	var req ops.EvalRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-
 	if req.Script == "" {
 		writeError(w, http.StatusBadRequest, "script is required")
 		return
 	}
-
-	result, err := s.browser.Evaluate(req.Script)
+	res, err := ops.Eval(r.Context(), s.browser, req)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("eval failed: %v", err))
+		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-
-	writeSuccess(w, map[string]interface{}{
-		"result": result,
-	})
+	writeSuccess(w, res)
 }
 
 // handleConsole handles GET /api/v1/console
@@ -666,20 +538,18 @@ func (s *Server) handleConsole(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-
-	limit := 50
+	req := ops.ConsoleRequest{}
 	if l := r.URL.Query().Get("limit"); l != "" {
 		if n, err := strconv.Atoi(l); err == nil && n > 0 {
-			limit = n
+			req.Limit = n
 		}
 	}
-
-	messages := s.browser.GetConsoleMessages(limit)
-
-	writeSuccess(w, map[string]interface{}{
-		"messages": messages,
-		"count":    len(messages),
-	})
+	res, err := ops.Console(r.Context(), s.browser, req)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeSuccess(w, res)
 }
 
 // handleNetwork handles GET /api/v1/network
@@ -688,20 +558,18 @@ func (s *Server) handleNetwork(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-
-	limit := 50
+	req := ops.NetworkRequestArgs{}
 	if l := r.URL.Query().Get("limit"); l != "" {
 		if n, err := strconv.Atoi(l); err == nil && n > 0 {
-			limit = n
+			req.Limit = n
 		}
 	}
-
-	requests := s.browser.GetNetworkRequests(limit)
-
-	writeSuccess(w, map[string]interface{}{
-		"requests": requests,
-		"count":    len(requests),
-	})
+	res, err := ops.Network(r.Context(), s.browser, req)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeSuccess(w, res)
 }
 
 // handleErrors handles GET /api/v1/errors
@@ -710,13 +578,12 @@ func (s *Server) handleErrors(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-
-	failedRequests := s.browser.GetFailedRequests()
-
-	writeSuccess(w, map[string]interface{}{
-		"failed_requests": failedRequests,
-		"count":           len(failedRequests),
-	})
+	res, err := ops.Errors(r.Context(), s.browser)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeSuccess(w, res)
 }
 
 // handleText handles GET /api/v1/text
@@ -725,27 +592,18 @@ func (s *Server) handleText(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-
-	selector := r.URL.Query().Get("selector")
-	if selector == "" {
+	q := r.URL.Query()
+	req := ops.TextRequest{Selector: q.Get("selector"), Mode: q.Get("mode")}
+	if req.Selector == "" {
 		writeError(w, http.StatusBadRequest, "selector is required")
 		return
 	}
-
-	mode := r.URL.Query().Get("mode")
-
-	result, err := s.browser.GetTextContent(selector, mode)
+	res, err := ops.Text(r.Context(), s.browser, req)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("text extraction failed: %v", err))
+		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-
-	writeSuccess(w, map[string]interface{}{
-		"selector": result.Selector,
-		"mode":     result.Mode,
-		"groups":   result.Groups,
-		"count":    len(result.Groups),
-	})
+	writeSuccess(w, res)
 }
 
 // handleFontCheck handles GET /api/v1/font-check
@@ -754,33 +612,17 @@ func (s *Server) handleFontCheck(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-
-	family := r.URL.Query().Get("family")
-	if family == "" {
+	req := ops.FontCheckRequest{Family: r.URL.Query().Get("family")}
+	if req.Family == "" {
 		writeError(w, http.StatusBadRequest, "family is required")
 		return
 	}
-
-	result, err := s.browser.CheckFont(family)
+	res, err := ops.FontCheck(r.Context(), s.browser, req)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("font check failed: %v", err))
+		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-
-	resp := map[string]interface{}{
-		"family":   result.Family,
-		"declared": result.Declared,
-		"loaded":   result.Loaded,
-		"status":   result.Status,
-	}
-	if result.Reason != "" {
-		resp["reason"] = result.Reason
-	}
-	if result.Fallback != "" {
-		resp["fallback"] = result.Fallback
-	}
-
-	writeSuccess(w, resp)
+	writeSuccess(w, res)
 }
 
 // handleDownloadImages handles POST /api/v1/download-images
@@ -789,17 +631,11 @@ func (s *Server) handleDownloadImages(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-
-	var req struct {
-		Selector           string `json:"selector"`
-		OutputDir          string `json:"output_dir"`
-		FallbackScreenshot bool   `json:"fallback_screenshot"`
-	}
+	var req ops.DownloadImagesRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-
 	if req.Selector == "" {
 		writeError(w, http.StatusBadRequest, "selector is required")
 		return
@@ -816,15 +652,15 @@ func (s *Server) handleDownloadImages(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	images, err := s.browser.DownloadImages(req.Selector, req.FallbackScreenshot)
+	res, err := ops.DownloadImages(r.Context(), s.browser, req)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("download images failed: %v", err))
+		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
 	var files []map[string]interface{}
 	var skipped []map[string]interface{}
-	for _, img := range images {
+	for _, img := range res.Images {
 		if img.Error != "" {
 			skipped = append(skipped, map[string]interface{}{
 				"index":  img.Index + 1,
@@ -837,14 +673,15 @@ func (s *Server) handleDownloadImages(w http.ResponseWriter, r *http.Request) {
 
 		ext := ".png"
 		if img.Method == "download" && img.Source != "" {
-			// Detect extension from source URL
-			if strings.HasSuffix(strings.ToLower(img.Source), ".jpg") || strings.HasSuffix(strings.ToLower(img.Source), ".jpeg") {
+			lower := strings.ToLower(img.Source)
+			switch {
+			case strings.HasSuffix(lower, ".jpg"), strings.HasSuffix(lower, ".jpeg"):
 				ext = ".jpg"
-			} else if strings.HasSuffix(strings.ToLower(img.Source), ".svg") {
+			case strings.HasSuffix(lower, ".svg"):
 				ext = ".svg"
-			} else if strings.HasSuffix(strings.ToLower(img.Source), ".webp") {
+			case strings.HasSuffix(lower, ".webp"):
 				ext = ".webp"
-			} else if strings.HasSuffix(strings.ToLower(img.Source), ".gif") {
+			case strings.HasSuffix(lower, ".gif"):
 				ext = ".gif"
 			}
 		}
@@ -873,13 +710,12 @@ func (s *Server) handleDownloadImages(w http.ResponseWriter, r *http.Request) {
 
 	resp := map[string]interface{}{
 		"captured": len(files),
-		"total":    len(images),
+		"total":    len(res.Images),
 		"files":    files,
 	}
 	if len(skipped) > 0 {
 		resp["skipped"] = skipped
 	}
-
 	writeSuccess(w, resp)
 }
 
@@ -889,8 +725,9 @@ func (s *Server) handleComputedStylesDiff(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
+	q := r.URL.Query()
 
-	againstStr := r.URL.Query().Get("against")
+	againstStr := q.Get("against")
 	if againstStr == "" {
 		writeError(w, http.StatusBadRequest, "against (page index) is required")
 		return
@@ -901,53 +738,47 @@ func (s *Server) handleComputedStylesDiff(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	var properties []string
-	if p := r.URL.Query().Get("properties"); p != "" {
-		properties = strings.Split(p, ",")
+	req := ops.ComputedStylesDiffRequest{
+		Against:        againstIdx,
+		SelectorTarget: q.Get("selector_target"),
 	}
-
-	selectorTarget := r.URL.Query().Get("selector_target")
-
-	// Batch selectors mode
-	selectors := r.URL.Query().Get("selectors")
-	if selectors != "" {
-		selectorList := strings.Split(selectors, ",")
-		for i := range selectorList {
-			selectorList[i] = strings.TrimSpace(selectorList[i])
+	if p := q.Get("properties"); p != "" {
+		req.Properties = strings.Split(p, ",")
+	}
+	if sels := q.Get("selectors"); sels != "" {
+		split := strings.Split(sels, ",")
+		for i := range split {
+			split[i] = strings.TrimSpace(split[i])
 		}
-		result, err := s.browser.GetBatchComputedStylesDiff(selectorList, againstIdx, properties, selectorTarget)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, fmt.Sprintf("batch diff failed: %v", err))
+		req.Selectors = split
+	} else {
+		req.Selector = q.Get("selector")
+		if req.Selector == "" {
+			writeError(w, http.StatusBadRequest, "selector or selectors is required")
 			return
 		}
+	}
 
+	res, err := ops.ComputedStylesDiff(r.Context(), s.browser, req)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	if res.Mode == "batch" {
 		writeSuccess(w, map[string]interface{}{
-			"results":       result.Results,
-			"overall_score": result.OverallScore,
+			"results":       res.Results,
+			"overall_score": res.OverallScore,
 		})
 		return
 	}
-
-	// Single selector mode
-	selector := r.URL.Query().Get("selector")
-	if selector == "" {
-		writeError(w, http.StatusBadRequest, "selector or selectors is required")
-		return
-	}
-
-	result, err := s.browser.GetComputedStylesDiff(selector, againstIdx, properties, selectorTarget)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("style diff failed: %v", err))
-		return
-	}
-
 	writeSuccess(w, map[string]interface{}{
-		"selector":      result.Selector,
-		"matches":       result.Matches,
-		"mismatches":    result.Mismatches,
-		"matchCount":    result.MatchCount,
-		"mismatchCount": result.MismatchCount,
-		"score":         result.Score,
+		"selector":      res.Selector,
+		"matches":       res.Matches,
+		"mismatches":    res.Mismatches,
+		"matchCount":    res.MatchCount,
+		"mismatchCount": res.MismatchCount,
+		"score":         res.Score,
 	})
 }
 
@@ -957,38 +788,29 @@ func (s *Server) handleScroll(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-
-	var req struct {
-		Selector string `json:"selector"`
-		X        int    `json:"x"`
-		Y        int    `json:"y"`
-		ToBottom bool   `json:"to_bottom"`
-		ToTop    bool   `json:"to_top"`
-	}
+	var req ops.ScrollRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-
 	if req.Selector == "" {
 		writeError(w, http.StatusBadRequest, "selector is required")
 		return
 	}
-
-	result, err := s.browser.ScrollElement(req.Selector, req.X, req.Y, req.ToBottom, req.ToTop)
+	res, err := ops.Scroll(r.Context(), s.browser, req)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("scroll failed: %v", err))
+		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-
+	// Preserve historical "scrolled" key for compatibility.
 	writeSuccess(w, map[string]interface{}{
-		"scrolled":     req.Selector,
-		"scrollTop":    result.ScrollTop,
-		"scrollLeft":   result.ScrollLeft,
-		"scrollHeight": result.ScrollHeight,
-		"scrollWidth":  result.ScrollWidth,
-		"clientHeight": result.ClientHeight,
-		"clientWidth":  result.ClientWidth,
+		"scrolled":     res.Selector,
+		"scrollTop":    res.ScrollTop,
+		"scrollLeft":   res.ScrollLeft,
+		"scrollHeight": res.ScrollHeight,
+		"scrollWidth":  res.ScrollWidth,
+		"clientHeight": res.ClientHeight,
+		"clientWidth":  res.ClientWidth,
 	})
 }
 
@@ -998,66 +820,47 @@ func (s *Server) handleComputedStyles(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-
-	var properties []string
-	if p := r.URL.Query().Get("properties"); p != "" {
-		properties = strings.Split(p, ",")
+	q := r.URL.Query()
+	req := ops.ComputedStylesRequest{
+		Selector:    q.Get("selector"),
+		SelectorAll: q.Get("selector_all"),
 	}
-
-	// Batch selectors mode (repeated selectors, comma-separated)
-	selectors := r.URL.Query().Get("selectors")
-	selector := r.URL.Query().Get("selector")
-	selectorAll := r.URL.Query().Get("selector_all")
-
-	if selector == "" && selectorAll == "" && selectors == "" {
+	if p := q.Get("properties"); p != "" {
+		req.Properties = strings.Split(p, ",")
+	}
+	if sels := q.Get("selectors"); sels != "" {
+		split := strings.Split(sels, ",")
+		for i := range split {
+			split[i] = strings.TrimSpace(split[i])
+		}
+		req.Selectors = split
+	}
+	if req.Selector == "" && req.SelectorAll == "" && len(req.Selectors) == 0 {
 		writeError(w, http.StatusBadRequest, "selector, selector_all, or selectors is required")
 		return
 	}
-	if selectors != "" {
-		selectorList := strings.Split(selectors, ",")
-		for i := range selectorList {
-			selectorList[i] = strings.TrimSpace(selectorList[i])
-		}
-		results, err := s.browser.GetBatchComputedStyles(selectorList, properties)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, fmt.Sprintf("batch styles failed: %v", err))
-			return
-		}
-
-		writeSuccess(w, map[string]interface{}{
-			"results": results,
-		})
-		return
-	}
-
-	// Multiple elements mode
-	if selectorAll != "" {
-		entries, err := s.browser.GetMultipleComputedStyles(selectorAll, properties)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to get computed styles: %v", err))
-			return
-		}
-
-		writeSuccess(w, map[string]interface{}{
-			"selector": selectorAll,
-			"count":    len(entries),
-			"elements": entries,
-		})
-		return
-	}
-
-	// Single element mode
-	styles, err := s.browser.GetComputedStyles(selector, properties)
+	res, err := ops.ComputedStyles(r.Context(), s.browser, req)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to get computed styles: %v", err))
+		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	writeSuccess(w, map[string]interface{}{
-		"selector": selector,
-		"styles":   styles,
-		"count":    len(styles),
-	})
+	switch res.Mode {
+	case "batch":
+		writeSuccess(w, map[string]interface{}{"results": res.BatchResults})
+	case "all":
+		writeSuccess(w, map[string]interface{}{
+			"selector": res.Selector,
+			"count":    res.Count,
+			"elements": res.Elements,
+		})
+	default: // "single"
+		writeSuccess(w, map[string]interface{}{
+			"selector": res.Selector,
+			"styles":   res.Styles,
+			"count":    res.Count,
+		})
+	}
 }
 
 // handleWait handles POST /api/v1/wait
@@ -1066,45 +869,30 @@ func (s *Server) handleWait(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-
-	var req struct {
+	// The request body uses "timeout" historically; map it onto TimeoutMs.
+	var raw struct {
 		Selector string `json:"selector"`
-		Timeout  int    `json:"timeout"` // milliseconds, default 5000
+		Timeout  int    `json:"timeout"`
 		Visible  bool   `json:"visible"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-
-	if req.Selector == "" {
+	if raw.Selector == "" {
 		writeError(w, http.StatusBadRequest, "selector is required")
 		return
 	}
-
-	timeout := 5 * time.Second
-	if req.Timeout > 0 {
-		timeout = time.Duration(req.Timeout) * time.Millisecond
-	}
-
-	ctx := context.Background()
-	var err error
-	if req.Visible {
-		err = s.browser.WaitForElementVisible(ctx, req.Selector, timeout)
-	} else {
-		err = s.browser.WaitForElement(ctx, req.Selector, timeout)
-	}
-
+	res, err := ops.Wait(r.Context(), s.browser, ops.WaitRequest{
+		Selector:  raw.Selector,
+		TimeoutMs: raw.Timeout,
+		Visible:   raw.Visible,
+	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("wait failed: %v", err))
+		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-
-	writeSuccess(w, map[string]interface{}{
-		"found":    true,
-		"selector": req.Selector,
-		"visible":  req.Visible,
-	})
+	writeSuccess(w, res)
 }
 
 // handleCleanSnapshot handles GET /api/v1/clean-snapshot
@@ -1113,66 +901,57 @@ func (s *Server) handleCleanSnapshot(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-
-	selector := r.URL.Query().Get("selector")
-	if selector == "" {
+	q := r.URL.Query()
+	req := ops.CleanSnapshotRequest{
+		Selector: q.Get("selector"),
+		SVGFull:  q.Get("svg_full") == "true",
+		JSON:     q.Get("format") == "json",
+	}
+	if req.Selector == "" {
 		writeError(w, http.StatusBadRequest, "selector is required")
 		return
 	}
-
-	depth := 0
-	if d := r.URL.Query().Get("depth"); d != "" {
+	if d := q.Get("depth"); d != "" {
 		if n, err := strconv.Atoi(d); err == nil {
-			depth = n
+			req.Depth = n
 		}
 	}
-
-	maxLength := 0
-	if m := r.URL.Query().Get("max_length"); m != "" {
+	if m := q.Get("max_length"); m != "" {
 		if n, err := strconv.Atoi(m); err == nil {
-			maxLength = n
+			req.MaxLength = n
 		}
 	}
-
-	svgFull := r.URL.Query().Get("svg_full") == "true"
-	jsonOutput := r.URL.Query().Get("format") == "json"
-
-	html, tree, err := s.browser.GetCleanSnapshot(selector, browser.CleanSnapshotOptions{
-		Depth:     depth,
-		SVGFull:   svgFull,
-		MaxLength: maxLength,
-	})
+	res, err := ops.CleanSnapshot(r.Context(), s.browser, req)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("clean snapshot failed: %v", err))
+		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-
-	if jsonOutput {
+	if req.JSON {
 		writeSuccess(w, map[string]interface{}{
-			"selector": selector,
-			"tree":     tree,
+			"selector": res.Selector,
+			"tree":     res.Tree,
 		})
-	} else {
-		writeSuccess(w, map[string]interface{}{
-			"selector": selector,
-			"html":     html,
-		})
+		return
 	}
+	writeSuccess(w, map[string]interface{}{
+		"selector": res.Selector,
+		"html":     res.HTML,
+	})
 }
 
 // handleViewport handles GET/POST /api/v1/viewport
 func (s *Server) handleViewport(w http.ResponseWriter, r *http.Request) {
 	// GET: query current viewport
 	if r.Method == http.MethodGet {
-		vp, err := s.browser.GetViewport()
+		res, err := ops.GetViewport(r.Context(), s.browser)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to get viewport: %v", err))
+			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		writeSuccess(w, map[string]interface{}{
-			"width":             vp.Width,
-			"height":            vp.Height,
-			"deviceScaleFactor": vp.DeviceScaleFactor,
+			"width":             res.Width,
+			"height":            res.Height,
+			"deviceScaleFactor": res.DPR,
 		})
 		return
 	}
@@ -1183,48 +962,25 @@ func (s *Server) handleViewport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req struct {
-		Width  int     `json:"width"`
-		Height int     `json:"height"`
-		DPR    float64 `json:"dpr"`
-		Preset string  `json:"preset"`
-	}
+	var req ops.ViewportRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-
-	// Apply preset if specified
-	if req.Preset != "" {
-		switch req.Preset {
-		case "mobile":
-			req.Width, req.Height = 375, 812
-		case "tablet":
-			req.Width, req.Height = 768, 1024
-		case "desktop":
-			req.Width, req.Height = 1440, 900
-		case "wide":
-			req.Width, req.Height = 1920, 1080
-		default:
-			writeError(w, http.StatusBadRequest, fmt.Sprintf("unknown preset: %s (use mobile, tablet, desktop, or wide)", req.Preset))
+	res, err := ops.SetViewport(r.Context(), s.browser, req)
+	if err != nil {
+		// Surface preset/dimensions errors as 400 to preserve historical behavior.
+		msg := err.Error()
+		if strings.Contains(msg, "unknown preset") || strings.Contains(msg, "width and height are required") {
+			writeError(w, http.StatusBadRequest, msg)
 			return
 		}
-	}
-
-	if req.Width == 0 || req.Height == 0 {
-		writeError(w, http.StatusBadRequest, "width and height are required")
+		writeError(w, http.StatusInternalServerError, msg)
 		return
 	}
-
-	prev, current, err := s.browser.SetViewport(req.Width, req.Height, req.DPR)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("viewport resize failed: %v", err))
-		return
-	}
-
 	writeSuccess(w, map[string]interface{}{
-		"previous": prev,
-		"current":  current,
+		"previous": res.Previous,
+		"current":  res.Current,
 	})
 }
 
@@ -1234,15 +990,11 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-
-	var req struct {
-		Question string `json:"question"`
-	}
+	var req ops.AskRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-
 	if req.Question == "" {
 		writeError(w, http.StatusBadRequest, "question is required")
 		return
@@ -1252,7 +1004,6 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "LLM not configured: app config not provided to server")
 		return
 	}
-
 	if err := s.appConfig.ValidateForLLM(); err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Sprintf("LLM configuration error: %v", err))
 		return
@@ -1272,15 +1023,16 @@ func (s *Server) handleAsk(w http.ResponseWriter, r *http.Request) {
 		Verbose:   true,
 	})
 
-	answer, err := askAgent.Ask(r.Context(), req.Question)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, fmt.Sprintf("ask failed: %v", err))
-		return
+	runner := func(ctx context.Context, q string) (string, error) {
+		return askAgent.Ask(ctx, q)
 	}
 
-	writeSuccess(w, map[string]interface{}{
-		"answer": answer,
-	})
+	res, err := ops.Ask(r.Context(), runner, req)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeSuccess(w, res)
 }
 
 // handleRecordStart handles POST /api/v1/record/start
@@ -1289,15 +1041,12 @@ func (s *Server) handleRecordStart(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-
-	var req struct {
-		URL string `json:"url"`
-	}
+	var req ops.RecordStartRequest
 	if r.Body != nil {
-		json.NewDecoder(r.Body).Decode(&req)
+		_ = json.NewDecoder(r.Body).Decode(&req)
 	}
-
-	if err := s.browser.StartRecording(req.URL); err != nil {
+	res, err := ops.RecordStart(r.Context(), s.browser, req)
+	if err != nil {
 		if strings.Contains(err.Error(), "already in progress") {
 			writeError(w, http.StatusConflict, err.Error())
 			return
@@ -1305,10 +1054,7 @@ func (s *Server) handleRecordStart(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-
-	writeSuccess(w, map[string]interface{}{
-		"recording": true,
-	})
+	writeSuccess(w, res)
 }
 
 // handleRecordStop handles POST /api/v1/record/stop
@@ -1317,20 +1063,12 @@ func (s *Server) handleRecordStop(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-
-	events, err := s.browser.StopRecording()
+	res, err := ops.RecordStop(r.Context(), s.browser)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-
-	testContent := browser.FormatTestFile(events, "Recorded Session")
-
-	writeSuccess(w, map[string]interface{}{
-		"event_count":  len(events),
-		"test_content": testContent,
-		"events":       events,
-	})
+	writeSuccess(w, res)
 }
 
 // handleRecordStatus handles GET /api/v1/record/status
@@ -1339,9 +1077,10 @@ func (s *Server) handleRecordStatus(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-
-	writeSuccess(w, map[string]interface{}{
-		"recording":   s.browser.IsRecording(),
-		"event_count": s.browser.RecordingEventCount(),
-	})
+	res, err := ops.RecordStatus(r.Context(), s.browser)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeSuccess(w, res)
 }

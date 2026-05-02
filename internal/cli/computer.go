@@ -397,10 +397,10 @@ func runComputerClick(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	body := mergeBody(map[string]any{
-		"x":      x,
-		"y":      y,
-		"button": computerClickButton,
-		"double": computerClickDouble,
+		"x":            x,
+		"y":            y,
+		"button":       computerClickButton,
+		"double_click": computerClickDouble,
 	}, displayBody(computerClickDisplay))
 	return computerAPIPost("/computer/click", body)
 }
