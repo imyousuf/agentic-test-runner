@@ -2,8 +2,11 @@ package ops
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/invopop/jsonschema"
 )
 
 // These tests pin the validation contract of the ops layer. They pass nil for
@@ -90,5 +93,104 @@ func TestComputerOps_RegionScreenshotRejectsZeroSize(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "width") || !strings.Contains(err.Error(), "height") {
 		t.Errorf("err = %q, want mention of width and height", err.Error())
+	}
+}
+
+// --- MapToStruct with pointer / optional fields -----------------------------
+
+// ComputerClickRequest.Display is *int specifically so callers can distinguish
+// "no display field" (root coords) from "display 0" (display-local coords on
+// the primary monitor). Round-trip both shapes through MapToStruct to make
+// sure that distinction survives — a regression here breaks multi-monitor
+// click semantics.
+func TestMapToStruct_DistinguishesAbsentFromZeroPointer(t *testing.T) {
+	var absent ComputerClickRequest
+	if err := MapToStruct(map[string]any{"x": 10, "y": 20}, &absent); err != nil {
+		t.Fatalf("MapToStruct (absent display): %v", err)
+	}
+	if absent.Display != nil {
+		t.Errorf("absent display should decode to nil pointer, got *int = %d", *absent.Display)
+	}
+
+	var explicit ComputerClickRequest
+	if err := MapToStruct(map[string]any{"x": 10, "y": 20, "display": 0}, &explicit); err != nil {
+		t.Fatalf("MapToStruct (explicit 0): %v", err)
+	}
+	if explicit.Display == nil {
+		t.Fatal("explicit display=0 should decode to non-nil pointer")
+	}
+	if *explicit.Display != 0 {
+		t.Errorf("explicit display = %d, want 0", *explicit.Display)
+	}
+}
+
+// --- Field-name regression: legacy keys must NOT decode as the canonical -----
+
+// A common refactor accident is to silently re-accept the old field name. The
+// json decoder ignores unknown keys, so feeding `{"target":"x"}` into a
+// ClickRequest leaves Selector empty — and the validation guard then catches
+// it. Pin both halves of that contract: the legacy key is dropped, AND the
+// ops function rejects the empty-Selector request.
+func TestClickRequest_LegacyTargetKeyIsDropped(t *testing.T) {
+	var req ClickRequest
+	if err := MapToStruct(map[string]any{"target": "#submit"}, &req); err != nil {
+		t.Fatalf("MapToStruct: %v", err)
+	}
+	if req.Selector != "" {
+		t.Fatalf("legacy target key should not populate Selector, got %q", req.Selector)
+	}
+	if _, err := Click(context.Background(), nil, req); err == nil ||
+		!strings.Contains(err.Error(), "selector is required") {
+		t.Fatalf("Click should reject empty Selector, got err=%v", err)
+	}
+}
+
+// --- Schema reflection contract --------------------------------------------
+
+// MCP tool inputSchemas are reflected from these Request structs. The MCP
+// server's Reflector config (DoNotReference, ExpandedStruct,
+// RequiredFromJSONSchemaTags, AllowAdditionalProperties) decides whether
+// `required` arrays and field descriptions actually populate. If a future
+// upgrade of invopop/jsonschema changes those defaults, every MCP client
+// would silently see broken schemas. Assert the contract here so the
+// regression fails the build instead.
+func TestSchemaReflection_ClickRequestContract(t *testing.T) {
+	r := &jsonschema.Reflector{
+		DoNotReference:             true,
+		AllowAdditionalProperties:  true,
+		ExpandedStruct:             true,
+		RequiredFromJSONSchemaTags: true,
+	}
+	raw, err := json.Marshal(r.Reflect(&ClickRequest{}))
+	if err != nil {
+		t.Fatalf("marshal reflected schema: %v", err)
+	}
+	var s map[string]any
+	if err := json.Unmarshal(raw, &s); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	if got := s["type"]; got != "object" {
+		t.Errorf("type = %v, want object", got)
+	}
+
+	required, _ := s["required"].([]any)
+	if len(required) != 1 || required[0] != "selector" {
+		t.Errorf("required = %v, want [selector]", required)
+	}
+
+	props, _ := s["properties"].(map[string]any)
+	selProp, _ := props["selector"].(map[string]any)
+	if selProp["description"] == "" || selProp["description"] == nil {
+		t.Errorf("selector property missing description; got %+v", selProp)
+	}
+	dcProp, _ := props["double_click"].(map[string]any)
+	if dcProp["type"] != "boolean" {
+		t.Errorf("double_click type = %v, want boolean", dcProp["type"])
+	}
+
+	// Field-name regression: legacy "target" must NOT appear as a property.
+	if _, leaked := props["target"]; leaked {
+		t.Error("schema leaks legacy 'target' property — field-name normalization regressed")
 	}
 }
