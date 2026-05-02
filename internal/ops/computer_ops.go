@@ -26,24 +26,17 @@ import (
 //
 // When Region is true, X/Y/Width/Height define the region in display-local
 // coordinates of the chosen Display. When Region is false, the entire display
-// is captured. Display defaults to the daemon's configured default display
-// (use a negative value to opt into the daemon default).
+// is captured. Display is *int so callers can distinguish "no display field"
+// (use the daemon's configured default) from "display 0" (display-local
+// coords on the primary monitor).
 type ComputerScreenshotRequest struct {
-	Display int    `json:"display"  jsonschema_description:"Display index to capture; omit or set negative to use the daemon's configured default"`
-	Region  bool   `json:"region"   jsonschema_description:"Capture a sub-rectangle instead of the full display"`
-	X       int    `json:"x"        jsonschema_description:"Region X (display-local pixels) when region=true"`
-	Y       int    `json:"y"        jsonschema_description:"Region Y (display-local pixels) when region=true"`
-	Width   int    `json:"width"    jsonschema_description:"Region width in pixels when region=true"`
-	Height  int    `json:"height"   jsonschema_description:"Region height in pixels when region=true"`
-	Output  string `json:"output"   jsonschema_description:"Optional file path to save the PNG; if empty the daemon returns base64."`
-
-	// UseDefaultDisplay forces the daemon-configured default display when
-	// Display is the zero value AND the caller hasn't passed an explicit
-	// display=0. REST sets this when the request body doesn't contain a
-	// display field (preserving the historical behavior). Surfaces that
-	// always pass an explicit display (e.g. CLI with --display) leave it
-	// false. JSON-tagged so the REST layer can wire it cleanly.
-	UseDefaultDisplay bool `json:"-"`
+	Display *int   `json:"display,omitempty" jsonschema_description:"Display index to capture; omit to use the daemon's configured default"`
+	Region  bool   `json:"region"            jsonschema_description:"Capture a sub-rectangle instead of the full display"`
+	X       int    `json:"x"                 jsonschema_description:"Region X (display-local pixels) when region=true"`
+	Y       int    `json:"y"                 jsonschema_description:"Region Y (display-local pixels) when region=true"`
+	Width   int    `json:"width"             jsonschema_description:"Region width in pixels when region=true"`
+	Height  int    `json:"height"            jsonschema_description:"Region height in pixels when region=true"`
+	Output  string `json:"output"            jsonschema_description:"Optional file path to save the PNG; if empty the daemon returns base64."`
 }
 
 // ComputerScreenshotResult carries the captured PNG bytes.
@@ -56,9 +49,9 @@ type ComputerScreenshotResult struct {
 // PNG bytes. Surfaces decide whether to base64-encode (REST) or save to disk
 // (MCP).
 func ComputerScreenshot(_ context.Context, c *computer.Computer, req ComputerScreenshotRequest) (ComputerScreenshotResult, error) {
-	display := req.Display
-	if req.UseDefaultDisplay && display == 0 {
-		display = -1
+	display := -1
+	if req.Display != nil {
+		display = *req.Display
 	}
 	var (
 		png []byte

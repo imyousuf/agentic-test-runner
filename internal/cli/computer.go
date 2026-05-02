@@ -328,8 +328,12 @@ func newComputerScreenshotCmd() *cobra.Command {
 }
 
 func runComputerScreenshot(cmd *cobra.Command, args []string) error {
-	body := map[string]any{
-		"display": computerScreenshotDisp,
+	// Only include display in the body when the user passed --display, so
+	// the daemon can distinguish "use default display" (omitted) from
+	// "display 0" (explicit). Mirrors displayBody used by click/move/etc.
+	body := map[string]any{}
+	if computerScreenshotDisp >= 0 {
+		body["display"] = computerScreenshotDisp
 	}
 	if computerScreenshotRgn != "" {
 		x, y, w, h, err := parseRegion(computerScreenshotRgn)

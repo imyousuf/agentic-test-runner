@@ -198,10 +198,14 @@ type browserScreenshotSchemaArgs struct {
 // browserComputedStylesSchemaArgs documents the MCP-specific arguments for
 // browser_computed_styles. The MCP wire form takes "properties" as a
 // comma-separated string while the canonical ops type uses []string.
+//
+// Either selector OR selector_all is required, but not both — the dispatcher
+// branches on which one is set. Marking neither as required in the schema is
+// the honest answer; the description spells out the constraint for callers.
 type browserComputedStylesSchemaArgs struct {
-	Selector    string `json:"selector"     jsonschema:"required" jsonschema_description:"CSS selector of the element"`
-	Properties  string `json:"properties"                          jsonschema_description:"Comma-separated CSS properties to return (e.g., 'fontSize,color,fontWeight'). Omit for default set."`
-	SelectorAll string `json:"selector_all"                        jsonschema_description:"CSS selector matching multiple elements (returns one entry per match)"`
+	Selector    string `json:"selector"     jsonschema_description:"CSS selector of a single element. Provide this OR selector_all."`
+	Properties  string `json:"properties"   jsonschema_description:"Comma-separated CSS properties to return (e.g., 'fontSize,color,fontWeight'). Omit for default set."`
+	SelectorAll string `json:"selector_all" jsonschema_description:"CSS selector matching multiple elements (one entry per match). Provide this OR selector."`
 }
 
 // browserComputedStylesDiffSchemaArgs documents the MCP-specific arguments

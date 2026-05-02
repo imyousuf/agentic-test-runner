@@ -341,11 +341,9 @@ func computerScreenshotMCP(ctx context.Context, c *computer.Computer, args map[s
 	if err := ops.MapToStruct(args, &req); err != nil {
 		return "", err
 	}
-	// MCP convention: omitting display means "default display" (matching the
-	// pre-migration helper that returned -1 when args["display"] was missing).
-	if _, present := args["display"]; !present {
-		req.UseDefaultDisplay = true
-	}
+	// req.Display is *int: a missing args["display"] decodes to nil, which
+	// the ops layer interprets as "use the daemon's configured default";
+	// explicit display=0 round-trips to *0.
 	res, err := ops.ComputerScreenshot(ctx, c, req)
 	if err != nil {
 		return "", err

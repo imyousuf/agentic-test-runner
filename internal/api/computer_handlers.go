@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -61,9 +62,10 @@ func (s *ComputerServer) gatedContext(parent context.Context) (context.Context, 
 }
 
 // abortStatus maps an action error to an HTTP status: aborted -> 499,
-// other errors -> 500.
+// other errors -> 500. Uses errors.Is so wrapped ErrAborted (e.g. via
+// fmt.Errorf("%w")) still maps to 499.
 func abortStatus(err error) int {
-	if err == computer.ErrAborted {
+	if errors.Is(err, computer.ErrAborted) {
 		return 499
 	}
 	return http.StatusInternalServerError
@@ -103,12 +105,9 @@ func (s *ComputerServer) handleComputerScreenshot(w http.ResponseWriter, r *http
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	// Preserve the historical "no display field" default: when the caller
-	// didn't pass display=N AND the URL lacks ?display=, fall back to the
-	// daemon's configured default display rather than hard-coded 0.
-	if req.Display == 0 && r.URL.Query().Get("display") == "" {
-		req.UseDefaultDisplay = true
-	}
+	// req.Display is *int: nil means "use the daemon's configured default
+	// display"; explicit display=0 stays as display 0 (display-local coords
+	// on the primary monitor). The ops layer handles the nil → -1 mapping.
 	res, err := ops.ComputerScreenshot(r.Context(), s.computer, req)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
