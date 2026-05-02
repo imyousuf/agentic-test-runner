@@ -124,6 +124,40 @@ func TestMapToStruct_DistinguishesAbsentFromZeroPointer(t *testing.T) {
 	}
 }
 
+// --- Result struct field shapes --------------------------------------------
+
+// computer.NoDisplay (-1) is an internal sentinel used by the underlying
+// primitive to mean "the request didn't specify a display". It must never
+// appear in JSON responses — that would surface a meaningless "-1" to MCP /
+// REST clients. The result structs use *int with omitempty so an absent
+// display is rendered as no field at all, while an explicit display (e.g. 0,
+// 1, 2) round-trips intact.
+func TestComputerClickResult_OmitsDisplayWhenAbsent(t *testing.T) {
+	t.Run("absent → field omitted", func(t *testing.T) {
+		raw, err := json.Marshal(ComputerClickResult{X: 10, Y: 20, Display: nil})
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		if strings.Contains(string(raw), "display") {
+			t.Errorf("display field leaked into JSON for nil display: %s", raw)
+		}
+		if strings.Contains(string(raw), "-1") {
+			t.Errorf("NoDisplay sentinel leaked into JSON: %s", raw)
+		}
+	})
+
+	t.Run("explicit 0 → field present", func(t *testing.T) {
+		zero := 0
+		raw, err := json.Marshal(ComputerClickResult{X: 10, Y: 20, Display: &zero})
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		if !strings.Contains(string(raw), `"display":0`) {
+			t.Errorf("explicit display=0 should appear in JSON, got: %s", raw)
+		}
+	})
+}
+
 // --- Field-name regression: legacy keys must NOT decode as the canonical -----
 
 // A common refactor accident is to silently re-accept the old field name. The

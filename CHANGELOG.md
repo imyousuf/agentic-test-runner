@@ -30,3 +30,15 @@ CLI need no changes.
   handlers now decode their protocol into the same struct, call the same
   function, and format the same result. Adding a new primitive is one struct
   + one function instead of four-place edits.
+
+### Fixed
+
+- Computer click/move/drag/hover responses no longer leak the internal
+  `NoDisplay` sentinel (`-1`) through the `display` field. The field is now
+  omitted entirely when the request didn't specify a display, and round-trips
+  the explicit value otherwise. Result shape changed from `int` to optional
+  `*int` (omitted via `omitempty`).
+- MCP server now responds with an empty success result when a client sends
+  `notifications/initialized` (or the legacy `initialized`) with an `id`,
+  rather than silently dropping it. Notifications without an `id` continue
+  to receive no response, per JSON-RPC 2.0.

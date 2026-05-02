@@ -4,34 +4,35 @@ This document describes the internal architecture of ATR.
 
 ## Overview
 
-ATR (Agentic Test Runner) is built around an **AI agent loop** that uses tools to investigate and analyze failures. The same agent architecture powers both command failure analysis and browser behavior testing.
+ATR has two layered concerns:
+
+1. An **AI agent loop** that uses tools to investigate command failures and run behavior tests (`atr run`).
+2. A set of **browser and desktop primitives** (~54 of them) exposed through three peer integration surfaces — CLI, REST, MCP — all converging on a single canonical execution layer (`internal/ops`).
+
+The agent loop and the primitives meet whenever an agent (`atr run`, `atr browser ask`, `atr computer ask`) calls a browser/computer tool: the tool implementations route through the same ops layer that REST and MCP use.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                           ATR CLI                               │
-├─────────────────────────────────────────────────────────────────┤
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐  │
-│  │ run --cmd   │  │ run         │  │ config                  │  │
-│  │             │  │ --behavior  │  │                         │  │
-│  └──────┬──────┘  └──────┬──────┘  └─────────────────────────┘  │
-│         │                │                                      │
-│         ▼                ▼                                      │
-│  ┌─────────────────────────────────────────────────────────┐   │
-│  │                    Agent Loop                            │   │
-│  │  ┌─────────┐    ┌─────────┐    ┌─────────┐              │   │
-│  │  │ Prompt  │───▶│   LLM   │───▶│  Tool   │──┐           │   │
-│  │  └─────────┘    └─────────┘    │  Calls  │  │           │   │
-│  │       ▲                        └─────────┘  │           │   │
-│  │       │                                     │           │   │
-│  │       └─────────────────────────────────────┘           │   │
-│  └─────────────────────────────────────────────────────────┘   │
-│                            │                                    │
-│         ┌──────────────────┼──────────────────┐                │
-│         ▼                  ▼                  ▼                │
-│  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐        │
-│  │  Shell      │    │  Code       │    │  Browser    │        │
-│  │  Tools      │    │  Tools      │    │  Tools      │        │
-│  └─────────────┘    └─────────────┘    └─────────────┘        │
+│                          ATR surfaces                           │
+│                                                                 │
+│   CLI (cobra)          REST (HTTP)            MCP (JSON-RPC)    │
+│   internal/cli/        internal/api/          internal/mcp/     │
+│        │                    │                       │           │
+│        │  HTTP to daemon    │  decode JSON          │  decode   │
+│        ▼                    ▼  into Request         ▼   args    │
+│   (runs the daemon)         │                       │           │
+│                             ▼                       ▼           │
+│                    ┌────────────────────────────────────┐       │
+│                    │     internal/ops (canonical)       │       │
+│                    │   Request structs + Execute funcs  │       │
+│                    │   one source of truth per primitive│       │
+│                    └────────────────────────────────────┘       │
+│                             │                       │           │
+│                             ▼                       ▼           │
+│                    internal/browser/         internal/computer/ │
+│                    (rod / CDP)               (robotgo / X11)    │
+│                                                                 │
+│   Agent loop (internal/agent/) calls ops.* via tool wrappers.   │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -40,48 +41,24 @@ ATR (Agentic Test Runner) is built around an **AI agent loop** that uses tools t
 ```
 github.com/imyousuf/agentic-test-runner/
 ├── cmd/atr/              # CLI entry point
-│   └── main.go
 ├── internal/             # Private packages
-│   ├── agent/            # AI agent implementation
-│   │   ├── agent.go      # Agent loop
-│   │   ├── tool.go       # Tool interface
-│   │   ├── registry.go   # Tool registry
-│   │   ├── tools_shell.go     # Shell tools
-│   │   ├── tools_read.go      # File reading tools
-│   │   ├── tools_grep.go      # Code search tools
-│   │   └── tools_browser.go   # Browser automation tools
-│   ├── browser/          # Browser automation
-│   │   ├── browser.go    # Lifecycle management
-│   │   └── element.go    # Element interactions
-│   ├── capture/          # Failure context capture
-│   │   ├── types.go      # Data structures
-│   │   └── capture.go    # Capture logic
-│   ├── cli/              # CLI commands
-│   │   ├── root.go       # Root command
-│   │   ├── run.go        # Run command
-│   │   ├── config.go     # Config commands
-│   │   └── version.go    # Version command
-│   ├── config/           # Configuration
-│   │   └── config.go     # Config loading
-│   ├── executor/         # Command execution
-│   │   ├── executor.go   # Command runner
-│   │   └── shell_*.go    # Platform-specific shells
-│   ├── llm/              # LLM provider registration
-│   │   └── gemini.go     # Gemini provider
-│   └── output/           # Output formatting
-│       ├── formatter.go  # Formatter interface
-│       └── text.go       # Text formatter
-├── pkg/                  # Public packages
-│   ├── behavior/         # Behavior test results
-│   │   └── result.go
-│   ├── llm/              # LLM client interface
-│   │   ├── client.go     # Client interface
-│   │   ├── provider.go   # Provider registry
-│   │   └── types.go      # Message types
-│   └── result/           # Analysis results
-│       └── result.go
-└── examples/             # Example files
-    └── behavior/         # Example tests
+│   ├── agent/            # AI agent loop + tool wrappers (shell, read, grep, browser, ask)
+│   ├── api/              # REST daemon: HTTP handlers that decode into ops.* requests
+│   ├── browser/          # Browser primitives via go-rod (CDP)
+│   ├── capture/          # Test-failure context capture
+│   ├── cli/              # Cobra commands (run, browser, computer, mcp, config, ...)
+│   ├── computer/         # Desktop primitives via robotgo + X11/EWMH
+│   ├── config/           # Viper-based config loading
+│   ├── executor/         # Cross-platform shell execution
+│   ├── llm/              # LLM provider implementations (Gemini API, Vertex, CLI)
+│   ├── mcp/              # MCP JSON-RPC server; reflects schemas from ops Request structs
+│   ├── ops/              # Canonical Request/Result + Execute funcs for every primitive
+│   └── output/           # Output formatting (text, file, summary)
+├── pkg/
+│   ├── behavior/         # Public behavior-test result types
+│   ├── llm/              # Public LLM client interface + provider registry
+│   └── result/           # Public analysis-result types
+└── examples/behavior/    # Example .test.txt files
 ```
 
 ## Core Components
@@ -168,6 +145,52 @@ func (b *Browser) Fill(ctx context.Context, target, value string) error
 func (b *Browser) Snapshot(verbose bool) ([]ElementInfo, error)
 ```
 
+### Integration Surfaces and the `internal/ops` Layer
+
+ATR exposes its browser and computer primitives through three peer surfaces, all converging on a shared execution layer.
+
+- **`internal/ops/`** — Canonical `Request`/`Result` structs and execution functions, one per primitive (e.g. `ops.ClickRequest`, `ops.Click(ctx, *browser.Browser, ClickRequest) (ClickResult, error)`). Validation and error wrapping live here. JSON tags + `jsonschema:"required"` / `jsonschema_description:"..."` struct tags drive both REST decoding and MCP `inputSchema` reflection.
+
+- **REST daemon (`internal/api/`)** — The execution engine for `atr browser start` / `atr computer start`. Handlers decode the HTTP body into the ops Request, call `ops.X(...)`, and `writeSuccess(result)`. Computer handlers map `computer.ErrAborted` to HTTP 499 via `abortStatus(err)`.
+
+- **CLI (`internal/cli/`)** — Cobra subcommands. Except for `atr run`, the browser/computer subcommands are **thin HTTP clients** that POST to the running daemon at `http://localhost:<port>/api/v1/...`. They require a running daemon.
+
+- **MCP (`internal/mcp/`)** — JSON-RPC server (`atr mcp serve`). Each tool dispatcher decodes the `args map[string]any` into the same ops Request via `ops.MapToStruct(args, &req)`, calls `ops.X(...)`, and formats the result for MCP. `inputSchema` is generated from the ops Request struct via `schemaFor(&ops.XRequest{})` — there are no hand-written schemas. The MCP server embeds its own `*browser.Browser` / `*computer.Computer`; it does not require a running REST daemon.
+
+```go
+// internal/ops/browser_ops.go — canonical primitive
+type ClickRequest struct {
+    Selector    string `json:"selector"     jsonschema:"required" jsonschema_description:"CSS selector to click"`
+    DoubleClick bool   `json:"double_click"                       jsonschema_description:"Issue a double-click instead"`
+}
+
+func Click(ctx context.Context, b *browser.Browser, req ClickRequest) (ClickResult, error) { ... }
+```
+
+```go
+// internal/api/handlers.go — REST adapter
+var req ops.ClickRequest
+_ = json.NewDecoder(r.Body).Decode(&req)
+res, err := ops.Click(r.Context(), s.browser, req)
+writeSuccess(w, res)
+```
+
+```go
+// internal/mcp/server.go — MCP adapter
+var req ops.ClickRequest
+_ = ops.MapToStruct(args, &req)
+res, err := ops.Click(ctx, s.browser, req)
+return fmt.Sprintf("Clicked on %s", res.Selector), nil
+```
+
+When adding a new primitive, the work is:
+
+1. Implement the underlying capability in `internal/browser/` or `internal/computer/`.
+2. Add the `XRequest`/`XResult` and `func X(...)` in `internal/ops/`.
+3. Add a REST handler that decodes into `XRequest` and calls `ops.X`.
+4. Add a CLI subcommand that HTTPs to that handler (if user-facing).
+5. Add an MCP tool entry (`InputSchema: schemaFor(&ops.XRequest{})`) and dispatch case (if agent-callable).
+
 ### Configuration
 
 Configuration uses [Viper](https://github.com/spf13/viper) for flexible loading:
@@ -253,7 +276,7 @@ Configuration uses [Viper](https://github.com/spf13/viper) for flexible loading:
 
 ### Browser Tools (`tools_browser.go`)
 
-21 tools for browser automation. See [Behavior Testing](behavior-testing.md) for the full list.
+~32 browser tools for navigation, interaction, snapshots, screenshots, computed-style inspection, network, console, and more. The agent's tool wrappers delegate to `internal/ops` so they share validation and behavior with the REST/MCP surfaces. See [Behavior Testing](behavior-testing.md) for the full list.
 
 ## Extension Points
 
@@ -305,8 +328,11 @@ func init() {
 | `github.com/spf13/cobra` | CLI framework |
 | `github.com/spf13/viper` | Configuration management |
 | `github.com/go-rod/rod` | Browser automation (CDP) |
-| `github.com/google/generative-ai-go` | Gemini API client |
-| `cloud.google.com/go/vertexai` | Vertex AI client |
+| `github.com/go-vgo/robotgo` | Cross-platform desktop control (mouse, keyboard) |
+| `github.com/jezek/xgbutil` | X11 EWMH window management (Linux) |
+| `github.com/vcaesar/screenshot` | Screen capture |
+| `github.com/invopop/jsonschema` | Reflect Go structs into MCP `inputSchema` |
+| `google.golang.org/genai` | Gemini API + Vertex AI client |
 
 ## Security Considerations
 

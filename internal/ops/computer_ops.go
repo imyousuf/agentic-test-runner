@@ -86,10 +86,12 @@ type ComputerClickRequest struct {
 }
 
 // ComputerClickResult reports the click coordinates and resolved display.
+// Display is *int so the internal NoDisplay sentinel (-1) doesn't leak into
+// JSON responses — when the caller didn't pass one, the field is omitted.
 type ComputerClickResult struct {
-	X       int `json:"x"`
-	Y       int `json:"y"`
-	Display int `json:"display"`
+	X       int  `json:"x"`
+	Y       int  `json:"y"`
+	Display *int `json:"display,omitempty"`
 }
 
 // ComputerClick clicks (or double-clicks / right-clicks) at the given coords.
@@ -108,7 +110,7 @@ func ComputerClick(ctx context.Context, c *computer.Computer, req ComputerClickR
 	if err := c.Click(ctx, req.X, req.Y, button, req.DoubleClick, display); err != nil {
 		return ComputerClickResult{}, err
 	}
-	return ComputerClickResult{X: req.X, Y: req.Y, Display: display}, nil
+	return ComputerClickResult{X: req.X, Y: req.Y, Display: req.Display}, nil
 }
 
 // ComputerMoveRequest moves the mouse to (X, Y).
@@ -121,9 +123,9 @@ type ComputerMoveRequest struct {
 
 // ComputerMoveResult mirrors ComputerClickResult.
 type ComputerMoveResult struct {
-	X       int `json:"x"`
-	Y       int `json:"y"`
-	Display int `json:"display"`
+	X       int  `json:"x"`
+	Y       int  `json:"y"`
+	Display *int `json:"display,omitempty"`
 }
 
 // ComputerMove moves the mouse cursor.
@@ -135,7 +137,7 @@ func ComputerMove(ctx context.Context, c *computer.Computer, req ComputerMoveReq
 	if err := c.MoveTo(ctx, req.X, req.Y, req.Smooth, display); err != nil {
 		return ComputerMoveResult{}, err
 	}
-	return ComputerMoveResult{X: req.X, Y: req.Y, Display: display}, nil
+	return ComputerMoveResult{X: req.X, Y: req.Y, Display: req.Display}, nil
 }
 
 // ComputerDragRequest drags from one point to another.
@@ -152,7 +154,7 @@ type ComputerDragRequest struct {
 type ComputerDragResult struct {
 	From    [2]int `json:"from"`
 	To      [2]int `json:"to"`
-	Display int    `json:"display"`
+	Display *int   `json:"display,omitempty"`
 }
 
 // ComputerDrag drags from one point to another.
@@ -171,7 +173,7 @@ func ComputerDrag(ctx context.Context, c *computer.Computer, req ComputerDragReq
 	return ComputerDragResult{
 		From:    [2]int{req.FromX, req.FromY},
 		To:      [2]int{req.ToX, req.ToY},
-		Display: display,
+		Display: req.Display,
 	}, nil
 }
 
@@ -204,9 +206,9 @@ type ComputerHoverRequest struct {
 
 // ComputerHoverResult reports the hover coordinates.
 type ComputerHoverResult struct {
-	X       int `json:"x"`
-	Y       int `json:"y"`
-	Display int `json:"display"`
+	X       int  `json:"x"`
+	Y       int  `json:"y"`
+	Display *int `json:"display,omitempty"`
 }
 
 // ComputerHover moves the mouse cursor without clicking.
@@ -218,7 +220,7 @@ func ComputerHover(ctx context.Context, c *computer.Computer, req ComputerHoverR
 	if err := c.Hover(ctx, req.X, req.Y, display); err != nil {
 		return ComputerHoverResult{}, err
 	}
-	return ComputerHoverResult{X: req.X, Y: req.Y, Display: display}, nil
+	return ComputerHoverResult{X: req.X, Y: req.Y, Display: req.Display}, nil
 }
 
 // --- Keyboard ---------------------------------------------------------------

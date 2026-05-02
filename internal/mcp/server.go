@@ -156,9 +156,14 @@ func (s *Server) handleRequest(ctx context.Context, req *Request) {
 	case "initialize":
 		s.handleInitialize(req)
 	case "initialized", "notifications/initialized":
-		// JSON-RPC notification — clients post this after init. The
-		// MCP 2024-11-05 spec uses the "notifications/" prefix; the
-		// older bare name is kept for compatibility with older clients.
+		// MCP 2024-11-05 defines this as a notification (no id). The
+		// older bare name is kept for legacy clients. Per JSON-RPC 2.0
+		// a notification omits id and MUST NOT receive a response — but
+		// some clients send it as a request anyway. If id is present we
+		// must respond, so reply with an empty success.
+		if req.ID != nil {
+			s.sendResult(req.ID, struct{}{})
+		}
 	case "tools/list":
 		s.handleToolsList(req)
 	case "tools/call":
