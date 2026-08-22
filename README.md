@@ -13,6 +13,7 @@
 - **CLI Backend Support**: Use Claude CLI or Gemini CLI as backends - no API keys needed
 - **Cross-platform Desktop Control**: Mouse, keyboard, screen capture, window/app management on Linux (X11), macOS, and Windows via `atr computer`, with multi-monitor support and an in-process LLM agent (`atr computer ask`)
 - **MCP Server**: Expose browser AND desktop tools to any MCP-compatible client
+- **Browser Live View**: Watch the browser in a web page and take over when a step needs a person, such as a login with MFA, via `atr rdp`. No X server or VNC required
 - **Cross-Platform**: Works on Linux, macOS, and Windows
 - **Extensible**: Tool-based architecture for custom extensions
 
@@ -132,6 +133,7 @@ Files Examined:
 - **[CLI Reference](docs/cli-reference.md)** - All commands and flags
 - **[Behavior Testing](docs/behavior-testing.md)** - Write browser tests in natural language
 - **[Browser Server](docs/browser-server.md)** - HTTP server for programmatic browser control
+- **[Browser Live View](docs/rdp-live-view.md)** - Watch and control the browser from a web page (`atr rdp`)
 - **[MCP Server](docs/mcp-server.md)** - MCP protocol server for CLI tool integration
 - **[Architecture](docs/architecture.md)** - How ATR works internally
 - **[llms.txt](docs/llms.txt)** - Quick reference for AI agents
@@ -209,6 +211,61 @@ Add to your project's `.gemini/settings.json`:
 ```
 
 See [MCP Server Documentation](docs/mcp-server.md) for the full list of browser and desktop tools exposed via MCP.
+
+## Browser Live View (`atr rdp`)
+
+Watch the browser that ATR drives, in a web page, and take control when a step needs a
+person. Chrome streams the page over the DevTools Protocol, so no X server, no VNC, and no
+desktop packages are needed. It works with a headless browser on a server.
+
+```bash
+# On the machine that runs the browser
+atr browser start --headless
+atr rdp
+```
+
+The command prints a URL with an access token:
+
+```
+ATR live view
+  URL:     http://127.0.0.1:7788/?t=8f2c...
+  Browser: Chrome/151.0.7922.170  (attached, not owned)
+  Pages:   2
+```
+
+Open the URL. You can click, type, scroll, and paste. A tab bar and a URL bar let you switch
+pages and navigate. Closing the view leaves the browser running, and ATR keeps driving it
+while you watch.
+
+### Agent on a server, viewer on your laptop
+
+```bash
+# On the server
+atr rdp setup                      # install a service that keeps it running
+
+# On your laptop
+ssh -L 7788:127.0.0.1:7788 myserver
+```
+
+Then open `http://127.0.0.1:7788/?t=<token>`.
+
+`atr rdp setup` writes a systemd user unit on Linux, or a launchd agent on macOS, and stores
+a token in `~/.atr/rdp.env` so the URL is stable. Use `--check` to report the state, and
+`--uninstall` to remove the service.
+
+| Flag | Default | Purpose |
+|---|---|---|
+| `--port` | `7788` | HTTP port |
+| `--bind` | `127.0.0.1` | Listen address |
+| `--attach` | discovered | CDP endpoint, such as `cdp://127.0.0.1:9222` |
+| `--view-only` | `false` | Refuse input from viewers |
+| `--fps` | `20` | Target frame rate |
+
+**Security**: a viewer gets full control of that browser and its cookies. The default bind is
+loopback only. Reach a remote machine through an SSH tunnel, not by opening the port.
+
+See [Browser Live View](docs/rdp-live-view.md) for the protocol, the foreground rule, and
+troubleshooting.
 
 ## Desktop Control (`atr computer`)
 
