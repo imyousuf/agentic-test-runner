@@ -1,4 +1,4 @@
-.PHONY: build install clean test lint fmt help \
+.PHONY: build web install clean test lint fmt help \
 	build-linux-amd64 build-linux-arm64 \
 	build-darwin-amd64 build-darwin-arm64 \
 	build-windows-amd64 build-windows-arm64 \
@@ -26,8 +26,16 @@ LDFLAGS=-ldflags "-s -w"
 # Default target
 all: build
 
+## web: Build the live view web application into web/dist
+web:
+	@if [ -d web/node_modules ]; then \
+		cd web && npm run build; \
+	else \
+		cd web && npm ci && npm run build; \
+	fi
+
 ## build: Build the binary
-build:
+build: web
 	@mkdir -p $(BUILD_DIR)
 	$(GOBUILD) $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/atr
 

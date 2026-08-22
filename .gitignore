@@ -43,3 +43,6 @@ atr
 # be checked in. Note that gitignored is not the same as secret — credentials
 # belong in a password manager, referenced by name via atr.fillSecret.
 *.override.properties
+# Live view web application
+web/node_modules/
+web/tsconfig.tsbuildinfo
