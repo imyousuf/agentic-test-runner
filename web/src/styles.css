@@ -1,0 +1,116 @@
+:root {
+  color-scheme: dark;
+  --bg: #121212;
+  --panel: #1d1d1d;
+  --line: #2e2e2e;
+  --text: #e4e4e4;
+  --dim: #8d8d8d;
+  --accent: #4aa3a3;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 13px/1.4 system-ui, -apple-system, sans-serif;
+}
+
+.app { display: flex; flex-direction: column; height: 100vh; }
+
+.tabs {
+  display: flex;
+  gap: 2px;
+  padding: 6px 8px 0;
+  background: var(--panel);
+  overflow-x: auto;
+}
+
+.tab {
+  max-width: 220px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
+  background: #171717;
+  color: var(--dim);
+  cursor: pointer;
+}
+
+.tab.active { background: var(--bg); color: var(--text); }
+
+.urlbar {
+  display: flex;
+  gap: 6px;
+  padding: 8px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+}
+
+.urlbar input {
+  flex: 1;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #111;
+  color: var(--text);
+  font: inherit;
+}
+
+.urlbar button {
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #262626;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.urlbar button.on { border-color: var(--accent); color: var(--accent); }
+
+.banner {
+  padding: 8px 12px;
+  background: #4a3a10;
+  color: #ffd479;
+}
+
+.banner.error { background: #4a1a1a; color: #ff9b9b; }
+
+.stage {
+  flex: 1;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  overflow: auto;
+  padding: 10px;
+}
+
+.viewport {
+  max-width: 100%;
+  background: #000;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+
+.viewport:focus { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.status {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  padding: 6px 10px;
+  background: var(--panel);
+  border-top: 1px solid var(--line);
+  color: var(--dim);
+}
+
+.status .grow { flex: 1; }
+.status .warn { color: #ffd479; }
+
+.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.dot.ok { background: #4ac26b; }
+.dot.bad { background: #d95c5c; }
