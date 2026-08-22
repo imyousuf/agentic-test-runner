@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -132,6 +133,87 @@ Examples:
 	cmd.Flags().IntVar(&quality, "quality", 60, "JPEG quality, 1 to 100")
 	cmd.Flags().IntVar(&maxWidth, "max-width", 1600, "Largest frame width")
 	cmd.Flags().IntVar(&fps, "fps", 20, "Target frame rate")
+
+	cmd.AddCommand(newRDPSetupCmd())
+
+	return cmd
+}
+
+func newRDPSetupCmd() *cobra.Command {
+	var (
+		port      int
+		bind      string
+		fps       int
+		check     bool
+		uninstall bool
+	)
+
+	cmd := &cobra.Command{
+		Use:   "setup",
+		Short: "Install a service that keeps the live view running",
+		Long: `Install a service that keeps the live view running.
+
+The command writes a systemd user unit on Linux, or a launchd agent on macOS.
+It also generates an access token and stores it with owner-only permissions.
+
+It does not install a browser. The browser belongs to ATR itself, and the live
+view attaches to whichever one ATR is driving.
+
+Examples:
+  atr rdp setup                 # install, enable, and print the URL
+  atr rdp setup --check         # report the state, change nothing
+  atr rdp setup --port 9000     # use another port
+  atr rdp setup --uninstall     # remove the service, keep the token`,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			switch {
+			case check:
+				installed, running, path := rdp.Status()
+				fmt.Println("ATR live view service")
+				fmt.Printf("  Platform:  %s\n", runtime.GOOS)
+				fmt.Printf("  File:      %s\n", path)
+				fmt.Printf("  Installed: %t\n", installed)
+				fmt.Printf("  Running:   %t\n", running)
+				token, tokenPath, err := rdp.EnsureToken()
+				if err != nil {
+					return err
+				}
+				fmt.Printf("  Token:     %s\n", tokenPath)
+				fmt.Printf("  URL:       http://%s:%d/?t=%s\n", bind, port, token)
+				return nil
+
+			case uninstall:
+				path, err := rdp.Uninstall()
+				if err != nil {
+					return err
+				}
+				fmt.Println("Removed the live view service.")
+				fmt.Printf("  File: %s\n", path)
+				fmt.Println("  The token is kept, so a later setup gives the same URL.")
+				return nil
+			}
+
+			result, err := rdp.Setup(rdp.SetupOptions{Port: port, Bind: bind, FPS: fps})
+			if err != nil {
+				return err
+			}
+
+			fmt.Println("ATR live view installed")
+			fmt.Printf("  Platform: %s\n", result.Platform)
+			fmt.Printf("  Service:  %s\n", result.ServicePath)
+			fmt.Printf("  Token:    %s\n", result.TokenPath)
+			fmt.Printf("  URL:      %s\n", result.URL)
+			for _, note := range result.Notes {
+				fmt.Printf("\n%s\n", note)
+			}
+			return nil
+		},
+	}
+
+	cmd.Flags().IntVar(&port, "port", 7788, "HTTP port for the service")
+	cmd.Flags().StringVar(&bind, "bind", "127.0.0.1", "Listen address for the service")
+	cmd.Flags().IntVar(&fps, "fps", 20, "Target frame rate")
+	cmd.Flags().BoolVar(&check, "check", false, "Report the state and change nothing")
+	cmd.Flags().BoolVar(&uninstall, "uninstall", false, "Remove the service")
 
 	return cmd
 }
