@@ -208,6 +208,81 @@ ATR live view
   Pages:   2
 ```
 
+### 5.1 Subcommand: setup
+
+```
+atr rdp setup [flags]
+```
+
+| Flag | Default | Purpose |
+|---|---|---|
+| `--port` | `7788` | The port to write into the service. |
+| `--bind` | `127.0.0.1` | The listen address to write into the service. |
+| `--fps` | `20` | The frame rate to write into the service. |
+| `--check` | `false` | Report the state. Change nothing. |
+| `--uninstall` | `false` | Remove the service. Keep the token. |
+
+Setup installs a systemd user unit on Linux, or a launchd agent on macOS. It also writes a
+token to `~/.atr/rdp.env` with mode 0600, so the URL does not change between restarts.
+
+Setup does not look for a browser, and it does not install one. The browser belongs to ATR
+itself. Setup also never runs `sudo`: a Linux user service needs lingering to survive a
+logout, so setup prints `sudo loginctl enable-linger <user>` for you to run.
+
+## 5.2 Common flow
+
+### On one machine
+
+```bash
+atr browser start          # ATR starts the browser it will drive
+atr rdp                    # start the live view, it prints a URL with a token
+```
+
+Open the printed URL. You now watch the browser and can take control.
+
+### Agent on a server, viewer on your laptop
+
+This is the usual case. The agent has no display, and a step needs a person.
+
+```bash
+# 1. On the server
+atr browser start --headless     # a display is not needed, Chrome encodes the frames
+atr rdp setup                    # install the service, print the URL and the token
+
+# 2. On your laptop, forward the port
+ssh -L 7788:127.0.0.1:7788 myserver
+```
+
+Then open `http://127.0.0.1:7788/?t=<token>` on your laptop.
+
+Add the forward to `~/.ssh/config` to avoid the flag each time:
+
+```
+Host myserver
+  LocalForward 127.0.0.1:7788 127.0.0.1:7788
+```
+
+Bind the forward to `127.0.0.1`, not to `0.0.0.0`. Anyone who reaches the port gets full
+control of that browser.
+
+### Day to day
+
+```bash
+atr rdp setup --check                  # the URL, the token, and the service state
+systemctl --user restart atr-rdp       # Linux, after the browser restarts
+journalctl --user -u atr-rdp -f        # Linux, follow the log
+grep ATR_RDP_TOKEN ~/.atr/rdp.env      # recover the token
+```
+
+### When something looks wrong
+
+| Symptom | Cause and action |
+|---|---|
+| The canvas is blank | The streamed tab is in the background, so Chrome sends no frames. Use the tab bar, or press "Hold my tab". |
+| The banner says another tab is in front | The agent moved the foreground. Section 8 explains the two policies. |
+| Every tool reports "failed to connect" | The browser restarted, so its CDP endpoint changed. Restart the live view. |
+| The page loads but the styles are missing | The token reached the document but not its assets. The server sets a cookie for this; check that cookies are allowed. |
+
 ## 6. Protocol
 
 One WebSocket at `/ws`. Binary messages carry frames. Text messages carry control.
