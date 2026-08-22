@@ -37,3 +37,7 @@ go.work.sum
 # build output
 bin/
 atr
+
+# Live view web application
+web/node_modules/
+web/tsconfig.tsbuildinfo
