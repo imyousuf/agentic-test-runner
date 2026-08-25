@@ -366,7 +366,7 @@ See [Configuration Guide](docs/configuration.md) for all options including CLI b
 
 ## Requirements
 
-- Go 1.25+ (for building from source)
+- Go 1.25+ and Node 22+ with npm (for building from source)
 - One of the following LLM backends:
   - **Claude CLI** or **Gemini CLI** (recommended - no API key needed)
   - Google Gemini API key

@@ -50,7 +50,13 @@ type Streamer struct {
 	lastAt   time.Time
 	live     bool
 	closed   bool
-	policy   string // "follow" or "hold"
+	// switching is true while stream() is between tearing the old stream down
+	// and committing the new one, so the watchdog does not mistake that window
+	// for a dead view. gen identifies the current stream, so a frame callback
+	// from a cancelled one cannot write over its successor's state.
+	switching bool
+	gen       int
+	policy    string // "follow" or "hold"
 
 	// last holds the most recent frame. A static page produces one frame and
 	// then nothing, so a viewer that connects later needs this to see anything.
@@ -207,7 +213,15 @@ func (s *Streamer) stream(page *rod.Page) error {
 
 	s.mu.Lock()
 	s.seq = 0
+	s.gen++
+	gen := s.gen
+	s.switching = true
 	s.mu.Unlock()
+	defer func() {
+		s.mu.Lock()
+		s.switching = false
+		s.mu.Unlock()
+	}()
 
 	go bound.EachEvent(func(e *proto.PageScreencastFrame) {
 		// Acknowledge at once. Chrome stops the stream without this, and it
@@ -215,6 +229,12 @@ func (s *Streamer) stream(page *rod.Page) error {
 		_ = proto.PageScreencastFrameAck{SessionID: e.SessionID}.Call(bound)
 
 		s.mu.Lock()
+		if s.gen != gen {
+			// A frame from a stream that has already been replaced. Writing
+			// here would resurrect live and overwrite the new tab's last frame.
+			s.mu.Unlock()
+			return
+		}
 		s.seq++
 		seq := s.seq
 		s.lastAt = time.Now()
@@ -237,6 +257,10 @@ func (s *Streamer) stream(page *rod.Page) error {
 			frame.ScrollY = md.ScrollOffsetY
 		}
 		s.mu.Lock()
+		if s.gen != gen {
+			s.mu.Unlock()
+			return
+		}
 		s.last = frame
 		s.mu.Unlock()
 		s.hub.Broadcast(frame)
@@ -258,7 +282,17 @@ func (s *Streamer) stream(page *rod.Page) error {
 
 	// Publish only once the stream is actually running. Committing earlier left
 	// a cancelled page behind that still reported streaming: true.
+	//
+	// Re-check closed in the same critical section: Close may have run while
+	// this call was inside a CDP round trip, and committing afterwards would
+	// leave a live screencast nobody owns.
 	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		cancel()
+		_ = proto.PageStopScreencast{}.Call(bound)
+		return fmt.Errorf("the live view is shutting down")
+	}
 	s.page = bound
 	s.targetID = page.TargetID
 	s.cancel = cancel
@@ -318,6 +352,9 @@ func (s *Streamer) Watch(ctx context.Context) {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 
+	// retries paces the recovery attempts below.
+	retries := 0
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -329,21 +366,40 @@ func (s *Streamer) Watch(ctx context.Context) {
 			live := s.live
 			policy := s.policy
 			current := s.targetID
+			switching := s.switching
+			closed := s.closed
 			s.mu.Unlock()
 
-			// No page is selected, which means an earlier stream attempt
-			// failed. Recover regardless of policy: "hold" holds a tab, and
-			// there is no tab to hold here.
+			if closed {
+				return
+			}
+
+			// No page is selected. That is either an ordinary tab switch in
+			// flight, which must be left alone, or an earlier attempt that
+			// failed, which is worth recovering from.
 			if page == nil {
+				if switching {
+					continue
+				}
 				if live {
 					s.mu.Lock()
 					s.live = false
 					s.mu.Unlock()
 					s.publishStatus(false)
 				}
-				_ = s.Select("")
+				// Recover regardless of policy: "hold" holds a tab, and there
+				// is no tab to hold here. Back off so a browser that refuses to
+				// focus is not hammered with Pages() plus an Eval per tab every
+				// second, forever.
+				retries++
+				if retries <= 1 || retries%(1<<min(retries-1, 5)) == 0 {
+					if err := s.Select(""); err == nil {
+						retries = 0
+					}
+				}
 				continue
 			}
+			retries = 0
 
 			if idle < 2*time.Second {
 				continue

@@ -187,13 +187,14 @@ type inbound struct {
 	T string `json:"t"`
 
 	// mouse and wheel
-	Kind   string  `json:"kind"`
-	X      float64 `json:"x"`
-	Y      float64 `json:"y"`
-	Button string  `json:"button"`
-	Clicks int     `json:"clicks"`
-	DX     float64 `json:"dx"`
-	DY     float64 `json:"dy"`
+	Kind    string  `json:"kind"`
+	X       float64 `json:"x"`
+	Y       float64 `json:"y"`
+	Button  string  `json:"button"`
+	Clicks  int     `json:"clicks"`
+	Buttons int     `json:"buttons"`
+	DX      float64 `json:"dx"`
+	DY      float64 `json:"dy"`
 
 	// keyboard
 	Key  string `json:"key"`
@@ -261,6 +262,8 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return
 		}
+		// A client that is talking is alive, whether or not it answers pings.
+		_ = conn.SetReadDeadline(time.Now().Add(pongWait))
 		var msg inbound
 		if err := json.Unmarshal(data, &msg); err != nil {
 			continue
@@ -279,9 +282,12 @@ func (s *Server) dispatch(msg inbound, v *viewer) {
 		err = s.streamer.Mouse(MouseMsg{
 			Kind: msg.Kind, X: msg.X, Y: msg.Y,
 			Button: msg.Button, Clicks: msg.Clicks, Mod: msg.Mod,
+			Buttons: msg.Buttons,
 		})
 	case "wheel":
-		err = s.streamer.Wheel(WheelMsg{X: msg.X, Y: msg.Y, DX: msg.DX, DY: msg.DY, Mod: msg.Mod})
+		err = s.streamer.Wheel(WheelMsg{
+			X: msg.X, Y: msg.Y, DX: msg.DX, DY: msg.DY, Mod: msg.Mod, Buttons: msg.Buttons,
+		})
 	case "key":
 		err = s.streamer.Key(KeyMsg{
 			Kind: msg.Kind, Key: msg.Key, Code: msg.Code,
@@ -297,15 +303,32 @@ func (s *Server) dispatch(msg inbound, v *viewer) {
 		s.streamer.SetPolicy(msg.Foreground)
 	}
 
-	// A silently dropped click looks identical to a broken stream. Tell the
-	// viewer instead.
-	if err != nil && v != nil {
-		if out, mErr := json.Marshal(map[string]any{
-			"t": "error", "message": err.Error(),
-		}); mErr == nil {
-			v.send(out)
-		}
+	// A silently dropped click looks identical to a broken stream, so tell the
+	// viewer -- but only for discrete actions. Pointer moves arrive once per
+	// animation frame, and reporting each failure would queue ~60 messages a
+	// second and re-render the client just as often.
+	if err == nil || v == nil || !worthReporting(msg) {
+		return
 	}
+	if v.repeatError(err.Error()) {
+		return
+	}
+	if out, mErr := json.Marshal(map[string]any{
+		"t": "error", "message": err.Error(),
+	}); mErr == nil {
+		v.send(out)
+	}
+}
+
+// worthReporting keeps continuous motion out of the error channel.
+func worthReporting(msg inbound) bool {
+	switch msg.T {
+	case "wheel":
+		return false
+	case "mouse":
+		return msg.Kind != "moved"
+	}
+	return true
 }
 
 // writeLoop is the only writer for this connection. A viewer holds one

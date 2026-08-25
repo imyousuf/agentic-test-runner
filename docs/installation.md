@@ -11,7 +11,7 @@ For building from source:
 - **Go 1.25** or later
 - **Node 22** or later, plus npm — the `atr rdp` live view is a web application
   that is compiled into the binary. `web/dist` is build output and is not
-  committed, so `make web` has to run before `make build`.
+  committed, so the Makefile builds it as part of any target that compiles Go.
 
 ## Installation Methods
 
@@ -77,15 +77,19 @@ rather than a checked-in artifact, so it is built first:
 ```bash
 git clone https://github.com/imyousuf/agentic-test-runner.git
 cd agentic-test-runner
-make web        # builds web/dist (needs Node); run once, and after any web/src change
-make install    # compiles and installs to GOPATH/bin
+make install    # builds web/dist if needed, then installs to GOPATH/bin
 ```
 
 `make build` puts the binary in `bin/atr` instead of installing it.
 
-If you skip `make web`, the Go build fails with
-`pattern all:dist: no matching files found` — that is the embedded web
-application missing, not a broken checkout.
+`build`, `install`, `test`, `lint` and the cross-compile targets all depend on
+`web/dist`, and the Makefile rebuilds it whenever anything under `web/src` (or
+the web config) has changed. `make web` forces a rebuild.
+
+Building the Go code directly with `go build ./cmd/atr` skips that step, so on a
+fresh checkout it fails with `pattern all:dist: no matching files found`. That
+is the embedded web application missing, not a broken checkout — run `make web`
+first, or go through the Makefile.
 
 > **Note on `go install`:** `go install github.com/imyousuf/agentic-test-runner/cmd/atr@latest`
 > no longer works on its own, because the module does not carry the built web

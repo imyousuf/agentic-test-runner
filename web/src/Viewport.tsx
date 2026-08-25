@@ -14,6 +14,9 @@ const BUTTONS = ['left', 'middle', 'right'] as const;
 const MULTI_CLICK_MS = 500;
 const MULTI_CLICK_SLOP = 5;
 
+/** CDP's `buttons` bitmask, which is not the same numbering as `button`. */
+const BUTTON_BIT = [1, 4, 2] as const;
+
 /**
  * Paste is the only shortcut whose default action we need: cancelling the
  * keydown would suppress the paste event that onPaste turns into insertText.
@@ -30,6 +33,9 @@ export function Viewport({ takeFrame, header, send, disabled }: Props) {
   // PointerEvent.detail is always 0, so the click count has to be tracked here
   // or Input.dispatchMouseEvent never sees a double click.
   const lastClick = useRef({ time: 0, x: 0, y: 0, count: 0, button: -1 });
+  // Chrome reads a mouseMoved with no held buttons as a hover, so a drag needs
+  // the held set forwarded on every move.
+  const held = useRef(0);
 
   // Draw the newest frame once per animation frame. Older frames are skipped.
   useEffect(() => {
@@ -95,6 +101,8 @@ export function Viewport({ takeFrame, header, send, disabled }: Props) {
       button: ev.button,
     };
 
+    held.current |= BUTTON_BIT[ev.button] ?? 1;
+
     const p = toPage(ev.clientX, ev.clientY);
     send({
       t: 'mouse',
@@ -103,6 +111,7 @@ export function Viewport({ takeFrame, header, send, disabled }: Props) {
       y: p.y,
       button: BUTTONS[ev.button] ?? 'left',
       clicks: count,
+      buttons: held.current,
       mod: modifiers(ev),
     });
   };
@@ -112,6 +121,8 @@ export function Viewport({ takeFrame, header, send, disabled }: Props) {
     if (canvasRef.current?.hasPointerCapture(ev.pointerId)) {
       canvasRef.current.releasePointerCapture(ev.pointerId);
     }
+    held.current &= ~(BUTTON_BIT[ev.button] ?? 1);
+
     const p = toPage(ev.clientX, ev.clientY);
     send({
       t: 'mouse',
@@ -122,6 +133,7 @@ export function Viewport({ takeFrame, header, send, disabled }: Props) {
       // Match the press: a release must not report a higher count than the
       // press that opened the click.
       clicks: lastClick.current.count || 1,
+      buttons: held.current,
       mod: modifiers(ev),
     });
   };
@@ -134,7 +146,16 @@ export function Viewport({ takeFrame, header, send, disabled }: Props) {
     requestAnimationFrame(() => {
       moveQueued.current = false;
       const p = toPage(clientX, clientY);
-      send({ t: 'mouse', kind: 'moved', x: p.x, y: p.y, button: '', clicks: 0, mod });
+      send({
+        t: 'mouse',
+        kind: 'moved',
+        x: p.x,
+        y: p.y,
+        button: '',
+        clicks: 0,
+        buttons: held.current,
+        mod,
+      });
     });
   };
 
@@ -144,14 +165,21 @@ export function Viewport({ takeFrame, header, send, disabled }: Props) {
   // to be sent from here or the remote button stays down.
   const onPointerCancel = (ev: React.PointerEvent<HTMLCanvasElement>) => {
     if (disabled) return;
+    // pointercancel reports button === -1, so the button that is actually down
+    // has to come from the press. Releasing "left" here would leave a middle or
+    // right drag stuck.
+    const button = lastClick.current.button;
+    held.current &= ~(BUTTON_BIT[button] ?? 1);
+
     const p = toPage(ev.clientX, ev.clientY);
     send({
       t: 'mouse',
       kind: 'released',
       x: p.x,
       y: p.y,
-      button: BUTTONS[ev.button] ?? 'left',
+      button: BUTTONS[button] ?? 'left',
       clicks: lastClick.current.count || 1,
+      buttons: held.current,
       mod: modifiers(ev),
     });
   };
@@ -159,7 +187,15 @@ export function Viewport({ takeFrame, header, send, disabled }: Props) {
   const onWheel = (ev: React.WheelEvent<HTMLCanvasElement>) => {
     if (disabled) return;
     const p = toPage(ev.clientX, ev.clientY);
-    send({ t: 'wheel', x: p.x, y: p.y, dx: ev.deltaX, dy: ev.deltaY, mod: modifiers(ev) });
+    send({
+      t: 'wheel',
+      x: p.x,
+      y: p.y,
+      dx: ev.deltaX,
+      dy: ev.deltaY,
+      buttons: held.current,
+      mod: modifiers(ev),
+    });
   };
 
   const onKeyDown = (ev: React.KeyboardEvent<HTMLCanvasElement>) => {
