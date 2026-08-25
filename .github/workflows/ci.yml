@@ -59,6 +59,17 @@ jobs:
       - name: Run tests
         run: go test -v -race ./...
 
+      # The release workflow builds through the Makefile. Exercise it here too,
+      # or a break in it passes every PR check and only fails after merge.
+      # GNU make is not in the Windows runner image.
+      - name: Install make (Windows)
+        if: matrix.os == 'windows-latest'
+        run: choco install make --no-progress -y
+
+      - name: Build through the Makefile
+        shell: bash
+        run: make build VERSION=ci COMMIT="$GITHUB_SHA" BUILD_DATE=1970-01-01T00:00:00Z
+
   lint:
     name: Lint
     runs-on: ubuntu-latest

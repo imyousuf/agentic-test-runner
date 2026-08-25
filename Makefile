@@ -33,7 +33,9 @@ LDFLAGS=-ldflags "-s -w \
 	-X $(CLI_PKG).BuildDate=$(BUILD_DATE)"
 
 # bin/ as an order-only prerequisite: plain mkdir works under both sh and
-# cmd.exe, unlike "mkdir -p".
+# cmd.exe, unlike "mkdir -p". Only "web", "build" and the targets they depend on
+# are cmd.exe-safe -- the cross-compile targets below use POSIX shell (mkdir -p,
+# tar, zip) and are meant for a Unix host.
 $(BUILD_DIR):
 	mkdir $(BUILD_DIR)
 
@@ -49,10 +51,13 @@ endif
 	cd web && npm run build
 
 # web/dist is gitignored build output, and every target that compiles Go needs
-# it to exist for //go:embed. This fires only when it is missing, so a fresh
-# clone works without npm running on each build. Run "make web" after changing
-# anything under web/src.
-web/dist/index.html:
+# it to exist for //go:embed. Listing the sources means make rebuilds it when
+# they change and skips it otherwise, so a fresh clone works and an ordinary
+# build does not shell out to npm.
+WEB_SRC=$(wildcard web/src/*) web/index.html web/package.json \
+	web/package-lock.json web/vite.config.ts web/tsconfig.json
+
+web/dist/index.html: $(WEB_SRC)
 	@$(MAKE) web
 
 ## build: Build the binary (run "make web" first: web/dist is embedded)
@@ -113,7 +118,7 @@ build-all: build-linux-amd64 build-linux-arm64 build-darwin-amd64 build-darwin-a
 ## clean: Clean build artifacts
 clean:
 	$(GOCLEAN)
-	rm -rf $(BUILD_DIR)
+	rm -rf $(BUILD_DIR) web/dist
 
 ## test: Run tests
 test: web/dist/index.html

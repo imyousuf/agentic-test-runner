@@ -4,7 +4,8 @@ This guide will help you get ATR up and running quickly.
 
 ## Prerequisites
 
-- **Go 1.23+** (for building from source)
+- **Go 1.25+** and **Node 22+** with npm (for building from source — the
+  `atr rdp` live view is compiled into the binary)
 - **LLM Backend** - one of:
   - **Claude CLI** or **Gemini CLI** (recommended - no API key needed), OR
   - Google Gemini API key, OR

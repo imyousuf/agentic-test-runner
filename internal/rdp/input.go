@@ -23,15 +23,21 @@ type MouseMsg struct {
 	Button string  `json:"button"`
 	Clicks int     `json:"clicks"`
 	Mod    int     `json:"mod"`
+
+	// Buttons is the CDP bitmask of buttons currently held (1 left, 2 right,
+	// 4 middle). Chrome treats a mouseMoved with no held buttons as a hover, so
+	// without this a drag never selects text or moves a slider.
+	Buttons int `json:"buttons"`
 }
 
 // WheelMsg is a scroll event.
 type WheelMsg struct {
-	X   float64 `json:"x"`
-	Y   float64 `json:"y"`
-	DX  float64 `json:"dx"`
-	DY  float64 `json:"dy"`
-	Mod int     `json:"mod"`
+	X       float64 `json:"x"`
+	Y       float64 `json:"y"`
+	DX      float64 `json:"dx"`
+	DY      float64 `json:"dy"`
+	Mod     int     `json:"mod"`
+	Buttons int     `json:"buttons"`
 }
 
 // KeyMsg is a keyboard event.
@@ -77,6 +83,7 @@ func (s *Streamer) Mouse(m MouseMsg) error {
 		kind = proto.InputDispatchMouseEventTypeMouseMoved
 	}
 
+	buttons := m.Buttons
 	ev := proto.InputDispatchMouseEvent{
 		Type:       kind,
 		X:          m.X,
@@ -84,6 +91,7 @@ func (s *Streamer) Mouse(m MouseMsg) error {
 		Button:     mouseButton(m.Button),
 		ClickCount: m.Clicks,
 		Modifiers:  m.Mod,
+		Buttons:    &buttons,
 	}
 	if kind == proto.InputDispatchMouseEventTypeMouseMoved && m.Button == "" {
 		ev.Button = proto.InputMouseButtonNone
@@ -104,6 +112,7 @@ func (s *Streamer) Wheel(w WheelMsg) error {
 	if page == nil {
 		return fmt.Errorf("no page is selected")
 	}
+	buttons := w.Buttons
 	ev := proto.InputDispatchMouseEvent{
 		Type:      proto.InputDispatchMouseEventTypeMouseWheel,
 		X:         w.X,
@@ -112,6 +121,7 @@ func (s *Streamer) Wheel(w WheelMsg) error {
 		DeltaX:    w.DX,
 		DeltaY:    w.DY,
 		Modifiers: w.Mod,
+		Buttons:   &buttons,
 	}
 	if err := ev.Call(page); err != nil {
 		return fmt.Errorf("failed to dispatch the wheel event: %w", err)

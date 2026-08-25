@@ -95,8 +95,8 @@ func EnsureToken() (string, string, error) {
 	token := hex.EncodeToString(buf)
 
 	// The file holds a secret, so keep it readable by the owner only.
-	if err := os.WriteFile(path, []byte("ATR_RDP_TOKEN="+token+"\n"), 0o600); err != nil {
-		return "", "", fmt.Errorf("failed to write %s: %w", path, err)
+	if err := writeSecret(path, []byte("ATR_RDP_TOKEN="+token+"\n")); err != nil {
+		return "", "", err
 	}
 	return token, path, nil
 }
@@ -184,7 +184,7 @@ After=network-online.target
 [Service]
 Type=simple
 EnvironmentFile=%s
-ExecStart=%s rdp --port %d --bind %s --fps %d
+ExecStart="%s" rdp --port %d --bind %s --fps %d
 Restart=always
 # "atr rdp setup" installs no browser by design, so "no browser running" is the
 # normal state right after install and the unit will exit until one appears.
@@ -241,6 +241,21 @@ func lingerEnabled() bool {
 	return err == nil && strings.Contains(string(out), "Linger=yes")
 }
 
+// writeSecret writes a file that holds the access token, owner-readable only.
+//
+// The explicit Chmod matters on the upgrade path: os.WriteFile applies its mode
+// only when it creates the file, so rewriting one an earlier version left at
+// 0644 would otherwise keep the token world-readable.
+func writeSecret(path string, data []byte) error {
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		return fmt.Errorf("failed to write %s: %w", path, err)
+	}
+	if err := os.Chmod(path, 0o600); err != nil {
+		return fmt.Errorf("failed to secure %s: %w", path, err)
+	}
+	return nil
+}
+
 // xmlEscape makes a value safe to interpolate into the plist. A home directory
 // containing "&" would otherwise produce XML that launchctl cannot parse.
 func xmlEscape(v string) string {
@@ -286,8 +301,8 @@ func setupLaunchd(servicePath, binary, token string, opts SetupOptions, result *
 
 	// The plist carries the token, so it gets the same owner-only treatment as
 	// the rdp.env file that EnsureToken writes.
-	if err := os.WriteFile(servicePath, []byte(plist), 0o600); err != nil {
-		return fmt.Errorf("failed to write %s: %w", servicePath, err)
+	if err := writeSecret(servicePath, []byte(plist)); err != nil {
+		return err
 	}
 
 	target := "gui/" + strconv.Itoa(os.Getuid())

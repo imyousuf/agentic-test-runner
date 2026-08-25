@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { decodeFrame, type FrameHeader, type PageInfo, type ServerMsg } from './protocol';
 
+/** How long a transient server-side error stays on screen. */
+const ERROR_TTL_MS = 6000;
+
 export interface LiveState {
   connected: boolean;
   streaming: boolean;
@@ -28,6 +31,7 @@ export function useLiveView() {
   });
 
   const socket = useRef<WebSocket | null>(null);
+  const errorTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const pending = useRef<ImageBitmap | null>(null);
   const header = useRef<FrameHeader | null>(null);
   const counter = useRef(0);
@@ -85,7 +89,16 @@ export function useLiveView() {
               viewOnly: msg.viewOnly ?? s.viewOnly,
             }));
           }
-          if (msg.t === 'error') setState((s) => ({ ...s, error: msg.message }));
+          if (msg.t === 'error') {
+            // Server-side refusals are transient -- a single failed click must
+            // not leave a banner up until the next reconnect.
+            setState((s) => ({ ...s, error: msg.message }));
+            clearTimeout(errorTimer.current);
+            errorTimer.current = setTimeout(
+              () => setState((s) => ({ ...s, error: '' })),
+              ERROR_TTL_MS,
+            );
+          }
           return;
         }
 
@@ -117,6 +130,7 @@ export function useLiveView() {
     return () => {
       closed = true;
       clearInterval(meter);
+      clearTimeout(errorTimer.current);
       if (retry) clearTimeout(retry);
       socket.current?.close();
       pending.current?.close();
