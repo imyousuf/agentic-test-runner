@@ -68,6 +68,22 @@ atr browser errors           # Get failed requests
 atr browser stop
 ```
 
+## Browser Live View (atr rdp)
+
+Watch and control the browser ATR drives, from a web page. Streams over CDP, so it
+needs no X server or VNC and works with a headless browser on a server.
+
+```bash
+atr browser start --headless
+atr rdp                  # prints http://127.0.0.1:7788/?t=<token>
+atr rdp --view-only      # watch without input
+atr rdp setup            # install as a systemd/launchd service
+atr rdp setup --check    # report state, change nothing
+```
+
+Use it when an automated step needs a person, such as a login with MFA. The viewer
+attaches as a second CDP session; closing it leaves the browser running.
+
 ## Browser Server Architecture
 
 For AI agents, ATR provides HTTP server mode:

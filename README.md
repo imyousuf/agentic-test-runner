@@ -31,10 +31,17 @@ curl -fsSL https://raw.githubusercontent.com/imyousuf/agentic-test-runner/main/i
 irm https://raw.githubusercontent.com/imyousuf/agentic-test-runner/main/install.ps1 | iex
 ```
 
-**From source:**
+**From source** (needs Go 1.25+ and Node 22+):
 ```bash
-go install github.com/imyousuf/agentic-test-runner/cmd/atr@latest
+git clone https://github.com/imyousuf/agentic-test-runner.git
+cd agentic-test-runner
+make web && make install
 ```
+
+`make web` builds the `atr rdp` live view that is embedded in the binary;
+`web/dist` is build output and is not committed. Without Node, build with
+`go build -tags noweb ./cmd/atr` — every command still works except the live
+view's web page.
 
 Or download from [Releases](https://github.com/imyousuf/agentic-test-runner/releases).
 

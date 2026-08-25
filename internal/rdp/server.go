@@ -20,6 +20,12 @@ import (
 
 const (
 	msgFrame byte = 0x01
+
+	// pingInterval is how often the server pings; pongWait is how long it will
+	// wait for any read before declaring the peer gone. pongWait must exceed
+	// pingInterval comfortably.
+	pingInterval = 20 * time.Second
+	pongWait     = 60 * time.Second
 )
 
 // Server serves the live view: the web assets, a small REST API, and the
@@ -158,6 +164,12 @@ func (s *Server) handleSelect(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleNavigate(w http.ResponseWriter, r *http.Request) {
+	// The WebSocket path is not the only way in: a read-only server has to
+	// refuse here too, or the token alone is enough to drive the browser.
+	if s.viewOnly {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": ErrViewOnly.Error()})
+		return
+	}
 	target := r.URL.Query().Get("url")
 	if target == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "url is required"})
@@ -221,7 +233,10 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if msg, err := json.Marshal(map[string]any{
-		"t": "status", "streaming": true, "viewers": s.hub.Count(), "viewOnly": s.viewOnly,
+		"t":         "status",
+		"streaming": s.streamer.Live(),
+		"viewers":   s.hub.Count(),
+		"viewOnly":  s.viewOnly,
 	}); err == nil {
 		v.send(msg)
 	}
@@ -234,6 +249,13 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	conn.SetReadLimit(1 << 20)
+	// The pings in writeLoop only detect a dead peer if a missing pong
+	// eventually fails the read. Without this a closed laptop lid leaks the
+	// viewer and its goroutine for the life of the process.
+	_ = conn.SetReadDeadline(time.Now().Add(pongWait))
+	conn.SetPongHandler(func(string) error {
+		return conn.SetReadDeadline(time.Now().Add(pongWait))
+	})
 	for {
 		_, data, err := conn.ReadMessage()
 		if err != nil {
@@ -283,7 +305,12 @@ func (s *Server) dispatch(msg inbound) {
 // writeLoop is the only writer for this connection. A viewer holds one
 // pending frame, so a slow client drops stale frames instead of lagging.
 func (s *Server) writeLoop(ctx context.Context, conn *websocket.Conn, v *viewer) {
-	ping := time.NewTicker(20 * time.Second)
+	// Closing here unblocks the read loop in handleWS. Returning without it
+	// left the viewer registered in the hub, so every later broadcast appended
+	// to a queue that nothing drained.
+	defer func() { _ = conn.Close() }()
+
+	ping := time.NewTicker(pingInterval)
 	defer ping.Stop()
 
 	for {

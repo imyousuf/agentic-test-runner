@@ -12,10 +12,10 @@ This guide will help you get ATR up and running quickly.
 
 ## Quick Install
 
-### Option 1: Go Install (Recommended)
+### Option 1: Install Script (Recommended)
 
 ```bash
-go install github.com/imyousuf/agentic-test-runner/cmd/atr@latest
+curl -fsSL https://raw.githubusercontent.com/imyousuf/agentic-test-runner/main/install.sh | sh
 ```
 
 ### Option 2: Download Binary

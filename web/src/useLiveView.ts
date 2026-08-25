@@ -42,44 +42,71 @@ export function useLiveView() {
   useEffect(() => {
     const token = new URLSearchParams(location.search).get('t') ?? '';
     const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
-    const ws = new WebSocket(`${scheme}://${location.host}/ws?t=${encodeURIComponent(token)}`);
-    ws.binaryType = 'arraybuffer';
-    socket.current = ws;
+    const url = `${scheme}://${location.host}/ws?t=${encodeURIComponent(token)}`;
 
-    ws.onopen = () => setState((s) => ({ ...s, connected: true, error: '' }));
-    ws.onclose = () => setState((s) => ({ ...s, connected: false, streaming: false }));
+    let closed = false;
+    let retry: ReturnType<typeof setTimeout> | undefined;
+    let attempt = 0;
 
-    ws.onmessage = (ev) => {
-      if (typeof ev.data === 'string') {
-        const msg = JSON.parse(ev.data) as ServerMsg;
-        if (msg.t === 'pages') setState((s) => ({ ...s, pages: msg.pages }));
-        if (msg.t === 'status') {
-          setState((s) => ({
-            ...s,
-            streaming: msg.streaming,
-            viewers: msg.viewers,
-            viewOnly: msg.viewOnly ?? s.viewOnly,
-          }));
+    // The service restarts on failure and an SSH tunnel can blip, so a dropped
+    // socket has to come back on its own. Without this the tab stays dead until
+    // someone reloads it by hand.
+    const backoff = () => Math.min(500 * 2 ** attempt++, 10_000);
+
+    const connect = () => {
+      if (closed) return;
+      const ws = new WebSocket(url);
+      ws.binaryType = 'arraybuffer';
+      socket.current = ws;
+
+      ws.onopen = () => {
+        attempt = 0;
+        setState((s) => ({ ...s, connected: true, error: '' }));
+      };
+
+      ws.onerror = () => {
+        setState((s) => (s.connected ? s : { ...s, error: 'Cannot reach the live view server.' }));
+      };
+
+      ws.onclose = () => {
+        setState((s) => ({ ...s, connected: false, streaming: false }));
+        if (!closed) retry = setTimeout(connect, backoff());
+      };
+
+      ws.onmessage = (ev) => {
+        if (typeof ev.data === 'string') {
+          const msg = JSON.parse(ev.data) as ServerMsg;
+          if (msg.t === 'pages') setState((s) => ({ ...s, pages: msg.pages }));
+          if (msg.t === 'status') {
+            setState((s) => ({
+              ...s,
+              streaming: msg.streaming,
+              viewers: msg.viewers,
+              viewOnly: msg.viewOnly ?? s.viewOnly,
+            }));
+          }
+          if (msg.t === 'error') setState((s) => ({ ...s, error: msg.message }));
+          return;
         }
-        if (msg.t === 'error') setState((s) => ({ ...s, error: msg.message }));
-        return;
-      }
 
-      const frame = decodeFrame(ev.data as ArrayBuffer);
-      if (!frame) return;
-      header.current = frame.header;
-      counter.current += 1;
+        const frame = decodeFrame(ev.data as ArrayBuffer);
+        if (!frame) return;
+        header.current = frame.header;
+        counter.current += 1;
 
-      // createImageBitmap decodes off the main thread.
-      createImageBitmap(new Blob([frame.jpeg as BufferSource], { type: 'image/jpeg' }))
-        .then((bitmap) => {
-          // Drop the previous undrawn bitmap so memory cannot grow.
-          pending.current?.close();
-          pending.current = bitmap;
-          setState((s) => (s.streaming ? s : { ...s, streaming: true }));
-        })
-        .catch(() => undefined);
+        // createImageBitmap decodes off the main thread.
+        createImageBitmap(new Blob([frame.jpeg as BufferSource], { type: 'image/jpeg' }))
+          .then((bitmap) => {
+            // Drop the previous undrawn bitmap so memory cannot grow.
+            pending.current?.close();
+            pending.current = bitmap;
+            setState((s) => (s.streaming ? s : { ...s, streaming: true }));
+          })
+          .catch(() => undefined);
+      };
     };
+
+    connect();
 
     const meter = setInterval(() => {
       const fps = counter.current;
@@ -88,8 +115,10 @@ export function useLiveView() {
     }, 1000);
 
     return () => {
+      closed = true;
       clearInterval(meter);
-      ws.close();
+      if (retry) clearTimeout(retry);
+      socket.current?.close();
       pending.current?.close();
       pending.current = null;
     };
