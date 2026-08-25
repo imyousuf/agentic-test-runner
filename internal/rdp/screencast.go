@@ -49,6 +49,7 @@ type Streamer struct {
 	seq      int
 	lastAt   time.Time
 	live     bool
+	closed   bool
 	policy   string // "follow" or "hold"
 
 	// last holds the most recent frame. A static page produces one frame and
@@ -183,6 +184,15 @@ func (s *Streamer) stream(page *rod.Page) error {
 	s.streamMu.Lock()
 	defer s.streamMu.Unlock()
 
+	// Close may have run while this call waited for streamMu. Bail rather than
+	// bringing a tab to the front during shutdown.
+	s.mu.Lock()
+	closed := s.closed
+	s.mu.Unlock()
+	if closed {
+		return fmt.Errorf("the live view is shutting down")
+	}
+
 	// Chrome sends nothing for a background tab, so the page has to come to the
 	// front. Do it before tearing the old stream down: if it fails, the viewer
 	// keeps the stream it had instead of being left with no page at all.
@@ -242,6 +252,7 @@ func (s *Streamer) stream(page *rod.Page) error {
 		EveryNthFrame: &everyNth,
 	}).Call(bound); err != nil {
 		cancel()
+		s.publishStatus(false)
 		return fmt.Errorf("failed to start the screencast: %w", err)
 	}
 
@@ -273,6 +284,9 @@ func (s *Streamer) stop() {
 	page := s.page
 	s.cancel = nil
 	s.page = nil
+	// Clearing live matters: without it a stream() that fails after stop()
+	// leaves Live() reporting true with no page behind it.
+	s.live = false
 	s.mu.Unlock()
 
 	if page != nil {
@@ -286,11 +300,13 @@ func (s *Streamer) stop() {
 // Close releases the stream. It never closes the browser, because the browser
 // belongs to ATR, not to this viewer.
 //
-// It takes streamMu so a stream() still in flight cannot repopulate the page
-// after shutdown has torn it down.
+// It does not take streamMu: an in-flight stream() can sit in several unbounded
+// CDP round trips, and waiting for it would hang Ctrl-C behind a wedged browser.
+// The closed flag stops that stream() from republishing instead.
 func (s *Streamer) Close() {
-	s.streamMu.Lock()
-	defer s.streamMu.Unlock()
+	s.mu.Lock()
+	s.closed = true
+	s.mu.Unlock()
 	s.stop()
 }
 
@@ -316,12 +332,16 @@ func (s *Streamer) Watch(ctx context.Context) {
 			s.mu.Unlock()
 
 			// No page is selected, which means an earlier stream attempt
-			// failed. Recover instead of staying dead until the process is
-			// restarted.
+			// failed. Recover regardless of policy: "hold" holds a tab, and
+			// there is no tab to hold here.
 			if page == nil {
-				if policy == "follow" {
-					_ = s.Select("")
+				if live {
+					s.mu.Lock()
+					s.live = false
+					s.mu.Unlock()
+					s.publishStatus(false)
 				}
+				_ = s.Select("")
 				continue
 			}
 

@@ -72,7 +72,14 @@ jobs:
 
       - name: Build web assets
         working-directory: web
+        shell: bash
         run: npm ci && npm run build
+
+      # The build step goes through the Makefile so the version stamping has a
+      # single definition, but GNU Make is not on the Windows runner's PATH.
+      - name: Install make (Windows)
+        if: matrix.goos == 'windows'
+        run: choco install make --no-progress -y
 
       - name: Download dependencies
         run: go mod download

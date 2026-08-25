@@ -388,8 +388,13 @@ A viewer gets full control of a browser and its cookies.
   generated token is easy to miss in a service log, and it travels in a URL over
   plaintext HTTP.
 - Check the `Origin` header on the upgrade.
-- `--view-only` is enforced in the `Streamer`, so the REST endpoints, the
-  WebSocket, and any future surface all inherit it.
+- `--view-only` refuses *input to the page* -- mouse, wheel, key, text, and
+  navigate -- in the `Streamer`, so the REST endpoints and the WebSocket both
+  inherit it rather than each keeping their own list.
+- Switching the streamed tab and setting the foreground policy are viewer
+  controls and remain available in view-only mode. Selecting a tab does call
+  `Page.bringToFront`, so a read-only viewer can still change which tab is in
+  the foreground of the session it is watching.
 - Store the token owner-only: `~/.atr/rdp.env` and the launchd plist are both `0600`.
 
 ## 11. Package layout

@@ -1,6 +1,7 @@
 package rdp
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -116,6 +117,10 @@ func TestNavigateReachesTheStreamerWhenNotViewOnly(t *testing.T) {
 }
 
 // Input must be refused by the streamer itself, so every surface inherits it.
+//
+// The assertion is errors.Is(ErrViewOnly) rather than err != nil on purpose: an
+// unattached streamer returns "no page is selected" for all of these, so a bare
+// nil check passes even with the guards removed.
 func TestStreamerRefusesInputWhenViewOnly(t *testing.T) {
 	st := NewStreamer(NewHub(), Options{ViewOnly: true})
 
@@ -126,8 +131,24 @@ func TestStreamerRefusesInputWhenViewOnly(t *testing.T) {
 		"text":     st.Text("hunter2"),
 		"navigate": st.Navigate("http://example.com"),
 	} {
-		if err == nil {
-			t.Fatalf("%s: expected a refusal on a view-only streamer", name)
+		if !errors.Is(err, ErrViewOnly) {
+			t.Fatalf("%s: got %v, want ErrViewOnly", name, err)
+		}
+	}
+}
+
+// The same calls on a normal streamer must fail for a different reason, which
+// is what proves the test above is measuring the guard and not the missing page.
+func TestStreamerInputIsNotRefusedWhenWritable(t *testing.T) {
+	st := NewStreamer(NewHub(), Options{})
+
+	for name, err := range map[string]error{
+		"mouse":    st.Mouse(MouseMsg{Kind: "pressed"}),
+		"text":     st.Text("hunter2"),
+		"navigate": st.Navigate("http://example.com"),
+	} {
+		if errors.Is(err, ErrViewOnly) {
+			t.Fatalf("%s: a writable streamer must not return ErrViewOnly", name)
 		}
 	}
 }

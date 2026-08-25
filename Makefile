@@ -32,60 +32,74 @@ LDFLAGS=-ldflags "-s -w \
 	-X $(CLI_PKG).Commit=$(COMMIT) \
 	-X $(CLI_PKG).BuildDate=$(BUILD_DATE)"
 
+# bin/ as an order-only prerequisite: plain mkdir works under both sh and
+# cmd.exe, unlike "mkdir -p".
+$(BUILD_DIR):
+	mkdir $(BUILD_DIR)
+
 # Default target
 all: build
 
 ## web: Build the live view web application into web/dist (needs Node 22+)
 ##      Run this once before "make build"; web/dist is not committed.
 web:
-	cd web && npm ci --no-audit --no-fund && npm run build
+ifeq ($(wildcard web/node_modules),)
+	cd web && npm ci --no-audit --no-fund
+endif
+	cd web && npm run build
+
+# web/dist is gitignored build output, and every target that compiles Go needs
+# it to exist for //go:embed. This fires only when it is missing, so a fresh
+# clone works without npm running on each build. Run "make web" after changing
+# anything under web/src.
+web/dist/index.html:
+	@$(MAKE) web
 
 ## build: Build the binary (run "make web" first: web/dist is embedded)
-build:
-	@mkdir -p $(BUILD_DIR)
+build: web/dist/index.html | $(BUILD_DIR)
 	$(GOBUILD) $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/atr
 
 ## install: Install the binary to GOPATH/bin
-install:
-	$(GOBUILD) $(LDFLAGS) -o $(GOPATH)/bin/$(BINARY_NAME) ./cmd/atr
+install: web/dist/index.html
+	$(GOBUILD) $(LDFLAGS) -o $(shell go env GOPATH)/bin/$(BINARY_NAME) ./cmd/atr
 
 ## build-linux-amd64: Build for Linux x86_64
-build-linux-amd64:
+build-linux-amd64: web/dist/index.html
 	@mkdir -p $(BUILD_DIR)/linux-amd64
 	GOOS=linux GOARCH=amd64 $(GOBUILD) $(LDFLAGS) -o $(BUILD_DIR)/linux-amd64/$(BINARY_NAME) ./cmd/atr
 	tar -czf $(BUILD_DIR)/$(BINARY_NAME)_linux_amd64.tar.gz -C $(BUILD_DIR)/linux-amd64 $(BINARY_NAME)
 	@rm -rf $(BUILD_DIR)/linux-amd64
 
 ## build-linux-arm64: Build for Linux ARM64
-build-linux-arm64:
+build-linux-arm64: web/dist/index.html
 	@mkdir -p $(BUILD_DIR)/linux-arm64
 	GOOS=linux GOARCH=arm64 $(GOBUILD) $(LDFLAGS) -o $(BUILD_DIR)/linux-arm64/$(BINARY_NAME) ./cmd/atr
 	tar -czf $(BUILD_DIR)/$(BINARY_NAME)_linux_arm64.tar.gz -C $(BUILD_DIR)/linux-arm64 $(BINARY_NAME)
 	@rm -rf $(BUILD_DIR)/linux-arm64
 
 ## build-darwin-amd64: Build for macOS x86_64
-build-darwin-amd64:
+build-darwin-amd64: web/dist/index.html
 	@mkdir -p $(BUILD_DIR)/darwin-amd64
 	GOOS=darwin GOARCH=amd64 $(GOBUILD) $(LDFLAGS) -o $(BUILD_DIR)/darwin-amd64/$(BINARY_NAME) ./cmd/atr
 	tar -czf $(BUILD_DIR)/$(BINARY_NAME)_darwin_amd64.tar.gz -C $(BUILD_DIR)/darwin-amd64 $(BINARY_NAME)
 	@rm -rf $(BUILD_DIR)/darwin-amd64
 
 ## build-darwin-arm64: Build for macOS ARM64 (Apple Silicon)
-build-darwin-arm64:
+build-darwin-arm64: web/dist/index.html
 	@mkdir -p $(BUILD_DIR)/darwin-arm64
 	GOOS=darwin GOARCH=arm64 $(GOBUILD) $(LDFLAGS) -o $(BUILD_DIR)/darwin-arm64/$(BINARY_NAME) ./cmd/atr
 	tar -czf $(BUILD_DIR)/$(BINARY_NAME)_darwin_arm64.tar.gz -C $(BUILD_DIR)/darwin-arm64 $(BINARY_NAME)
 	@rm -rf $(BUILD_DIR)/darwin-arm64
 
 ## build-windows-amd64: Build for Windows x86_64
-build-windows-amd64:
+build-windows-amd64: web/dist/index.html
 	@mkdir -p $(BUILD_DIR)/windows-amd64
 	GOOS=windows GOARCH=amd64 $(GOBUILD) $(LDFLAGS) -o $(BUILD_DIR)/windows-amd64/$(BINARY_NAME).exe ./cmd/atr
 	cd $(BUILD_DIR)/windows-amd64 && zip ../$(BINARY_NAME)_windows_amd64.zip $(BINARY_NAME).exe
 	@rm -rf $(BUILD_DIR)/windows-amd64
 
 ## build-windows-arm64: Build for Windows ARM64
-build-windows-arm64:
+build-windows-arm64: web/dist/index.html
 	@mkdir -p $(BUILD_DIR)/windows-arm64
 	GOOS=windows GOARCH=arm64 $(GOBUILD) $(LDFLAGS) -o $(BUILD_DIR)/windows-arm64/$(BINARY_NAME).exe ./cmd/atr
 	cd $(BUILD_DIR)/windows-arm64 && zip ../$(BINARY_NAME)_windows_arm64.zip $(BINARY_NAME).exe
@@ -102,16 +116,16 @@ clean:
 	rm -rf $(BUILD_DIR)
 
 ## test: Run tests
-test:
+test: web/dist/index.html
 	$(GOTEST) -v ./...
 
 ## test-coverage: Run tests with coverage
-test-coverage:
+test-coverage: web/dist/index.html
 	$(GOTEST) -v -coverprofile=coverage.out ./...
 	$(GOCMD) tool cover -html=coverage.out -o coverage.html
 
 ## lint: Run linter
-lint:
+lint: web/dist/index.html
 	@which golangci-lint > /dev/null || (echo "Installing golangci-lint..." && go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest)
 	golangci-lint run ./...
 

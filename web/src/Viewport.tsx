@@ -14,11 +14,14 @@ const BUTTONS = ['left', 'middle', 'right'] as const;
 const MULTI_CLICK_MS = 500;
 const MULTI_CLICK_SLOP = 5;
 
-/** Keys whose default action produces an event we need, so we must not cancel them. */
-function isClipboardShortcut(ev: React.KeyboardEvent): boolean {
-  if (!ev.ctrlKey && !ev.metaKey) return false;
-  const key = ev.key.toLowerCase();
-  return key === 'c' || key === 'v' || key === 'x';
+/**
+ * Paste is the only shortcut whose default action we need: cancelling the
+ * keydown would suppress the paste event that onPaste turns into insertText.
+ * Copy and cut are forwarded like any other key, so the remote page still sees
+ * them.
+ */
+function isPasteShortcut(ev: React.KeyboardEvent): boolean {
+  return (ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'v';
 }
 
 export function Viewport({ takeFrame, header, send, disabled }: Props) {
@@ -26,7 +29,7 @@ export function Viewport({ takeFrame, header, send, disabled }: Props) {
   const moveQueued = useRef(false);
   // PointerEvent.detail is always 0, so the click count has to be tracked here
   // or Input.dispatchMouseEvent never sees a double click.
-  const lastClick = useRef({ time: 0, x: 0, y: 0, count: 0 });
+  const lastClick = useRef({ time: 0, x: 0, y: 0, count: 0, button: -1 });
 
   // Draw the newest frame once per animation frame. Older frames are skipped.
   useEffect(() => {
@@ -81,8 +84,16 @@ export function Viewport({ takeFrame, header, send, disabled }: Props) {
     const near =
       Math.abs(ev.clientX - prev.x) <= MULTI_CLICK_SLOP &&
       Math.abs(ev.clientY - prev.y) <= MULTI_CLICK_SLOP;
-    const count = ev.timeStamp - prev.time <= MULTI_CLICK_MS && near ? prev.count + 1 : 1;
-    lastClick.current = { time: ev.timeStamp, x: ev.clientX, y: ev.clientY, count };
+    const sameButton = ev.button === prev.button;
+    const consecutive = ev.timeStamp - prev.time <= MULTI_CLICK_MS && near && sameButton;
+    const count = consecutive ? prev.count + 1 : 1;
+    lastClick.current = {
+      time: ev.timeStamp,
+      x: ev.clientX,
+      y: ev.clientY,
+      count,
+      button: ev.button,
+    };
 
     const p = toPage(ev.clientX, ev.clientY);
     send({
@@ -127,6 +138,24 @@ export function Viewport({ takeFrame, header, send, disabled }: Props) {
     });
   };
 
+  // pointercancel fires instead of pointerup when the browser takes the pointer
+  // (a touch gesture claimed for panning, a system dialog, a backgrounded tab).
+  // Capture is released implicitly and no pointerup arrives, so the release has
+  // to be sent from here or the remote button stays down.
+  const onPointerCancel = (ev: React.PointerEvent<HTMLCanvasElement>) => {
+    if (disabled) return;
+    const p = toPage(ev.clientX, ev.clientY);
+    send({
+      t: 'mouse',
+      kind: 'released',
+      x: p.x,
+      y: p.y,
+      button: BUTTONS[ev.button] ?? 'left',
+      clicks: lastClick.current.count || 1,
+      mod: modifiers(ev),
+    });
+  };
+
   const onWheel = (ev: React.WheelEvent<HTMLCanvasElement>) => {
     if (disabled) return;
     const p = toPage(ev.clientX, ev.clientY);
@@ -135,11 +164,11 @@ export function Viewport({ takeFrame, header, send, disabled }: Props) {
 
   const onKeyDown = (ev: React.KeyboardEvent<HTMLCanvasElement>) => {
     if (disabled) return;
-    // Copy and paste are the default action of the shortcut, so cancelling the
-    // keydown would stop the paste event from ever firing. Let the browser run
-    // them and do not forward the shortcut either, or the remote page would act
-    // on its own clipboard as well as the text onPaste sends.
-    if (isClipboardShortcut(ev)) return;
+    // Paste is the default action of the shortcut, so cancelling the keydown
+    // would stop the paste event from firing. Let the browser run it and do not
+    // forward the shortcut either, or the remote page would act on its own
+    // clipboard as well as the text onPaste sends.
+    if (isPasteShortcut(ev)) return;
     // The viewer's own browser would otherwise take Tab, the slash, and the
     // function keys before the page ever sees them.
     ev.preventDefault();
@@ -156,7 +185,7 @@ export function Viewport({ takeFrame, header, send, disabled }: Props) {
 
   const onKeyUp = (ev: React.KeyboardEvent<HTMLCanvasElement>) => {
     if (disabled) return;
-    if (isClipboardShortcut(ev)) return;
+    if (isPasteShortcut(ev)) return;
     ev.preventDefault();
     send({
       t: 'key',
@@ -182,6 +211,7 @@ export function Viewport({ takeFrame, header, send, disabled }: Props) {
       tabIndex={0}
       onPointerDown={onPointerDown}
       onPointerUp={onPointerUp}
+      onPointerCancel={onPointerCancel}
       onPointerMove={onPointerMove}
       onWheel={onWheel}
       onKeyDown={onKeyDown}
