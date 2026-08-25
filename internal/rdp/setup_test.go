@@ -3,6 +3,7 @@ package rdp
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -36,13 +37,17 @@ func TestLookupTokenReadsWhatEnsureTokenWrote(t *testing.T) {
 		t.Fatalf("EnsureToken: %v", err)
 	}
 
-	// The file holds a secret and must stay owner-only.
-	info, err := os.Stat(path)
-	if err != nil {
-		t.Fatalf("stat: %v", err)
-	}
-	if perm := info.Mode().Perm(); perm != 0o600 {
-		t.Fatalf("token file mode = %o, want 600", perm)
+	// The file holds a secret and must stay owner-only. Windows has no POSIX
+	// mode bits -- Perm() reports 0666 for any writable file -- so the
+	// assertion only means something on Unix.
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatalf("stat: %v", err)
+		}
+		if perm := info.Mode().Perm(); perm != 0o600 {
+			t.Fatalf("token file mode = %o, want 600", perm)
+		}
 	}
 
 	got, _, found, err := LookupToken()

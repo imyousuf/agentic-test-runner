@@ -265,40 +265,46 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		if err := json.Unmarshal(data, &msg); err != nil {
 			continue
 		}
-		s.dispatch(msg)
+		s.dispatch(msg, v)
 	}
 }
 
-func (s *Server) dispatch(msg inbound) {
-	// A view-only server drops input here, on the server, not in the client.
-	if s.viewOnly {
-		switch msg.T {
-		case "mouse", "wheel", "key", "text", "navigate":
-			return
-		}
-	}
+// dispatch applies one viewer message. View-only is enforced by the Streamer,
+// so there is no second list here to forget a new primitive from.
+func (s *Server) dispatch(msg inbound, v *viewer) {
+	var err error
 
 	switch msg.T {
 	case "mouse":
-		_ = s.streamer.Mouse(MouseMsg{
+		err = s.streamer.Mouse(MouseMsg{
 			Kind: msg.Kind, X: msg.X, Y: msg.Y,
 			Button: msg.Button, Clicks: msg.Clicks, Mod: msg.Mod,
 		})
 	case "wheel":
-		_ = s.streamer.Wheel(WheelMsg{X: msg.X, Y: msg.Y, DX: msg.DX, DY: msg.DY, Mod: msg.Mod})
+		err = s.streamer.Wheel(WheelMsg{X: msg.X, Y: msg.Y, DX: msg.DX, DY: msg.DY, Mod: msg.Mod})
 	case "key":
-		_ = s.streamer.Key(KeyMsg{
+		err = s.streamer.Key(KeyMsg{
 			Kind: msg.Kind, Key: msg.Key, Code: msg.Code,
 			VK: msg.VK, Text: msg.Text, Mod: msg.Mod,
 		})
 	case "text":
-		_ = s.streamer.Text(msg.Value)
+		err = s.streamer.Text(msg.Value)
 	case "selectPage":
-		_ = s.streamer.Select(msg.ID)
+		err = s.streamer.Select(msg.ID)
 	case "navigate":
-		_ = s.streamer.Navigate(msg.URL)
+		err = s.streamer.Navigate(msg.URL)
 	case "policy":
 		s.streamer.SetPolicy(msg.Foreground)
+	}
+
+	// A silently dropped click looks identical to a broken stream. Tell the
+	// viewer instead.
+	if err != nil && v != nil {
+		if out, mErr := json.Marshal(map[string]any{
+			"t": "error", "message": err.Error(),
+		}); mErr == nil {
+			v.send(out)
+		}
 	}
 }
 

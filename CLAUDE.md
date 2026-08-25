@@ -12,8 +12,8 @@ Go version: 1.25+
 ## Build & Development Commands
 
 ```bash
-make web                # Build the live view web app into web/dist (needs Node 22+)
-make build              # Build binary to bin/atr (run `make web` first)
+make web                # Rebuild the live view web app into web/dist (needs Node 22+)
+make build              # Build binary to bin/atr
 make install            # Install to GOPATH/bin
 make test               # Run tests: go test -v ./...
 make test-coverage      # Tests with coverage report (coverage.html)
@@ -84,8 +84,8 @@ For LLM-driven use, any LLM with shell access can drive ATR via plain `atr <subc
 - **`internal/computer/`** — Cross-platform desktop control via `go-vgo/robotgo` (mouse/keyboard/screen) and `xgbutil/ewmh` for X11 window management. Linux-X11 only in v1; macOS/Windows window management is stubbed. Includes a configurable countdown safety gate (`per-request` / `per-app` / `off`) before each gated action, abortable via SIGINT.
 - **`internal/api/`** — REST daemon (the execution engine). Holds session state and runs primitives. Started by `atr browser start` / `atr computer start`; CLI subcommands HTTP into it.
 - **`internal/mcp/`** — MCP JSON-RPC server for Claude Code integration (`atr mcp serve`). Peer surface to CLI/REST: embeds its own `Browser`/`Computer` and calls the same package methods.
-- **`internal/rdp/`** — Browser live view (`atr rdp`). Attaches to a running browser as a second CDP session and streams the active page over a WebSocket to an embedded web app, relaying mouse/keyboard input back. Read-only mode is enforced in the `Streamer`, so every surface inherits it. Never owns or closes the browser.
-- **`web/`** — The live view's React/Vite application. `web/dist` is build output and is **not** committed: run `make web` (needs Node 22+) before `make build`. The `noweb` build tag serves a placeholder for contributors without Node.
+- **`internal/rdp/`** — Browser live view (`atr rdp`). Attaches to a running browser as a second CDP session and streams the active page over a WebSocket to an embedded web app, relaying mouse/keyboard input back. Read-only mode (`--view-only`) is enforced in the `Streamer` for page input (mouse/wheel/key/text/navigate), so REST and WebSocket both inherit it; tab selection and foreground policy stay available to viewers. Never owns or closes the browser.
+- **`web/`** — The live view's React/Vite application. `web/dist` is build output and is **not** committed. Targets that compile Go (`build`, `test`, `lint`, `install`, the cross-compile targets) depend on `web/dist/index.html` and will build it once if missing, so a fresh clone works — but run `make web` explicitly after changing anything under `web/src`, or the embedded assets go stale. The `noweb` build tag serves a placeholder for contributors without Node.
 - **`internal/capture/`** — Test failure context capture
 - **`internal/output/`** — Output formatting (text, file, summarization)
 - **`pkg/behavior/`** and **`pkg/result/`** — Public result types

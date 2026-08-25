@@ -45,6 +45,7 @@ jobs:
 
       - name: Build web assets
         working-directory: web
+        shell: bash
         run: npm ci && npm run build
 
       - name: Download dependencies
@@ -91,6 +92,7 @@ jobs:
 
       - name: Build web assets
         working-directory: web
+        shell: bash
         run: npm ci && npm run build
 
       - name: Run go vet

@@ -54,7 +54,10 @@ func LookupToken() (token string, path string, found bool, err error) {
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return "", path, false, nil
+		if os.IsNotExist(err) {
+			return "", path, false, nil
+		}
+		return "", path, false, fmt.Errorf("failed to read %s: %w", path, err)
 	}
 	for _, line := range strings.Split(string(data), "\n") {
 		if value, ok := strings.CutPrefix(strings.TrimSpace(line), "ATR_RDP_TOKEN="); ok && value != "" {
@@ -73,11 +76,15 @@ func EnsureToken() (string, string, error) {
 	}
 	path := filepath.Join(dir, "rdp.env")
 
-	if data, err := os.ReadFile(path); err == nil {
-		for _, line := range strings.Split(string(data), "\n") {
-			if value, ok := strings.CutPrefix(strings.TrimSpace(line), "ATR_RDP_TOKEN="); ok && value != "" {
-				return value, path, nil
-			}
+	data, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		// Never overwrite a token file that exists but cannot be read: the
+		// installed service is still serving the URL it contains.
+		return "", "", fmt.Errorf("failed to read %s: %w", path, err)
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if value, ok := strings.CutPrefix(strings.TrimSpace(line), "ATR_RDP_TOKEN="); ok && value != "" {
+			return value, path, nil
 		}
 	}
 
