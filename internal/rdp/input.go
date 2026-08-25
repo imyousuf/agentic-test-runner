@@ -59,6 +59,9 @@ func mouseButton(name string) proto.InputMouseButton {
 
 // Mouse dispatches a pointer event.
 func (s *Streamer) Mouse(m MouseMsg) error {
+	if err := s.viewOnly(); err != nil {
+		return err
+	}
 	page := s.CurrentPage()
 	if page == nil {
 		return fmt.Errorf("no page is selected")
@@ -94,6 +97,9 @@ func (s *Streamer) Mouse(m MouseMsg) error {
 
 // Wheel dispatches a scroll event.
 func (s *Streamer) Wheel(w WheelMsg) error {
+	if err := s.viewOnly(); err != nil {
+		return err
+	}
 	page := s.CurrentPage()
 	if page == nil {
 		return fmt.Errorf("no page is selected")
@@ -116,6 +122,9 @@ func (s *Streamer) Wheel(w WheelMsg) error {
 // Key dispatches a keyboard event. A printable key also needs a char event,
 // otherwise the character never reaches the page.
 func (s *Streamer) Key(k KeyMsg) error {
+	if err := s.viewOnly(); err != nil {
+		return err
+	}
 	page := s.CurrentPage()
 	if page == nil {
 		return fmt.Errorf("no page is selected")
@@ -150,6 +159,9 @@ func (s *Streamer) Key(k KeyMsg) error {
 
 // Text inserts a string in one step. Use it for a paste.
 func (s *Streamer) Text(value string) error {
+	if err := s.viewOnly(); err != nil {
+		return err
+	}
 	page := s.CurrentPage()
 	if page == nil {
 		return fmt.Errorf("no page is selected")

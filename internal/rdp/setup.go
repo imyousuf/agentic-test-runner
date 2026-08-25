@@ -1,11 +1,14 @@
 package rdp
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/xml"
 	"fmt"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -31,6 +34,35 @@ type SetupResult struct {
 }
 
 const serviceName = "atr-rdp"
+
+// tokenPath returns where the token file lives, without creating anything.
+func tokenPath() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("failed to find the home directory: %w", err)
+	}
+	return filepath.Join(home, ".atr", "rdp.env"), nil
+}
+
+// LookupToken reads the stored token without creating a directory or minting a
+// new one. "atr rdp setup --check" is documented to change nothing, so it must
+// not go through EnsureToken.
+func LookupToken() (token string, path string, found bool, err error) {
+	path, err = tokenPath()
+	if err != nil {
+		return "", "", false, err
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", path, false, nil
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if value, ok := strings.CutPrefix(strings.TrimSpace(line), "ATR_RDP_TOKEN="); ok && value != "" {
+			return value, path, true, nil
+		}
+	}
+	return "", path, false, nil
+}
 
 // EnsureToken reads the token, or writes a new one. The file holds the token
 // for the service and for anyone who needs the URL later.
@@ -147,7 +179,10 @@ Type=simple
 EnvironmentFile=%s
 ExecStart=%s rdp --port %d --bind %s --fps %d
 Restart=always
-RestartSec=5
+# "atr rdp setup" installs no browser by design, so "no browser running" is the
+# normal state right after install and the unit will exit until one appears.
+# Keep the retry cheap rather than respawning every few seconds.
+RestartSec=15
 
 [Install]
 WantedBy=default.target
@@ -176,14 +211,37 @@ WantedBy=default.target
 	if !lingerEnabled() {
 		result.Notes = append(result.Notes,
 			"The service stops when you log out. To keep it running after a reboot, run:\n"+
-				"    sudo loginctl enable-linger "+os.Getenv("USER"))
+				"    sudo loginctl enable-linger "+currentUser())
 	}
 	return nil
 }
 
+// currentUser prefers os/user over $USER, which is empty under cron, in
+// containers, and in ssh non-login invocations.
+func currentUser() string {
+	if u, err := user.Current(); err == nil && u.Username != "" {
+		return u.Username
+	}
+	return os.Getenv("USER")
+}
+
 func lingerEnabled() bool {
-	out, err := exec.Command("loginctl", "show-user", os.Getenv("USER"), "--property=Linger").Output()
+	name := currentUser()
+	if name == "" {
+		return false
+	}
+	out, err := exec.Command("loginctl", "show-user", name, "--property=Linger").Output()
 	return err == nil && strings.Contains(string(out), "Linger=yes")
+}
+
+// xmlEscape makes a value safe to interpolate into the plist. A home directory
+// containing "&" would otherwise produce XML that launchctl cannot parse.
+func xmlEscape(v string) string {
+	var buf bytes.Buffer
+	if err := xml.EscapeText(&buf, []byte(v)); err != nil {
+		return v
+	}
+	return buf.String()
 }
 
 func setupLaunchd(servicePath, binary, token string, opts SetupOptions, result *SetupResult) error {
@@ -217,9 +275,11 @@ func setupLaunchd(servicePath, binary, token string, opts SetupOptions, result *
   <integer>10</integer>
 </dict>
 </plist>
-`, binary, opts.Port, opts.Bind, opts.FPS, token)
+`, xmlEscape(binary), opts.Port, xmlEscape(opts.Bind), opts.FPS, xmlEscape(token))
 
-	if err := os.WriteFile(servicePath, []byte(plist), 0o644); err != nil {
+	// The plist carries the token, so it gets the same owner-only treatment as
+	// the rdp.env file that EnsureToken writes.
+	if err := os.WriteFile(servicePath, []byte(plist), 0o600); err != nil {
 		return fmt.Errorf("failed to write %s: %w", servicePath, err)
 	}
 

@@ -6,8 +6,10 @@
 
 # Binary name
 BINARY_NAME=atr
-# Version (can be overridden)
+# Version information (all overridable by CI)
 VERSION?=$(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+COMMIT?=$(shell git rev-parse HEAD 2>/dev/null || echo "unknown")
+BUILD_DATE?=$(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 # Build directory
 BUILD_DIR=bin
 
@@ -21,21 +23,25 @@ GOMOD=$(GOCMD) mod
 GOFMT=gofmt
 
 # Build flags
-LDFLAGS=-ldflags "-s -w"
+#
+# The version variables live in internal/cli, not package main. Setting
+# -X main.version here would be silently ignored by the linker.
+CLI_PKG=github.com/imyousuf/agentic-test-runner/internal/cli
+LDFLAGS=-ldflags "-s -w \
+	-X $(CLI_PKG).Version=$(VERSION) \
+	-X $(CLI_PKG).Commit=$(COMMIT) \
+	-X $(CLI_PKG).BuildDate=$(BUILD_DATE)"
 
 # Default target
 all: build
 
-## web: Build the live view web application into web/dist
+## web: Build the live view web application into web/dist (needs Node 22+)
+##      Run this once before "make build"; web/dist is not committed.
 web:
-	@if [ -d web/node_modules ]; then \
-		cd web && npm run build; \
-	else \
-		cd web && npm ci && npm run build; \
-	fi
+	cd web && npm ci --no-audit --no-fund && npm run build
 
-## build: Build the binary
-build: web
+## build: Build the binary (run "make web" first: web/dist is embedded)
+build:
 	@mkdir -p $(BUILD_DIR)
 	$(GOBUILD) $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/atr
 

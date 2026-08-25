@@ -12,7 +12,8 @@ Go version: 1.25+
 ## Build & Development Commands
 
 ```bash
-make build              # Build binary to bin/atr
+make web                # Build the live view web app into web/dist (needs Node 22+)
+make build              # Build binary to bin/atr (run `make web` first)
 make install            # Install to GOPATH/bin
 make test               # Run tests: go test -v ./...
 make test-coverage      # Tests with coverage report (coverage.html)
@@ -108,7 +109,7 @@ model in the loop; the agent returns only to triage a failure.
 
 ### Other Key Packages
 
-- **`internal/cli/`** — Cobra command definitions (run, config, browser, computer, mcp, test, version, update). Browser subcommands include: navigate, click, fill, hover, drag, wait, scroll, screenshot (with --selector, --selector-all, --full, --timeout), snapshot, clean-snapshot, computed-styles (with --selector, --selector-all), computed-styles-diff (with --selector), text, font-check, download-images, viewport, batch, eval, ask, record (with --output, --url), console, network, errors, hud (on/off/status). Computer subcommands include: start, stop, status, screenshot, click, move, drag, scroll, hover, type, key, chord, position, displays, window (list/active/focus/minimize/maximize/restore/close/move/resize), app (launch/quit), reset-approvals, ask (LLM agent loop for natural-language tasks).
+- **`internal/cli/`** — Cobra command definitions (run, config, browser, computer, mcp, rdp, test, version, update). Browser subcommands include: navigate, click, fill, hover, drag, wait, scroll, screenshot (with --selector, --selector-all, --full, --timeout), snapshot, clean-snapshot, computed-styles (with --selector, --selector-all), computed-styles-diff (with --selector), text, font-check, download-images, viewport, batch, eval, ask, record (with --output, --url), console, network, errors, hud (on/off/status). Computer subcommands include: start, stop, status, screenshot, click, move, drag, scroll, hover, type, key, chord, position, displays, window (list/active/focus/minimize/maximize/restore/close/move/resize), app (launch/quit), reset-approvals, ask (LLM agent loop for natural-language tasks).
 - **`internal/config/`** — Configuration loading from `~/.atr/config.yaml`, env vars, and CLI flags via Viper
 - **`internal/executor/`** — Cross-platform shell execution with environment detection (Python venv, nvm)
 - **`internal/browser/`** — Browser lifecycle management using `go-rod/rod` (Chromium via CDP)
@@ -116,6 +117,8 @@ model in the loop; the agent returns only to triage a failure.
 - **`internal/api/`** — REST daemon (the execution engine). Holds session state and runs primitives. Started by `atr browser start` / `atr computer start`; CLI subcommands HTTP into it.
 - **`internal/mcp/`** — MCP JSON-RPC server for Claude Code integration (`atr mcp serve`). Peer surface to CLI/REST: embeds its own `Browser`/`Computer` and calls the same package methods.
 - **`internal/secret/`** — Fetches secrets by running the user's password-manager command. Used by `browser_fill_secret` so a credential is fetched and consumed inside one tool call and never becomes a tool result (which would put it in the LLM message history, re-sent on every later turn).
+- **`internal/rdp/`** — Browser live view (`atr rdp`). Attaches to a running browser as a second CDP session and streams the active page over a WebSocket to an embedded web app, relaying mouse/keyboard input back. Read-only mode is enforced in the `Streamer`, so every surface inherits it. Never owns or closes the browser.
+- **`web/`** — The live view's React/Vite application. `web/dist` is build output and is **not** committed: run `make web` (needs Node 22+) before `make build`. The `noweb` build tag serves a placeholder for contributors without Node.
 - **`internal/capture/`** — Test failure context capture
 - **`internal/output/`** — Output formatting (text, file, summarization)
 - **`pkg/behavior/`** and **`pkg/result/`** — Public result types

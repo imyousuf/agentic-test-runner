@@ -50,14 +50,27 @@ Examples:
   # Watch without the ability to click
   atr rdp --view-only`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			// Whether the operator supplied a token has to be captured before
+			// one is generated, or the non-loopback check below can never fire.
+			supplied := token != "" || os.Getenv("ATR_RDP_TOKEN") != ""
 			if token == "" {
 				token = os.Getenv("ATR_RDP_TOKEN")
 			}
 			if token == "" {
 				token = rdp.NewToken()
 			}
-			if !isLoopback(bind) && token == "" {
-				return fmt.Errorf("a token is required to bind %s", bind)
+			if !isLoopback(bind) && !supplied {
+				return fmt.Errorf(
+					"refusing to bind %s with a generated token.\n"+
+						"A viewer gets full control of the browser and its cookies, and the token "+
+						"would travel in a URL over plaintext HTTP.\n"+
+						"Prefer an SSH tunnel to 127.0.0.1, or pass --token / ATR_RDP_TOKEN "+
+						"explicitly to confirm you intend this", bind)
+			}
+			if !isLoopback(bind) {
+				fmt.Fprintf(os.Stderr,
+					"Warning: bound to %s. Anyone who can reach this port and the token has "+
+						"full control of the browser. Prefer an SSH tunnel.\n", bind)
 			}
 
 			cdpURL, err := rdp.Discover(attach)
@@ -173,9 +186,14 @@ Examples:
 				fmt.Printf("  File:      %s\n", path)
 				fmt.Printf("  Installed: %t\n", installed)
 				fmt.Printf("  Running:   %t\n", running)
-				token, tokenPath, err := rdp.EnsureToken()
+				token, tokenPath, found, err := rdp.LookupToken()
 				if err != nil {
 					return err
+				}
+				if !found {
+					fmt.Printf("  Token:     none yet (%s)\n", tokenPath)
+					fmt.Println("  URL:       run \"atr rdp setup\" to generate one")
+					return nil
 				}
 				fmt.Printf("  Token:     %s\n", tokenPath)
 				fmt.Printf("  URL:       http://%s:%d/?t=%s\n", bind, port, token)

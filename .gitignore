@@ -44,5 +44,8 @@ atr
 # belong in a password manager, referenced by name via atr.fillSecret.
 *.override.properties
 # Live view web application
+# web/dist is build output, not source. "make web" regenerates it and both CI
+# workflows build it before compiling, so it is not committed.
 web/node_modules/
+web/dist/
 web/tsconfig.tsbuildinfo

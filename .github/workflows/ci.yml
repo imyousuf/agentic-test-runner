@@ -33,9 +33,25 @@ jobs:
             libxtst-dev libxss-dev libpng-dev \
             libxkbcommon-dev libx11-dev xclip xsel
 
+      # web/dist is build output and is not committed, so it has to exist
+      # before any Go step: //go:embed all:dist is a compile-time error without
+      # it, and `go test` compiles too.
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Build web assets
+        working-directory: web
+        run: npm ci && npm run build
+
       - name: Download dependencies
         run: go mod download
 
+      # Kept as `go build ./...` rather than `make build`: this compiles every
+      # package, including any that the atr binary does not import.
       - name: Build
         run: go build -v ./...
 
@@ -63,8 +79,27 @@ jobs:
             libxtst-dev libxss-dev libpng-dev \
             libxkbcommon-dev libx11-dev xclip xsel
 
+      # web/dist is build output and is not committed, so it has to exist
+      # before any Go step: //go:embed all:dist is a compile-time error without
+      # it, and `go test` compiles too.
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Build web assets
+        working-directory: web
+        run: npm ci && npm run build
+
       - name: Run go vet
         run: go vet ./...
+
+      # The noweb tag lets contributors build without Node. Nothing exercised
+      # it before, so it was free to break.
+      - name: Build without the web assets
+        run: go build -tags noweb ./...
 
       - name: Check formatting
         run: |
