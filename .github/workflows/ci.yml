@@ -33,14 +33,42 @@ jobs:
             libxtst-dev libxss-dev libpng-dev \
             libxkbcommon-dev libx11-dev xclip xsel
 
+      # web/dist is build output and is not committed, so it has to exist
+      # before any Go step: //go:embed all:dist is a compile-time error without
+      # it, and `go test` compiles too.
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Build web assets
+        working-directory: web
+        shell: bash
+        run: npm ci && npm run build
+
       - name: Download dependencies
         run: go mod download
 
+      # Kept as `go build ./...` rather than `make build`: this compiles every
+      # package, including any that the atr binary does not import.
       - name: Build
         run: go build -v ./...
 
       - name: Run tests
         run: go test -v -race ./...
+
+      # The release workflow builds through the Makefile. Exercise it here too,
+      # or a break in it passes every PR check and only fails after merge.
+      # GNU make is not in the Windows runner image.
+      - name: Install make (Windows)
+        if: matrix.os == 'windows-latest'
+        run: choco install make --no-progress -y
+
+      - name: Build through the Makefile
+        shell: bash
+        run: make build VERSION=ci COMMIT="$GITHUB_SHA" BUILD_DATE=1970-01-01T00:00:00Z
 
   lint:
     name: Lint
@@ -63,8 +91,28 @@ jobs:
             libxtst-dev libxss-dev libpng-dev \
             libxkbcommon-dev libx11-dev xclip xsel
 
+      # web/dist is build output and is not committed, so it has to exist
+      # before any Go step: //go:embed all:dist is a compile-time error without
+      # it, and `go test` compiles too.
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Build web assets
+        working-directory: web
+        shell: bash
+        run: npm ci && npm run build
+
       - name: Run go vet
         run: go vet ./...
+
+      # The noweb tag lets contributors build without Node. Nothing exercised
+      # it before, so it was free to break.
+      - name: Build without the web assets
+        run: go build -tags noweb ./...
 
       - name: Check formatting
         run: |

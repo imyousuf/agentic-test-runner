@@ -24,6 +24,19 @@ type viewer struct {
 	text    [][]byte
 	wake    chan struct{}
 	closed  bool
+	lastErr string
+}
+
+// repeatError reports whether this message is the same as the last one sent,
+// so a failure that recurs on every action does not queue without bound.
+func (v *viewer) repeatError(msg string) bool {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if v.lastErr == msg {
+		return true
+	}
+	v.lastErr = msg
+	return false
 }
 
 func newViewer() *viewer {

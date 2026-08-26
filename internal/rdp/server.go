@@ -20,6 +20,12 @@ import (
 
 const (
 	msgFrame byte = 0x01
+
+	// pingInterval is how often the server pings; pongWait is how long it will
+	// wait for any read before declaring the peer gone. pongWait must exceed
+	// pingInterval comfortably.
+	pingInterval = 20 * time.Second
+	pongWait     = 60 * time.Second
 )
 
 // Server serves the live view: the web assets, a small REST API, and the
@@ -158,6 +164,12 @@ func (s *Server) handleSelect(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleNavigate(w http.ResponseWriter, r *http.Request) {
+	// The WebSocket path is not the only way in: a read-only server has to
+	// refuse here too, or the token alone is enough to drive the browser.
+	if s.viewOnly {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": ErrViewOnly.Error()})
+		return
+	}
 	target := r.URL.Query().Get("url")
 	if target == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "url is required"})
@@ -175,13 +187,14 @@ type inbound struct {
 	T string `json:"t"`
 
 	// mouse and wheel
-	Kind   string  `json:"kind"`
-	X      float64 `json:"x"`
-	Y      float64 `json:"y"`
-	Button string  `json:"button"`
-	Clicks int     `json:"clicks"`
-	DX     float64 `json:"dx"`
-	DY     float64 `json:"dy"`
+	Kind    string  `json:"kind"`
+	X       float64 `json:"x"`
+	Y       float64 `json:"y"`
+	Button  string  `json:"button"`
+	Clicks  int     `json:"clicks"`
+	Buttons int     `json:"buttons"`
+	DX      float64 `json:"dx"`
+	DY      float64 `json:"dy"`
 
 	// keyboard
 	Key  string `json:"key"`
@@ -221,7 +234,10 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if msg, err := json.Marshal(map[string]any{
-		"t": "status", "streaming": true, "viewers": s.hub.Count(), "viewOnly": s.viewOnly,
+		"t":         "status",
+		"streaming": s.streamer.Live(),
+		"viewers":   s.hub.Count(),
+		"viewOnly":  s.viewOnly,
 	}); err == nil {
 		v.send(msg)
 	}
@@ -234,56 +250,96 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	conn.SetReadLimit(1 << 20)
+	// The pings in writeLoop only detect a dead peer if a missing pong
+	// eventually fails the read. Without this a closed laptop lid leaks the
+	// viewer and its goroutine for the life of the process.
+	_ = conn.SetReadDeadline(time.Now().Add(pongWait))
+	conn.SetPongHandler(func(string) error {
+		return conn.SetReadDeadline(time.Now().Add(pongWait))
+	})
 	for {
 		_, data, err := conn.ReadMessage()
 		if err != nil {
 			return
 		}
+		// A client that is talking is alive, whether or not it answers pings.
+		_ = conn.SetReadDeadline(time.Now().Add(pongWait))
 		var msg inbound
 		if err := json.Unmarshal(data, &msg); err != nil {
 			continue
 		}
-		s.dispatch(msg)
+		s.dispatch(msg, v)
 	}
 }
 
-func (s *Server) dispatch(msg inbound) {
-	// A view-only server drops input here, on the server, not in the client.
-	if s.viewOnly {
-		switch msg.T {
-		case "mouse", "wheel", "key", "text", "navigate":
-			return
-		}
-	}
+// dispatch applies one viewer message. View-only is enforced by the Streamer,
+// so there is no second list here to forget a new primitive from.
+func (s *Server) dispatch(msg inbound, v *viewer) {
+	var err error
 
 	switch msg.T {
 	case "mouse":
-		_ = s.streamer.Mouse(MouseMsg{
+		err = s.streamer.Mouse(MouseMsg{
 			Kind: msg.Kind, X: msg.X, Y: msg.Y,
 			Button: msg.Button, Clicks: msg.Clicks, Mod: msg.Mod,
+			Buttons: msg.Buttons,
 		})
 	case "wheel":
-		_ = s.streamer.Wheel(WheelMsg{X: msg.X, Y: msg.Y, DX: msg.DX, DY: msg.DY, Mod: msg.Mod})
+		err = s.streamer.Wheel(WheelMsg{
+			X: msg.X, Y: msg.Y, DX: msg.DX, DY: msg.DY, Mod: msg.Mod, Buttons: msg.Buttons,
+		})
 	case "key":
-		_ = s.streamer.Key(KeyMsg{
+		err = s.streamer.Key(KeyMsg{
 			Kind: msg.Kind, Key: msg.Key, Code: msg.Code,
 			VK: msg.VK, Text: msg.Text, Mod: msg.Mod,
 		})
 	case "text":
-		_ = s.streamer.Text(msg.Value)
+		err = s.streamer.Text(msg.Value)
 	case "selectPage":
-		_ = s.streamer.Select(msg.ID)
+		err = s.streamer.Select(msg.ID)
 	case "navigate":
-		_ = s.streamer.Navigate(msg.URL)
+		err = s.streamer.Navigate(msg.URL)
 	case "policy":
 		s.streamer.SetPolicy(msg.Foreground)
 	}
+
+	// A silently dropped click looks identical to a broken stream, so tell the
+	// viewer -- but only for discrete actions. Pointer moves arrive once per
+	// animation frame, and reporting each failure would queue ~60 messages a
+	// second and re-render the client just as often.
+	if err == nil || v == nil || !worthReporting(msg) {
+		return
+	}
+	if v.repeatError(err.Error()) {
+		return
+	}
+	if out, mErr := json.Marshal(map[string]any{
+		"t": "error", "message": err.Error(),
+	}); mErr == nil {
+		v.send(out)
+	}
+}
+
+// worthReporting keeps continuous motion out of the error channel.
+func worthReporting(msg inbound) bool {
+	switch msg.T {
+	case "wheel":
+		return false
+	case "mouse":
+		return msg.Kind != "moved"
+	}
+	return true
 }
 
 // writeLoop is the only writer for this connection. A viewer holds one
 // pending frame, so a slow client drops stale frames instead of lagging.
 func (s *Server) writeLoop(ctx context.Context, conn *websocket.Conn, v *viewer) {
-	ping := time.NewTicker(20 * time.Second)
+	// Closing here unblocks the read loop in handleWS. Returning without it
+	// left the viewer registered in the hub, so every later broadcast appended
+	// to a queue that nothing drained.
+	defer func() { _ = conn.Close() }()
+
+	ping := time.NewTicker(pingInterval)
 	defer ping.Stop()
 
 	for {

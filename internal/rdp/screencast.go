@@ -3,6 +3,7 @@ package rdp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"sync"
@@ -37,6 +38,9 @@ type Streamer struct {
 	hub  *Hub
 	opts Options
 
+	// streamMu serialises stream() end to end; mu guards the fields below.
+	streamMu sync.Mutex
+
 	mu       sync.Mutex
 	browser  *rod.Browser
 	page     *rod.Page
@@ -45,7 +49,14 @@ type Streamer struct {
 	seq      int
 	lastAt   time.Time
 	live     bool
-	policy   string // "follow" or "hold"
+	closed   bool
+	// switching is true while stream() is between tearing the old stream down
+	// and committing the new one, so the watchdog does not mistake that window
+	// for a dead view. gen identifies the current stream, so a frame callback
+	// from a cancelled one cannot write over its successor's state.
+	switching bool
+	gen       int
+	policy    string // "follow" or "hold"
 
 	// last holds the most recent frame. A static page produces one frame and
 	// then nothing, so a viewer that connects later needs this to see anything.
@@ -66,8 +77,12 @@ func NewStreamer(hub *Hub, opts Options) *Streamer {
 }
 
 // Attach connects to the browser at the given CDP endpoint.
+//
+// NoDefaultDevice matters: rod otherwise applies its default device emulation
+// to every page it touches, which would rewrite the viewport and user agent of
+// the tabs ATR is already driving. The viewer never owns the browser.
 func (s *Streamer) Attach(cdpURL string) error {
-	browser := rod.New().ControlURL(cdpURL)
+	browser := rod.New().ControlURL(cdpURL).NoDefaultDevice()
 	if err := browser.Connect(); err != nil {
 		return fmt.Errorf("failed to attach to the browser at %s: %w", cdpURL, err)
 	}
@@ -169,24 +184,44 @@ func frontMost(pages rod.Pages) *rod.Page {
 }
 
 func (s *Streamer) stream(page *rod.Page) error {
-	s.stop()
+	// stream() is reachable from the HTTP handler, the WebSocket dispatch and
+	// the watchdog at once. Without this, two callers interleave stop() and
+	// StartScreencast and leave s.page on one target with the stream on another.
+	s.streamMu.Lock()
+	defer s.streamMu.Unlock()
 
-	// Chrome sends nothing for a background tab.
+	// Close may have run while this call waited for streamMu. Bail rather than
+	// bringing a tab to the front during shutdown.
+	s.mu.Lock()
+	closed := s.closed
+	s.mu.Unlock()
+	if closed {
+		return fmt.Errorf("the live view is shutting down")
+	}
+
+	// Chrome sends nothing for a background tab, so the page has to come to the
+	// front. Do it before tearing the old stream down: if it fails, the viewer
+	// keeps the stream it had instead of being left with no page at all.
 	if err := (proto.PageBringToFront{}).Call(page); err != nil {
 		return fmt.Errorf("failed to bring the page to the front: %w", err)
 	}
+
+	s.stop()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	bound := page.Context(ctx)
 
 	s.mu.Lock()
-	s.page = bound
-	s.targetID = page.TargetID
-	s.cancel = cancel
 	s.seq = 0
-	s.lastAt = time.Now()
-	s.live = true
+	s.gen++
+	gen := s.gen
+	s.switching = true
 	s.mu.Unlock()
+	defer func() {
+		s.mu.Lock()
+		s.switching = false
+		s.mu.Unlock()
+	}()
 
 	go bound.EachEvent(func(e *proto.PageScreencastFrame) {
 		// Acknowledge at once. Chrome stops the stream without this, and it
@@ -194,6 +229,12 @@ func (s *Streamer) stream(page *rod.Page) error {
 		_ = proto.PageScreencastFrameAck{SessionID: e.SessionID}.Call(bound)
 
 		s.mu.Lock()
+		if s.gen != gen {
+			// A frame from a stream that has already been replaced. Writing
+			// here would resurrect live and overwrite the new tab's last frame.
+			s.mu.Unlock()
+			return
+		}
 		s.seq++
 		seq := s.seq
 		s.lastAt = time.Now()
@@ -216,6 +257,10 @@ func (s *Streamer) stream(page *rod.Page) error {
 			frame.ScrollY = md.ScrollOffsetY
 		}
 		s.mu.Lock()
+		if s.gen != gen {
+			s.mu.Unlock()
+			return
+		}
 		s.last = frame
 		s.mu.Unlock()
 		s.hub.Broadcast(frame)
@@ -231,21 +276,37 @@ func (s *Streamer) stream(page *rod.Page) error {
 		EveryNthFrame: &everyNth,
 	}).Call(bound); err != nil {
 		cancel()
+		s.publishStatus(false)
 		return fmt.Errorf("failed to start the screencast: %w", err)
 	}
 
+	// Publish only once the stream is actually running. Committing earlier left
+	// a cancelled page behind that still reported streaming: true.
+	//
+	// Re-check closed in the same critical section: Close may have run while
+	// this call was inside a CDP round trip, and committing afterwards would
+	// leave a live screencast nobody owns.
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		cancel()
+		_ = proto.PageStopScreencast{}.Call(bound)
+		return fmt.Errorf("the live view is shutting down")
+	}
+	s.page = bound
+	s.targetID = page.TargetID
+	s.cancel = cancel
+	s.lastAt = time.Now()
+	s.live = true
+	s.mu.Unlock()
+
 	s.publishPages()
 
-	// Send one image at once and mark the stream healthy. A still page emits
-	// no frame, so without this the viewer would keep the stall banner and an
-	// empty canvas after every tab switch.
+	// Send one image at once. A still page emits no frame, so without this the
+	// viewer would keep an empty canvas after every tab switch.
 	if frame, err := s.Snapshot(); err == nil {
 		s.hub.Broadcast(frame)
 	}
-	s.mu.Lock()
-	s.live = true
-	s.lastAt = time.Now()
-	s.mu.Unlock()
 	s.publishStatus(true)
 
 	return nil
@@ -257,6 +318,9 @@ func (s *Streamer) stop() {
 	page := s.page
 	s.cancel = nil
 	s.page = nil
+	// Clearing live matters: without it a stream() that fails after stop()
+	// leaves Live() reporting true with no page behind it.
+	s.live = false
 	s.mu.Unlock()
 
 	if page != nil {
@@ -269,7 +333,14 @@ func (s *Streamer) stop() {
 
 // Close releases the stream. It never closes the browser, because the browser
 // belongs to ATR, not to this viewer.
+//
+// It does not take streamMu: an in-flight stream() can sit in several unbounded
+// CDP round trips, and waiting for it would hang Ctrl-C behind a wedged browser.
+// The closed flag stops that stream() from republishing instead.
 func (s *Streamer) Close() {
+	s.mu.Lock()
+	s.closed = true
+	s.mu.Unlock()
 	s.stop()
 }
 
@@ -281,6 +352,9 @@ func (s *Streamer) Watch(ctx context.Context) {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 
+	// retries paces the recovery attempts below.
+	retries := 0
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -291,9 +365,43 @@ func (s *Streamer) Watch(ctx context.Context) {
 			idle := time.Since(s.lastAt)
 			live := s.live
 			policy := s.policy
+			current := s.targetID
+			switching := s.switching
+			closed := s.closed
 			s.mu.Unlock()
 
-			if page == nil || idle < 2*time.Second {
+			if closed {
+				return
+			}
+
+			// No page is selected. That is either an ordinary tab switch in
+			// flight, which must be left alone, or an earlier attempt that
+			// failed, which is worth recovering from.
+			if page == nil {
+				if switching {
+					continue
+				}
+				if live {
+					s.mu.Lock()
+					s.live = false
+					s.mu.Unlock()
+					s.publishStatus(false)
+				}
+				// Recover regardless of policy: "hold" holds a tab, and there
+				// is no tab to hold here. Back off so a browser that refuses to
+				// focus is not hammered with Pages() plus an Eval per tab every
+				// second, forever.
+				retries++
+				if retries <= 1 || retries%(1<<min(retries-1, 5)) == 0 {
+					if err := s.Select(""); err == nil {
+						retries = 0
+					}
+				}
+				continue
+			}
+			retries = 0
+
+			if idle < 2*time.Second {
 				continue
 			}
 
@@ -327,7 +435,7 @@ func (s *Streamer) Watch(ctx context.Context) {
 					continue
 				}
 				front := frontMost(pages)
-				if front.TargetID != s.targetID {
+				if front.TargetID != current {
 					_ = s.stream(front)
 				}
 			}
@@ -345,8 +453,24 @@ func (s *Streamer) SetPolicy(p string) {
 	s.mu.Unlock()
 }
 
+// ErrViewOnly is returned when input reaches a read-only streamer.
+var ErrViewOnly = errors.New("the live view is read only")
+
+// viewOnly reports whether input must be refused. Enforcing here rather than in
+// a single handler means the REST, WebSocket and any future surface all inherit
+// it, instead of each having to remember the check.
+func (s *Streamer) viewOnly() error {
+	if s.opts.ViewOnly {
+		return ErrViewOnly
+	}
+	return nil
+}
+
 // Navigate loads a URL in the streamed tab.
 func (s *Streamer) Navigate(url string) error {
+	if err := s.viewOnly(); err != nil {
+		return err
+	}
 	s.mu.Lock()
 	page := s.page
 	s.mu.Unlock()
@@ -382,6 +506,14 @@ func (s *Streamer) publishPages() {
 		return
 	}
 	s.hub.BroadcastText(msg)
+}
+
+// Live reports whether frames are currently flowing, so a viewer that joins a
+// stalled stream is told the truth instead of an unconditional "streaming".
+func (s *Streamer) Live() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.live
 }
 
 // LastFrame returns the most recent frame, so a viewer that connects to a

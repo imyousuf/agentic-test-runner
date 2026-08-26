@@ -61,6 +61,26 @@ jobs:
             libxtst-dev libxss-dev libpng-dev \
             libxkbcommon-dev libx11-dev xclip xsel
 
+      # web/dist is build output and is not committed. It must exist before the
+      # test step, which compiles, not just before the build step.
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Build web assets
+        working-directory: web
+        shell: bash
+        run: npm ci && npm run build
+
+      # The build step goes through the Makefile so the version stamping has a
+      # single definition, but GNU Make is not on the Windows runner's PATH.
+      - name: Install make (Windows)
+        if: matrix.goos == 'windows'
+        run: choco install make --no-progress -y
+
       - name: Download dependencies
         run: go mod download
 
@@ -76,6 +96,10 @@ jobs:
             go test ./...
           fi
 
+      # Built through make so the version stamping has a single definition.
+      # The inline ldflags this replaces set -X main.version, but those
+      # variables live in internal/cli and do not exist in package main, so the
+      # linker ignored them and every release reported "atr version dev".
       - name: Build binary
         env:
           GOOS: ${{ matrix.goos }}
@@ -83,11 +107,12 @@ jobs:
         shell: bash
         run: |
           SHORT_SHA=$(git rev-parse --short HEAD)
-          VERSION="dev-$SHORT_SHA"
-          DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-          LDFLAGS="-X main.version=$VERSION -X main.commit=${{ github.sha }} -X main.date=$DATE"
           mkdir -p dist
-          go build -ldflags "$LDFLAGS" -o dist/atr${{ matrix.ext }} ./cmd/atr
+          make build \
+            VERSION="dev-$SHORT_SHA" \
+            COMMIT="${{ github.sha }}" \
+            BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          mv bin/atr dist/atr${{ matrix.ext }}
 
       - name: Archive (tar.gz)
         if: matrix.archive == 'tar.gz'

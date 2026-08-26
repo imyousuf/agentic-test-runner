@@ -383,10 +383,19 @@ A viewer gets full control of a browser and its cookies.
 
 - Bind `127.0.0.1` by default. Reach it through an SSH tunnel.
 - Require a token. Generate one at start when none is given, and print it in the URL.
-- Accept the token as a `Bearer` header, or once as a WebSocket query parameter.
-- Refuse a non-loopback bind when the token is empty.
+- Accept the token as a `Bearer` header, a query parameter, or a cookie.
+- Refuse a non-loopback bind unless the operator supplied a token explicitly. A
+  generated token is easy to miss in a service log, and it travels in a URL over
+  plaintext HTTP.
 - Check the `Origin` header on the upgrade.
-- `--view-only` drops input on the server, not in the client.
+- `--view-only` refuses *input to the page* -- mouse, wheel, key, text, and
+  navigate -- in the `Streamer`, so the REST endpoints and the WebSocket both
+  inherit it rather than each keeping their own list.
+- Switching the streamed tab and setting the foreground policy are viewer
+  controls and remain available in view-only mode. Selecting a tab does call
+  `Page.bringToFront`, so a read-only viewer can still change which tab is in
+  the foreground of the session it is watching.
+- Store the token owner-only: `~/.atr/rdp.env` and the launchd plist are both `0600`.
 
 ## 11. Package layout
 
@@ -407,13 +416,15 @@ No change is needed in `internal/mcp`, `internal/agent`, `internal/api`, or
 
 Stack: Vite, React 19, and TypeScript. No user interface framework.
 
-| Component | Purpose |
+| Module | Purpose |
 |---|---|
-| `App` | The socket, the state, and the reconnection. |
+| `useLiveView` | The socket, the state, and the reconnection with backoff. |
+| `App` | The tab list, the URL bar, the foreground policy, and the status line. |
 | `Viewport` | The canvas. It draws frames and captures input. |
-| `TabBar` | The page list. |
-| `UrlBar` | The current URL and navigation. |
-| `StatusBar` | Frame rate, latency, viewers, and the streaming state. |
+| `protocol` | The wire types and the binary frame decoder. |
+
+The tab list, URL bar, and status line are rendered inline by `App` rather than
+being separate components.
 
 Rules:
 
@@ -425,15 +436,25 @@ Rules:
 Build:
 
 - `make web` runs `npm ci && npm run build` into `web/dist`.
-- `//go:embed all:web/dist` puts the result in the binary.
+- `web/embed.go` embeds it with `//go:embed all:dist`.
+- `web/dist` is build output and is not committed. `make web` runs before
+  `make build`, and both CI workflows build it before any Go step.
 - A `noweb` build tag serves a short message, so a contributor without Node can build the Go
   code.
 
 ## 13. Test plan
 
-- Unit: the coordinate conversion at several scale factors.
-- Unit: the modifier bit field for every combination.
-- Unit: the hub replaces a queued frame and never grows.
+Implemented:
+
+- Unit: the hub replaces a pending frame and never grows; control messages are kept.
+- Unit: the binary frame layout round-trips.
+- Unit: endpoint resolution for the `ws://`, `http://`, `cdp://`, and bare host forms.
+- Unit: every accepted and rejected token form, and the `Origin` check.
+- Unit: `--view-only` refuses input at the streamer and returns 403 over REST.
+- Unit: `LookupToken` writes nothing; `EnsureToken` writes `0600`; plist XML escaping.
+
+Still manual:
+
 - Integration: attach, stream, and receive ten frames.
 - Integration: a canvas click changes the page URL.
 - Integration: the watchdog reports silence when another tab moves to the front.

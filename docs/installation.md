@@ -8,25 +8,21 @@ This guide covers all methods for installing ATR.
 - **Architecture**: amd64 (x86_64) or arm64
 
 For building from source:
-- **Go 1.23** or later
+- **Go 1.25** or later
+- **Node 22** or later, plus npm — the `atr rdp` live view is a web application
+  that is compiled into the binary. `web/dist` is build output and is not
+  committed, so the Makefile builds it as part of any target that compiles Go.
 
 ## Installation Methods
 
-### Method 1: Go Install (Recommended)
-
-If you have Go installed:
+### Method 1: Install Script (Recommended)
 
 ```bash
-go install github.com/imyousuf/agentic-test-runner/cmd/atr@latest
+curl -fsSL https://raw.githubusercontent.com/imyousuf/agentic-test-runner/main/install.sh | sh
 ```
 
-This installs the `atr` binary to your `$GOPATH/bin` (usually `~/go/bin`).
-
-Make sure `$GOPATH/bin` is in your PATH:
-
-```bash
-export PATH="$PATH:$(go env GOPATH)/bin"
-```
+This downloads the release binary for your platform and verifies it against the
+published checksums. Nothing else is needed — no Go, no Node.
 
 ### Method 2: Pre-built Binaries
 
@@ -74,26 +70,46 @@ Expand-Archive -Path "atr.zip" -DestinationPath "C:\Program Files\atr"
 
 ### Method 3: Build from Source
 
-Clone and build:
+Building needs **Go 1.25+ and Node 22+**. The `atr rdp` live view is a web
+application that is embedded in the binary, and `web/dist` is build output
+rather than a checked-in artifact, so it is built first:
 
 ```bash
 git clone https://github.com/imyousuf/agentic-test-runner.git
 cd agentic-test-runner
-go build -o atr ./cmd/atr
-sudo mv atr /usr/local/bin/
+make install    # builds web/dist if needed, then installs to GOPATH/bin
 ```
 
-Or use the Makefile:
+`make build` puts the binary in `bin/atr` instead of installing it.
+
+`build`, `install`, `test`, `lint` and the cross-compile targets all depend on
+`web/dist`, and the Makefile rebuilds it whenever anything under `web/src` (or
+the web config) has changed. `make web` forces a rebuild.
+
+Building the Go code directly with `go build ./cmd/atr` skips that step, so on a
+fresh checkout it fails with `pattern all:dist: no matching files found`. That
+is the embedded web application missing, not a broken checkout — run `make web`
+first, or go through the Makefile.
+
+> **Note on `go install`:** `go install github.com/imyousuf/agentic-test-runner/cmd/atr@latest`
+> no longer works on its own, because the module does not carry the built web
+> assets. Use the install script or build from source.
+
+#### Without Node
+
+If you do not want Node, the `noweb` build tag compiles everything except the
+live view's web application, which is then served as a short placeholder page.
+Every other command, including `atr browser` and `atr computer`, is unaffected:
 
 ```bash
-git clone https://github.com/imyousuf/agentic-test-runner.git
-cd agentic-test-runner
-make install
+go build -tags noweb -o atr ./cmd/atr
 ```
 
 ### Building for All Platforms
 
 The Makefile supports cross-compilation:
+
+These targets compile the Go binary only. Run `make web` first.
 
 ```bash
 # Build for all platforms
@@ -178,7 +194,7 @@ Ensure the binary is in your PATH:
 # Check if atr is found
 which atr
 
-# If using go install, add GOPATH/bin to PATH
+# If installed with "make install", add GOPATH/bin to PATH
 export PATH="$PATH:$(go env GOPATH)/bin"
 ```
 
@@ -201,9 +217,14 @@ Or manually specify a browser path in config.
 
 ## Updating
 
-### Go Install
+### Built-in updater
 ```bash
-go install github.com/imyousuf/agentic-test-runner/cmd/atr@latest
+atr update
+```
+
+### Install script
+```bash
+curl -fsSL https://raw.githubusercontent.com/imyousuf/agentic-test-runner/main/install.sh | sh
 ```
 
 ### Binary
@@ -212,6 +233,7 @@ Download the latest release and replace the existing binary.
 ### From Source
 ```bash
 git pull
+make web
 make install
 ```
 
