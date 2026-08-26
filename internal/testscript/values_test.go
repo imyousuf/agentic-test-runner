@@ -242,3 +242,28 @@ func read(t *testing.T, path string) string {
 	}
 	return string(data)
 }
+
+// A base URL routinely names a document rather than a directory. Joining a
+// relative path onto it produces login.html/login.html, which the script then
+// reports as a missing element — a 404 disguised as drift.
+func TestRelativeURLsResolveLikeABrowser(t *testing.T) {
+	tests := []struct {
+		base, ref, want string
+	}{
+		{"http://host/login.html", "login.html", "http://host/login.html"},
+		{"http://host/login.html", "signup.html", "http://host/signup.html"},
+		{"http://host/login.html", "/admin", "http://host/admin"},
+		{"http://host/app/", "page", "http://host/app/page"},
+		{"http://host/app", "page", "http://host/page"},
+		{"http://host/login.html", "", "http://host/login.html"},
+		{"http://host/a.html", "https://other/b", "https://other/b"},
+		{"", "page.html", "page.html"},
+	}
+
+	for _, tt := range tests {
+		r := &runtime{opts: Options{BaseURL: tt.base}}
+		if got := r.resolve(tt.ref); got != tt.want {
+			t.Errorf("resolve(base=%q, ref=%q) = %q, want %q", tt.base, tt.ref, got, tt.want)
+		}
+	}
+}

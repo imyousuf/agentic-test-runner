@@ -3,6 +3,7 @@ package testscript
 import (
 	"errors"
 	"fmt"
+	neturl "net/url"
 	"strings"
 	"time"
 
@@ -251,17 +252,28 @@ func (r *runtime) jsForward() {
 
 // resolve expands a path against atr.base so scripts can be written against
 // relative URLs and run at any host.
-func (r *runtime) resolve(url string) string {
-	if r.opts.BaseURL == "" || strings.Contains(url, "://") {
-		return url
+func (r *runtime) resolve(ref string) string {
+	if r.opts.BaseURL == "" || strings.Contains(ref, "://") {
+		return ref
 	}
-	// An empty path means "the base itself". Joining a "/" onto it would
-	// turn a base that names a document into a directory that does not
-	// exist.
-	if url == "" || url == "/" {
+	// An empty path means "the base itself".
+	if ref == "" {
 		return r.opts.BaseURL
 	}
-	return strings.TrimRight(r.opts.BaseURL, "/") + "/" + strings.TrimLeft(url, "/")
+
+	// Resolve the way a browser would, rather than by joining strings. A
+	// base URL routinely names a document — http://host/login.html — and
+	// joining "login.html" onto that produces login.html/login.html, which
+	// is a 404 the script then reports as a missing element.
+	base, err := neturl.Parse(r.opts.BaseURL)
+	if err != nil {
+		return ref
+	}
+	rel, err := neturl.Parse(ref)
+	if err != nil {
+		return ref
+	}
+	return base.ResolveReference(rel).String()
 }
 
 // --- interaction -------------------------------------------------------------
