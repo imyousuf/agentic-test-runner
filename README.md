@@ -131,6 +131,7 @@ Files Examined:
 - **[Configuration](docs/configuration.md)** - Config file and authentication setup
 - **[CLI Reference](docs/cli-reference.md)** - All commands and flags
 - **[Behavior Testing](docs/behavior-testing.md)** - Write browser tests in natural language
+- **[Compiled Behavior Tests](docs/behavior-compilation.md)** - Specs compile to JavaScript and replay with no model calls
 - **[Browser Server](docs/browser-server.md)** - HTTP server for programmatic browser control
 - **[In-Page Agent HUD](docs/browser-hud.md)** - Agent panel inside the browser window, with leak-free password filling
 - **[MCP Server](docs/mcp-server.md)** - MCP protocol server for CLI tool integration

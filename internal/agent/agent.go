@@ -22,6 +22,9 @@ type Agent struct {
 	maxIterations int
 	timeout       time.Duration
 	verbose       bool
+	// browser is set for agents that drive a page. RunBehavior needs it to
+	// execute the compiled script itself, not only through tools.
+	browser *browser.Browser
 }
 
 // Config holds configuration for creating an agent.

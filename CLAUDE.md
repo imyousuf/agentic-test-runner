@@ -72,6 +72,29 @@ For LLM-driven use, any LLM with shell access can drive ATR via plain `atr <subc
 
 1. **Command Analysis** (`atr run --cmd "go test ./..."`) — Executor runs the command; on failure, the agent loop starts with shell/read/grep tools to diagnose the issue and produce a summary, root cause, and recommendations.
 
+### Compiled Behavior Tests (`internal/testscript/`, `internal/agent/behavior_*.go`)
+
+A `.test.txt` spec compiles once to a sibling `.test.js` and replays with no
+model in the loop; the agent returns only to triage a failure.
+
+- `internal/testscript/` is an embedded **goja** JS runtime plus a host `atr`
+  library. No Node, no DOM, no network — scripts reach the browser only
+  through the library, which keeps ATR a single binary.
+- The **failure taxonomy** in `errors.go` is the load-bearing part.
+  `assertion` means the app is wrong and is *never* repaired — repairing an
+  assertion is indistinguishable from deleting the test. `not_found` and
+  `script` are repair candidates; `timeout` and `environment` are retried.
+  `RunBehavior` never calls the model for an assertion failure, which is both
+  the cost saving and the safety property.
+- `findElement`'s CSS/XPath branches return early and so never reach the
+  `ErrElementNotFound` at the end of the fallback chain. `asNotFound` maps
+  their deadline to it — without that, the most common drift case (a CSS
+  selector that no longer matches) is misclassified as environmental and
+  retried forever instead of repaired.
+- Compiled scripts are **committed**, and carry an `atr-spec-sha256` header.
+  A spec edit invalidates them; a whitespace-only edit does not, because a
+  reformat should not cost tokens.
+
 2. **Behavior Testing** (`atr run --behavior tests/login.test.txt`) — Parses `.test.txt` files with natural language test steps, launches a browser, and the agent drives browser tools to execute the steps and report pass/fail.
 
 ### Other Key Packages

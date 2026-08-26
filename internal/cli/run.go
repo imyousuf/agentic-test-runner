@@ -34,6 +34,10 @@ var (
 	behaviorFlag    string
 	browserURLFlag  string
 	headlessFlag    bool
+	recompileFlag   bool
+	noCompileFlag   bool
+	noRepairFlag    bool
+	interpretFlag   bool
 	sandboxFlag     bool // opt-in to enable sandbox (default: disabled for compatibility)
 	viewportFlag    string
 	cdpEndpointFlag string
@@ -87,6 +91,14 @@ will read the test specification and execute it using browser automation tools.`
 	runCmd.Flags().StringVar(&behaviorFlag, "behavior", "", "Path to .test.txt file or directory for browser behavior testing")
 	runCmd.Flags().StringVar(&browserURLFlag, "browser-url", "", "Base URL for behavior tests (overrides config)")
 	runCmd.Flags().BoolVar(&headlessFlag, "headless", false, "Run browser in headless mode (no visible window)")
+	runCmd.Flags().BoolVar(&recompileFlag, "recompile", false,
+		"Regenerate the compiled script even if it matches the spec")
+	runCmd.Flags().BoolVar(&noCompileFlag, "no-compile", false,
+		"Replay only; never call the model. Fails if a script is missing or stale (use in CI)")
+	runCmd.Flags().BoolVar(&noRepairFlag, "no-repair", false,
+		"Diagnose a drifted script but do not rewrite it")
+	runCmd.Flags().BoolVar(&interpretFlag, "interpret", false,
+		"Skip compilation and let the agent drive every step (slower, costs tokens per run)")
 	runCmd.Flags().BoolVar(&sandboxFlag, "sandbox", false, "Enable Chrome sandbox (disabled by default for Ubuntu 23.10+ compatibility)")
 	runCmd.Flags().StringVar(&viewportFlag, "viewport", "", "Viewport size (e.g., 1920x1080)")
 	runCmd.Flags().StringVar(&cdpEndpointFlag, "cdp-endpoint", "", "Connect to existing browser via CDP endpoint")
@@ -371,8 +383,9 @@ func runBehaviorTest(ctx context.Context, cfg *config.Config, cwd string) error 
 		baseURL = cfg.Behavior.BaseURL
 	}
 
-	// Create behavior agent
-	ag := agent.NewBehaviorAgent(agent.BehaviorConfig{
+	// Create behavior agent. The compiler agent carries the browser as well
+	// as the tools, because it runs compiled scripts itself.
+	ag := agent.NewCompilerAgent(agent.CompilerConfig{
 		LLMClient:     llmClient,
 		Browser:       b,
 		MaxIterations: cfg.Agent.MaxIterations,
@@ -418,39 +431,69 @@ func runBehaviorTest(ctx context.Context, cfg *config.Config, cwd string) error 
 			}
 		}
 
-		// Execute behavior test
-		result, err := ag.ExecuteBehaviorTest(ctx, &agent.BehaviorRequest{
-			TestFile:    testFile,
-			TestContent: string(content),
-			BaseURL:     baseURL,
+		if interpretFlag {
+			// Legacy path: the agent drives every step, every run.
+			result, err := ag.ExecuteBehaviorTest(ctx, &agent.BehaviorRequest{
+				TestFile:    testFile,
+				TestContent: string(content),
+				BaseURL:     baseURL,
+			})
+
+			closeTestTab(b, reusingServer, testPageIndex)
+
+			if err != nil {
+				fmt.Printf("✗ Test execution failed: %v\n", err)
+				failedTests = append(failedTests, testFile)
+				continue
+			}
+
+			formatter := output.NewTextFormatter()
+			formatted, err := formatter.Format(result)
+			if err != nil {
+				fmt.Printf("✗ Failed to format output: %v\n", err)
+				failedTests = append(failedTests, testFile)
+				continue
+			}
+			fmt.Println(formatted)
+
+			if result.IsFailure() {
+				failedTests = append(failedTests, testFile)
+			}
+			continue
+		}
+
+		// Compiled path: generate the script once, replay it for free after.
+		outcome, err := ag.RunBehavior(ctx, agent.RunRequest{
+			SpecPath:      testFile,
+			Spec:          string(content),
+			BaseURL:       baseURL,
+			Recompile:     recompileFlag,
+			NoCompile:     noCompileFlag,
+			NoRepair:      noRepairFlag,
+			ScriptTimeout: cfg.Agent.Timeout,
+			Reset: func(ctx context.Context) error {
+				if baseURL == "" {
+					return nil
+				}
+				return b.Navigate(ctx, baseURL)
+			},
+			Log: func(msg string) {
+				if verbose {
+					fmt.Printf("  %s\n", msg)
+				}
+			},
 		})
 
-		// Clean up test tab when reusing server
-		if reusingServer && testPageIndex >= 0 && testPageIndex < len(b.ListPages()) {
-			b.ClosePage(testPageIndex)
-			if len(b.ListPages()) > 0 {
-				b.SelectPage(0)
-			}
-		}
+		closeTestTab(b, reusingServer, testPageIndex)
 
 		if err != nil {
-			fmt.Printf("✗ Test execution failed: %v\n", err)
+			fmt.Printf("✗ %v\n", err)
 			failedTests = append(failedTests, testFile)
 			continue
 		}
 
-		// Format and print result
-		formatter := output.NewTextFormatter()
-		formatted, err := formatter.Format(result)
-		if err != nil {
-			fmt.Printf("✗ Failed to format output: %v\n", err)
-			failedTests = append(failedTests, testFile)
-			continue
-		}
-
-		fmt.Println(formatted)
-
-		if result.IsFailure() {
+		printBehaviorOutcome(testFile, outcome)
+		if !outcome.Passed() {
 			failedTests = append(failedTests, testFile)
 		}
 	}

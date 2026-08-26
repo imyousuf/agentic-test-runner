@@ -843,3 +843,17 @@ export GEMINI_API_KEY="your-key"           # Gemini API
 export GOOGLE_CLOUD_PROJECT="project-id"   # Vertex AI
 export ATR_MODEL="pro"                     # Use pro model
 ```
+
+## Compiled behavior tests
+
+`atr run --behavior` compiles a spec to JavaScript on first run and replays it
+after, so a passing run costs no model calls. See
+[Compiled Behavior Tests](behavior-compilation.md).
+
+| Flag | Effect |
+|------|--------|
+| *(none)* | Compile if needed, replay, repair on drift |
+| `--recompile` | Regenerate the script even if it matches the spec |
+| `--no-compile` | Replay only, never call the model. Fails if a script is missing or stale — use in CI |
+| `--no-repair` | Diagnose drift but leave the script alone |
+| `--interpret` | Skip compilation; the agent drives every step |
