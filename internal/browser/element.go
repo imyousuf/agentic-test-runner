@@ -872,6 +872,17 @@ func (b *Browser) GetMultipleElementScreenshots(selector string, perElementTimeo
 	for i, el := range elements {
 		result := ElementScreenshotResult{Index: i}
 
+		// Give each capture its own budget.
+		//
+		// The elements above came from a page bounded to 3 seconds for the
+		// *lookup*, and every element carries that context with it. Left
+		// alone, all the captures share one 3-second window between them, so
+		// a page with several images fails partway through with "context
+		// deadline exceeded" — and the per-element timeout below never
+		// applies, because it only bounds the wait on the channel, not the
+		// CDP call underneath.
+		el := el.Context(page.Timeout(timeout).GetContext())
+
 		// Use a goroutine with timeout for each element screenshot
 		type screenshotResult struct {
 			data []byte
