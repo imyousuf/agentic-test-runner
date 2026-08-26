@@ -107,6 +107,14 @@ func (s *Streamer) Mouse(m MouseMsg) error {
 		return fmt.Errorf("no page is selected")
 	}
 
+	// An intercepted HTML5 drag has to travel as drag events; Chrome does not
+	// consider a mouseMoved when deciding what a drop target sees.
+	if handled, err := s.dispatchDrag(m, page); err != nil {
+		return err
+	} else if handled {
+		return nil
+	}
+
 	var kind proto.InputDispatchMouseEventType
 	switch m.Kind {
 	case "pressed":

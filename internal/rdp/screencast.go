@@ -61,6 +61,8 @@ type Streamer struct {
 	// last holds the most recent frame. A static page produces one frame and
 	// then nothing, so a viewer that connects later needs this to see anything.
 	last *Frame
+	// drag is the HTML5 drag Chrome handed back, if one is in flight.
+	drag *dragSession
 }
 
 func NewStreamer(hub *Hub, opts Options) *Streamer {
@@ -267,6 +269,14 @@ func (s *Streamer) stream(page *rod.Page) error {
 	})()
 
 	everyNth := int(math.Max(1, math.Round(60/float64(s.opts.FPS))))
+	// Before the commit below, so a failure takes the same rollback path as the
+	// screencast rather than leaving committed state behind.
+	if err := s.interceptDrags(bound, gen); err != nil {
+		cancel()
+		s.publishStatus(false)
+		return err
+	}
+
 	q, mw, mh := s.opts.Quality, s.opts.MaxWidth, s.opts.MaxWidth*2
 	if err := (proto.PageStartScreencast{
 		Format:        proto.PageStartScreencastFormatJpeg,
@@ -321,6 +331,9 @@ func (s *Streamer) stop() {
 	// Clearing live matters: without it a stream() that fails after stop()
 	// leaves Live() reporting true with no page behind it.
 	s.live = false
+	// A drag belongs to the page it started on. Carrying it to the next tab
+	// would drop its payload somewhere the user never dragged it.
+	s.drag = nil
 	s.mu.Unlock()
 
 	if page != nil {
