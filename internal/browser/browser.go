@@ -15,7 +15,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/go-rod/rod"
@@ -1528,18 +1527,6 @@ func clearStaleProfileLock(userDataDir string) {
 	for _, name := range singletonFiles {
 		_ = os.Remove(filepath.Join(userDataDir, name))
 	}
-}
-
-// processAlive reports whether a pid refers to a running process.
-func processAlive(pid int) bool {
-	proc, err := os.FindProcess(pid)
-	if err != nil {
-		return false
-	}
-	// On Unix FindProcess always succeeds, so the signal is what actually
-	// answers the question. Signal 0 performs the permission and existence
-	// checks without delivering anything.
-	return proc.Signal(syscall.Signal(0)) == nil
 }
 
 // markProfileCleanExit tells Chrome the profile was closed properly.

@@ -70,8 +70,13 @@ jobs:
           # On linux-arm64 the rod browser auto-download has no Chromium
           # build for the architecture, so skip the browser-touching
           # packages there. PR CI on linux-amd64 already enforces these.
+          #
+          # internal/agent and internal/testscript launch a browser too: the
+          # compiled-behaviour tests drive real pages, and the secret-fill
+          # tests type into a real form. They belong on this list for exactly
+          # the same reason as the other two.
           if [ "${{ matrix.target }}" = "linux-arm64" ]; then
-            go test $(go list ./... | grep -Ev '/(internal/browser|internal/api)$')
+            go test $(go list ./... | grep -Ev '/(internal/browser|internal/api|internal/agent|internal/testscript)$')
           else
             go test ./...
           fi
