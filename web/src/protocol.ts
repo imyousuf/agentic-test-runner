@@ -1,4 +1,4 @@
-// Wire types shared with internal/rdp.
+// Wire types shared with internal/remote.
 
 export interface FrameHeader {
   seq: number;

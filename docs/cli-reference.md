@@ -528,7 +528,7 @@ The agent **cannot type passwords**. If a sudo / polkit / authentication prompt 
 
 ---
 
-## atr rdp
+## atr remote
 
 Serve a live view of the browser that ATR drives, as a web page. Chrome streams the
 page over the DevTools Protocol, so no X server, VNC, or desktop packages are needed —
@@ -538,13 +538,13 @@ it works against a headless browser on a server.
 
 ```bash
 # Watch the browser that "atr browser start" launched
-atr rdp
+atr remote
 
 # Another port, attached to a browser by endpoint
-atr rdp --port 9000 --attach cdp://127.0.0.1:9222
+atr remote --port 9000 --attach cdp://127.0.0.1:9222
 
 # Watch without the ability to click
-atr rdp --view-only
+atr remote --view-only
 ```
 
 The command prints a URL containing an access token:
@@ -563,7 +563,7 @@ watches.
 |------|---------|-------------|
 | `--port <n>` | `7788` | HTTP port |
 | `--bind <addr>` | `127.0.0.1` | Listen address. A non-loopback bind requires an explicit `--token` |
-| `--token <s>` | generated | Access token (or set `ATR_RDP_TOKEN`) |
+| `--token <s>` | generated | Access token (or set `ATR_REMOTE_TOKEN`) |
 | `--attach <url>` | discovered | CDP endpoint, such as `cdp://127.0.0.1:9222` |
 | `--view-only` | `false` | Refuse input from viewers |
 | `--quality <n>` | `60` | JPEG quality, 1 to 100 |
@@ -578,20 +578,20 @@ the port:
 ssh -L 7788:127.0.0.1:7788 myserver
 ```
 
-### atr rdp setup
+### atr remote setup
 
 Install a service that keeps the live view running: a systemd user unit on Linux, or a
-launchd agent on macOS. It generates an access token and stores it in `~/.atr/rdp.env`
+launchd agent on macOS. It generates an access token and stores it in `~/.atr/remote.env`
 with owner-only permissions, so the URL is stable across restarts.
 
 It does not install or start a browser — the browser belongs to ATR, and the live view
 attaches to whichever one ATR is driving.
 
 ```bash
-atr rdp setup                 # install, enable, and print the URL
-atr rdp setup --check         # report the state, change nothing
-atr rdp setup --port 9000     # use another port
-atr rdp setup --uninstall     # remove the service, keep the token
+atr remote setup                 # install, enable, and print the URL
+atr remote setup --check         # report the state, change nothing
+atr remote setup --port 9000     # use another port
+atr remote setup --uninstall     # remove the service, keep the token
 ```
 
 | Flag | Default | Description |
@@ -602,7 +602,7 @@ atr rdp setup --uninstall     # remove the service, keep the token
 | `--check` | `false` | Report the state and change nothing |
 | `--uninstall` | `false` | Remove the service, keep the token |
 
-See [Browser Live View](rdp-live-view.md) for the protocol, the foreground rule, and
+See [Browser Live View](remote-live-view.md) for the protocol, the foreground rule, and
 troubleshooting.
 
 ---

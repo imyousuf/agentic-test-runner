@@ -1,4 +1,4 @@
-package rdp
+package remote
 
 import (
 	"slices"

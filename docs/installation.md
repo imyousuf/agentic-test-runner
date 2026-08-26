@@ -9,7 +9,7 @@ This guide covers all methods for installing ATR.
 
 For building from source:
 - **Go 1.25** or later
-- **Node 22** or later, plus npm — only if you change the `atr rdp` live view.
+- **Node 22** or later, plus npm — only if you change the `atr remote` live view.
   The live view is a web application that is compiled into the binary. Its build
   output, `web/dist`, is committed, so building the Go code needs no Node at all.
   Run `make web` after editing anything under `web/src`, and commit the result.

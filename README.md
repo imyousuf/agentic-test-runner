@@ -13,7 +13,7 @@
 - **CLI Backend Support**: Use Claude CLI or Gemini CLI as backends - no API keys needed
 - **Cross-platform Desktop Control**: Mouse, keyboard, screen capture, window/app management on Linux (X11), macOS, and Windows via `atr computer`, with multi-monitor support and an in-process LLM agent (`atr computer ask`)
 - **MCP Server**: Expose browser AND desktop tools to any MCP-compatible client
-- **Browser Live View**: Watch the browser in a web page and take over when a step needs a person, such as a login with MFA, via `atr rdp`. No X server or VNC required
+- **Browser Live View**: Watch the browser in a web page and take over when a step needs a person, such as a login with MFA, via `atr remote`. No X server or VNC required
 - **Cross-Platform**: Works on Linux, macOS, and Windows
 - **Extensible**: Tool-based architecture for custom extensions
 
@@ -43,7 +43,7 @@ cd agentic-test-runner
 make install
 ```
 
-The `atr rdp` live view is a web application embedded in the binary. Its build
+The `atr remote` live view is a web application embedded in the binary. Its build
 output, `web/dist`, is committed, so neither path needs Node. Node 22+ is needed
 only to change the live view: run `make web` and commit the rebuilt assets.
 
@@ -146,7 +146,7 @@ Files Examined:
 - **[Compiled Behavior Tests](docs/behavior-compilation.md)** - Specs compile to JavaScript and replay with no model calls
 - **[Browser Server](docs/browser-server.md)** - HTTP server for programmatic browser control
 - **[In-Page Agent HUD](docs/browser-hud.md)** - Agent panel inside the browser window, with leak-free password filling
-- **[Browser Live View](docs/rdp-live-view.md)** - Watch and control the browser from a web page (`atr rdp`)
+- **[Browser Live View](docs/remote-live-view.md)** - Watch and control the browser from a web page (`atr remote`)
 - **[MCP Server](docs/mcp-server.md)** - MCP protocol server for CLI tool integration
 - **[Architecture](docs/architecture.md)** - How ATR works internally
 - **[llms.txt](docs/llms.txt)** - Quick reference for AI agents
@@ -225,7 +225,7 @@ Add to your project's `.gemini/settings.json`:
 
 See [MCP Server Documentation](docs/mcp-server.md) for the full list of browser and desktop tools exposed via MCP.
 
-## Browser Live View (`atr rdp`)
+## Browser Live View (`atr remote`)
 
 Watch the browser that ATR drives, in a web page, and take control when a step needs a
 person. Chrome streams the page over the DevTools Protocol, so no X server, no VNC, and no
@@ -234,7 +234,7 @@ desktop packages are needed. It works with a headless browser on a server.
 ```bash
 # On the machine that runs the browser
 atr browser start --headless
-atr rdp
+atr remote
 ```
 
 The command prints a URL with an access token:
@@ -254,7 +254,7 @@ while you watch.
 
 ```bash
 # On the server
-atr rdp setup                      # install a service that keeps it running
+atr remote setup                      # install a service that keeps it running
 
 # On your laptop
 ssh -L 7788:127.0.0.1:7788 myserver
@@ -262,8 +262,8 @@ ssh -L 7788:127.0.0.1:7788 myserver
 
 Then open `http://127.0.0.1:7788/?t=<token>`.
 
-`atr rdp setup` writes a systemd user unit on Linux, or a launchd agent on macOS, and stores
-a token in `~/.atr/rdp.env` so the URL is stable. Use `--check` to report the state, and
+`atr remote setup` writes a systemd user unit on Linux, or a launchd agent on macOS, and stores
+a token in `~/.atr/remote.env` so the URL is stable. Use `--check` to report the state, and
 `--uninstall` to remove the service.
 
 | Flag | Default | Purpose |
@@ -277,7 +277,7 @@ a token in `~/.atr/rdp.env` so the URL is stable. Use `--check` to report the st
 **Security**: a viewer gets full control of that browser and its cookies. The default bind is
 loopback only. Reach a remote machine through an SSH tunnel, not by opening the port.
 
-See [Browser Live View](docs/rdp-live-view.md) for the protocol, the foreground rule, and
+See [Browser Live View](docs/remote-live-view.md) for the protocol, the foreground rule, and
 troubleshooting.
 
 ## Desktop Control (`atr computer`)

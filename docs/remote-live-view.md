@@ -1,14 +1,14 @@
-# `atr rdp` — Browser Live View
+# `atr remote` — Browser Live View
 
 Status: draft for review
-Command: `atr rdp --port 7788`
+Command: `atr remote --port 7788`
 
 ## 1. Summary
 
 Add a command that serves a live view of the browser that ATR drives.
 
 ```
-atr rdp --port 7788
+atr remote --port 7788
 ```
 
 The command starts a small web server. The server attaches to ATR's browser as a second CDP
@@ -46,18 +46,18 @@ and the JPEG encoding.
                        └──────────────────────────────────────────┘  │
                                                                      ▼
                                                             ┌────────────────┐
-  atr rdp  (new) ──────┐                                    │    Chrome      │
+  atr remote  (new) ──────┐                                    │    Chrome      │
                        │  attach as a second CDP session ──▶│                │
                        │  screencast out, input in          └────────────────┘
                        └──────────────────────────────────────────
 ```
 
-`atr rdp` adds no code to the existing paths. It observes and drives the same browser.
+`atr remote` adds no code to the existing paths. It observes and drives the same browser.
 
 ### 3.2 Startup and discovery
 
 ```
-  atr rdp --port 7788
+  atr remote --port 7788
         │
         ├─▶ --attach flag set?            ── yes ─▶ use it
         │        no
@@ -88,7 +88,7 @@ and the JPEG encoding.
 ### 3.3 The frame path
 
 ```
-  Chrome            atr rdp                         browser tab (React)
+  Chrome            atr remote                         browser tab (React)
     │                  │                                  │
     │ screencastFrame  │                                  │
     ├─────────────────▶│                                  │
@@ -107,7 +107,7 @@ and the JPEG encoding.
 ### 3.4 The input path
 
 ```
-  React                       atr rdp                     Chrome
+  React                       atr remote                     Chrome
     │ pointerdown                 │                          │
     ├────────────────────────────▶│                          │
     │  {x,y in canvas pixels}     │ convert to page pixels   │
@@ -183,14 +183,14 @@ waits for a person costs no bandwidth.
 ## 5. Command
 
 ```
-atr rdp [flags]
+atr remote [flags]
 ```
 
 | Flag | Default | Purpose |
 |---|---|---|
 | `--port` | `7788` | The HTTP port. |
 | `--bind` | `127.0.0.1` | The listen address. |
-| `--token` | from `ATR_RDP_TOKEN` | The access token. One is generated when empty. |
+| `--token` | from `ATR_REMOTE_TOKEN` | The access token. One is generated when empty. |
 | `--attach` | discovered | A CDP endpoint. |
 | `--start` | `false` | Launch a browser when none runs. |
 | `--view-only` | `false` | Drop all input on the server. |
@@ -211,7 +211,7 @@ ATR live view
 ### 5.1 Subcommand: setup
 
 ```
-atr rdp setup [flags]
+atr remote setup [flags]
 ```
 
 | Flag | Default | Purpose |
@@ -223,7 +223,7 @@ atr rdp setup [flags]
 | `--uninstall` | `false` | Remove the service. Keep the token. |
 
 Setup installs a systemd user unit on Linux, or a launchd agent on macOS. It also writes a
-token to `~/.atr/rdp.env` with mode 0600, so the URL does not change between restarts.
+token to `~/.atr/remote.env` with mode 0600, so the URL does not change between restarts.
 
 Setup does not look for a browser, and it does not install one. The browser belongs to ATR
 itself. Setup also never runs `sudo`: a Linux user service needs lingering to survive a
@@ -235,7 +235,7 @@ logout, so setup prints `sudo loginctl enable-linger <user>` for you to run.
 
 ```bash
 atr browser start          # ATR starts the browser it will drive
-atr rdp                    # start the live view, it prints a URL with a token
+atr remote                    # start the live view, it prints a URL with a token
 ```
 
 Open the printed URL. You now watch the browser and can take control.
@@ -247,7 +247,7 @@ This is the usual case. The agent has no display, and a step needs a person.
 ```bash
 # 1. On the server
 atr browser start --headless     # a display is not needed, Chrome encodes the frames
-atr rdp setup                    # install the service, print the URL and the token
+atr remote setup                    # install the service, print the URL and the token
 
 # 2. On your laptop, forward the port
 ssh -L 7788:127.0.0.1:7788 myserver
@@ -268,10 +268,10 @@ control of that browser.
 ### Day to day
 
 ```bash
-atr rdp setup --check                  # the URL, the token, and the service state
-systemctl --user restart atr-rdp       # Linux, after the browser restarts
-journalctl --user -u atr-rdp -f        # Linux, follow the log
-grep ATR_RDP_TOKEN ~/.atr/rdp.env      # recover the token
+atr remote setup --check                  # the URL, the token, and the service state
+systemctl --user restart atr-remote       # Linux, after the browser restarts
+journalctl --user -u atr-remote -f        # Linux, follow the log
+grep ATR_REMOTE_TOKEN ~/.atr/remote.env      # recover the token
 ```
 
 ### When something looks wrong
@@ -395,17 +395,17 @@ A viewer gets full control of a browser and its cookies.
   controls and remain available in view-only mode. Selecting a tab does call
   `Page.bringToFront`, so a read-only viewer can still change which tab is in
   the foreground of the session it is watching.
-- Store the token owner-only: `~/.atr/rdp.env` and the launchd plist are both `0600`.
+- Store the token owner-only: `~/.atr/remote.env` and the launchd plist are both `0600`.
 
 ## 11. Package layout
 
 ```
-internal/cli/rdp.go         the cobra command
-internal/rdp/server.go      HTTP, the WebSocket, and the static files
-internal/rdp/screencast.go  the CDP screencast and the acknowledgement loop
-internal/rdp/input.go       the event mapping
-internal/rdp/hub.go         viewers and the frame fan-out
-internal/rdp/discover.go    the endpoint discovery order
+internal/cli/remote.go         the cobra command
+internal/remote/server.go      HTTP, the WebSocket, and the static files
+internal/remote/screencast.go  the CDP screencast and the acknowledgement loop
+internal/remote/input.go       the event mapping
+internal/remote/hub.go         viewers and the frame fan-out
+internal/remote/discover.go    the endpoint discovery order
 web/                        the React source and the build output
 ```
 
@@ -494,10 +494,11 @@ The spike replaced estimates with measurements.
 
 ## 16. Open questions
 
-1. Should `atr rdp` start a browser when none runs? The spec keeps `--start` off by default.
+1. Should `atr remote` start a browser when none runs? The spec keeps `--start` off by default.
 2. Should phase 1 include "Pause the agent"? The foreground conflict makes it more useful
    than it first appeared.
-3. Do you want `atr view` as an alias? RDP is the name of a Microsoft protocol, and this
-   command uses CDP and shows a page, not a desktop.
+3. ~~Do you want `atr view` as an alias? RDP is the name of a Microsoft protocol, and this
+   command uses CDP and shows a page, not a desktop.~~ Settled: the command is `atr remote`,
+   with `view` kept as an alias. It was renamed before shipping, so no migration was needed.
 4. Should input force the foreground? A click reaches a background tab, but you cannot see
    the result.

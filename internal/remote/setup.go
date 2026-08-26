@@ -1,4 +1,4 @@
-package rdp
+package remote
 
 import (
 	"bytes"
@@ -33,7 +33,7 @@ type SetupResult struct {
 	Notes       []string
 }
 
-const serviceName = "atr-rdp"
+const serviceName = "atr-remote"
 
 // tokenPath returns where the token file lives, without creating anything.
 func tokenPath() (string, error) {
@@ -41,11 +41,11 @@ func tokenPath() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to find the home directory: %w", err)
 	}
-	return filepath.Join(home, ".atr", "rdp.env"), nil
+	return filepath.Join(home, ".atr", "remote.env"), nil
 }
 
 // LookupToken reads the stored token without creating a directory or minting a
-// new one. "atr rdp setup --check" is documented to change nothing, so it must
+// new one. "atr remote setup --check" is documented to change nothing, so it must
 // not go through EnsureToken.
 func LookupToken() (token string, path string, found bool, err error) {
 	path, err = tokenPath()
@@ -60,7 +60,7 @@ func LookupToken() (token string, path string, found bool, err error) {
 		return "", path, false, fmt.Errorf("failed to read %s: %w", path, err)
 	}
 	for _, line := range strings.Split(string(data), "\n") {
-		if value, ok := strings.CutPrefix(strings.TrimSpace(line), "ATR_RDP_TOKEN="); ok && value != "" {
+		if value, ok := strings.CutPrefix(strings.TrimSpace(line), "ATR_REMOTE_TOKEN="); ok && value != "" {
 			return value, path, true, nil
 		}
 	}
@@ -74,7 +74,7 @@ func EnsureToken() (string, string, error) {
 	if err != nil {
 		return "", "", err
 	}
-	path := filepath.Join(dir, "rdp.env")
+	path := filepath.Join(dir, "remote.env")
 
 	data, err := os.ReadFile(path)
 	if err != nil && !os.IsNotExist(err) {
@@ -83,7 +83,7 @@ func EnsureToken() (string, string, error) {
 		return "", "", fmt.Errorf("failed to read %s: %w", path, err)
 	}
 	for _, line := range strings.Split(string(data), "\n") {
-		if value, ok := strings.CutPrefix(strings.TrimSpace(line), "ATR_RDP_TOKEN="); ok && value != "" {
+		if value, ok := strings.CutPrefix(strings.TrimSpace(line), "ATR_REMOTE_TOKEN="); ok && value != "" {
 			return value, path, nil
 		}
 	}
@@ -95,7 +95,7 @@ func EnsureToken() (string, string, error) {
 	token := hex.EncodeToString(buf)
 
 	// The file holds a secret, so keep it readable by the owner only.
-	if err := writeSecret(path, []byte("ATR_RDP_TOKEN="+token+"\n")); err != nil {
+	if err := writeSecret(path, []byte("ATR_REMOTE_TOKEN="+token+"\n")); err != nil {
 		return "", "", err
 	}
 	return token, path, nil
@@ -123,9 +123,9 @@ func ServicePath() (string, error) {
 	case "linux":
 		return filepath.Join(home, ".config", "systemd", "user", serviceName+".service"), nil
 	case "darwin":
-		return filepath.Join(home, "Library", "LaunchAgents", "com.atr.rdp.plist"), nil
+		return filepath.Join(home, "Library", "LaunchAgents", "com.atr.remote.plist"), nil
 	default:
-		return "", fmt.Errorf("no service support for %s; run \"atr rdp\" yourself", runtime.GOOS)
+		return "", fmt.Errorf("no service support for %s; run \"atr remote\" yourself", runtime.GOOS)
 	}
 }
 
@@ -184,9 +184,9 @@ After=network-online.target
 [Service]
 Type=simple
 EnvironmentFile=%s
-ExecStart="%s" rdp --port %d --bind %s --fps %d
+ExecStart="%s" remote --port %d --bind %s --fps %d
 Restart=always
-# "atr rdp setup" installs no browser by design, so "no browser running" is the
+# "atr remote setup" installs no browser by design, so "no browser running" is the
 # normal state right after install and the unit will exit until one appears.
 # Keep the retry cheap rather than respawning every few seconds.
 RestartSec=15
@@ -201,7 +201,7 @@ WantedBy=default.target
 
 	if _, err := exec.LookPath("systemctl"); err != nil {
 		result.Notes = append(result.Notes,
-			"systemctl was not found. Start the live view yourself with \"atr rdp\".")
+			"systemctl was not found. Start the live view yourself with \"atr remote\".")
 		return nil
 	}
 	for _, args := range [][]string{
@@ -272,11 +272,11 @@ func setupLaunchd(servicePath, binary, token string, opts SetupOptions, result *
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>com.atr.rdp</string>
+  <string>com.atr.remote</string>
   <key>ProgramArguments</key>
   <array>
     <string>%s</string>
-    <string>rdp</string>
+    <string>remote</string>
     <string>--port</string>
     <string>%d</string>
     <string>--bind</string>
@@ -286,7 +286,7 @@ func setupLaunchd(servicePath, binary, token string, opts SetupOptions, result *
   </array>
   <key>EnvironmentVariables</key>
   <dict>
-    <key>ATR_RDP_TOKEN</key>
+    <key>ATR_REMOTE_TOKEN</key>
     <string>%s</string>
   </dict>
   <key>RunAtLoad</key>
@@ -300,13 +300,13 @@ func setupLaunchd(servicePath, binary, token string, opts SetupOptions, result *
 `, xmlEscape(binary), opts.Port, xmlEscape(opts.Bind), opts.FPS, xmlEscape(token))
 
 	// The plist carries the token, so it gets the same owner-only treatment as
-	// the rdp.env file that EnsureToken writes.
+	// the remote.env file that EnsureToken writes.
 	if err := writeSecret(servicePath, []byte(plist)); err != nil {
 		return err
 	}
 
 	target := "gui/" + strconv.Itoa(os.Getuid())
-	_ = exec.Command("launchctl", "bootout", target+"/com.atr.rdp").Run()
+	_ = exec.Command("launchctl", "bootout", target+"/com.atr.remote").Run()
 	if out, err := exec.Command("launchctl", "bootstrap", target, servicePath).CombinedOutput(); err != nil {
 		return fmt.Errorf("launchctl bootstrap failed: %s", strings.TrimSpace(string(out)))
 	}
@@ -325,7 +325,7 @@ func Uninstall() (string, error) {
 	case "linux":
 		_ = exec.Command("systemctl", "--user", "disable", "--now", serviceName+".service").Run()
 	case "darwin":
-		_ = exec.Command("launchctl", "bootout", "gui/"+strconv.Itoa(os.Getuid())+"/com.atr.rdp").Run()
+		_ = exec.Command("launchctl", "bootout", "gui/"+strconv.Itoa(os.Getuid())+"/com.atr.remote").Run()
 	}
 
 	if err := os.Remove(servicePath); err != nil && !os.IsNotExist(err) {
@@ -352,7 +352,7 @@ func Status() (installed bool, running bool, path string) {
 		out, _ := exec.Command("systemctl", "--user", "is-active", serviceName+".service").Output()
 		return true, strings.TrimSpace(string(out)) == "active", path
 	case "darwin":
-		err := exec.Command("launchctl", "print", "gui/"+strconv.Itoa(os.Getuid())+"/com.atr.rdp").Run()
+		err := exec.Command("launchctl", "print", "gui/"+strconv.Itoa(os.Getuid())+"/com.atr.remote").Run()
 		return true, err == nil, path
 	}
 	return true, false, path

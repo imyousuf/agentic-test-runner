@@ -1,4 +1,4 @@
-package rdp
+package remote
 
 import (
 	"context"
@@ -81,7 +81,7 @@ func (s *Server) checkOrigin(r *http.Request) bool {
 	return host == "127.0.0.1" || host == "localhost" || host == "[::1]" || host == "::1"
 }
 
-const cookieName = "atr_rdp"
+const cookieName = "atr_remote"
 
 func (s *Server) matches(value string) bool {
 	return subtle.ConstantTimeCompare([]byte(value), []byte(s.token)) == 1

@@ -14,11 +14,11 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/imyousuf/agentic-test-runner/internal/rdp"
+	"github.com/imyousuf/agentic-test-runner/internal/remote"
 	"github.com/imyousuf/agentic-test-runner/web"
 )
 
-func newRDPCmd() *cobra.Command {
+func newRemoteCmd() *cobra.Command {
 	var (
 		port     int
 		bind     string
@@ -31,7 +31,7 @@ func newRDPCmd() *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use:     "rdp",
+		Use:     "remote",
 		Aliases: []string{"view"},
 		Short:   "Serve a live view of the browser in a web page",
 		Long: `Serve a live view of the browser that ATR drives.
@@ -42,29 +42,29 @@ over for a step that needs a person, such as a login.
 
 Examples:
   # Watch the browser that "atr browser start" launched
-  atr rdp
+  atr remote
 
   # Use another port, and attach to a browser by endpoint
-  atr rdp --port 9000 --attach cdp://127.0.0.1:9222
+  atr remote --port 9000 --attach cdp://127.0.0.1:9222
 
   # Watch without the ability to click
-  atr rdp --view-only`,
+  atr remote --view-only`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			// Whether the operator supplied a token has to be captured before
 			// one is generated, or the non-loopback check below can never fire.
-			supplied := token != "" || os.Getenv("ATR_RDP_TOKEN") != ""
+			supplied := token != "" || os.Getenv("ATR_REMOTE_TOKEN") != ""
 			if token == "" {
-				token = os.Getenv("ATR_RDP_TOKEN")
+				token = os.Getenv("ATR_REMOTE_TOKEN")
 			}
 			if token == "" {
-				token = rdp.NewToken()
+				token = remote.NewToken()
 			}
 			if !isLoopback(bind) && !supplied {
 				return fmt.Errorf(
 					"refusing to bind %s with a generated token.\n"+
 						"A viewer gets full control of the browser and its cookies, and the token "+
 						"would travel in a URL over plaintext HTTP.\n"+
-						"Prefer an SSH tunnel to 127.0.0.1, or pass --token / ATR_RDP_TOKEN "+
+						"Prefer an SSH tunnel to 127.0.0.1, or pass --token / ATR_REMOTE_TOKEN "+
 						"explicitly to confirm you intend this", bind)
 			}
 			if !isLoopback(bind) {
@@ -73,13 +73,13 @@ Examples:
 						"full control of the browser. Prefer an SSH tunnel.\n", bind)
 			}
 
-			cdpURL, err := rdp.Discover(attach)
+			cdpURL, err := remote.Discover(attach)
 			if err != nil {
 				return err
 			}
 
-			hub := rdp.NewHub()
-			streamer := rdp.NewStreamer(hub, rdp.Options{
+			hub := remote.NewHub()
+			streamer := remote.NewStreamer(hub, remote.Options{
 				Quality: quality, MaxWidth: maxWidth, FPS: fps, ViewOnly: viewOnly,
 			})
 			if err := streamer.Attach(cdpURL); err != nil {
@@ -100,7 +100,7 @@ Examples:
 			defer stop()
 			go streamer.Watch(ctx)
 
-			server := rdp.NewServer(hub, streamer, assets, token, viewOnly)
+			server := remote.NewServer(hub, streamer, assets, token, viewOnly)
 			addr := net.JoinHostPort(bind, fmt.Sprint(port))
 			httpServer := &http.Server{
 				Addr:              addr,
@@ -140,19 +140,19 @@ Examples:
 
 	cmd.Flags().IntVar(&port, "port", 7788, "HTTP port")
 	cmd.Flags().StringVar(&bind, "bind", "127.0.0.1", "Listen address")
-	cmd.Flags().StringVar(&token, "token", "", "Access token (or set ATR_RDP_TOKEN)")
+	cmd.Flags().StringVar(&token, "token", "", "Access token (or set ATR_REMOTE_TOKEN)")
 	cmd.Flags().StringVar(&attach, "attach", "", "CDP endpoint, such as cdp://127.0.0.1:9222")
 	cmd.Flags().BoolVar(&viewOnly, "view-only", false, "Refuse input from viewers")
 	cmd.Flags().IntVar(&quality, "quality", 60, "JPEG quality, 1 to 100")
 	cmd.Flags().IntVar(&maxWidth, "max-width", 1600, "Largest frame width")
 	cmd.Flags().IntVar(&fps, "fps", 20, "Target frame rate")
 
-	cmd.AddCommand(newRDPSetupCmd())
+	cmd.AddCommand(newRemoteSetupCmd())
 
 	return cmd
 }
 
-func newRDPSetupCmd() *cobra.Command {
+func newRemoteSetupCmd() *cobra.Command {
 	var (
 		port      int
 		bind      string
@@ -173,26 +173,26 @@ It does not install a browser. The browser belongs to ATR itself, and the live
 view attaches to whichever one ATR is driving.
 
 Examples:
-  atr rdp setup                 # install, enable, and print the URL
-  atr rdp setup --check         # report the state, change nothing
-  atr rdp setup --port 9000     # use another port
-  atr rdp setup --uninstall     # remove the service, keep the token`,
+  atr remote setup                 # install, enable, and print the URL
+  atr remote setup --check         # report the state, change nothing
+  atr remote setup --port 9000     # use another port
+  atr remote setup --uninstall     # remove the service, keep the token`,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			switch {
 			case check:
-				installed, running, path := rdp.Status()
+				installed, running, path := remote.Status()
 				fmt.Println("ATR live view service")
 				fmt.Printf("  Platform:  %s\n", runtime.GOOS)
 				fmt.Printf("  File:      %s\n", path)
 				fmt.Printf("  Installed: %t\n", installed)
 				fmt.Printf("  Running:   %t\n", running)
-				token, tokenPath, found, err := rdp.LookupToken()
+				token, tokenPath, found, err := remote.LookupToken()
 				if err != nil {
 					return err
 				}
 				if !found {
 					fmt.Printf("  Token:     none yet (%s)\n", tokenPath)
-					fmt.Println("  URL:       run \"atr rdp setup\" to generate one")
+					fmt.Println("  URL:       run \"atr remote setup\" to generate one")
 					return nil
 				}
 				fmt.Printf("  Token:     %s\n", tokenPath)
@@ -200,7 +200,7 @@ Examples:
 				return nil
 
 			case uninstall:
-				path, err := rdp.Uninstall()
+				path, err := remote.Uninstall()
 				if err != nil {
 					return err
 				}
@@ -210,7 +210,7 @@ Examples:
 				return nil
 			}
 
-			result, err := rdp.Setup(rdp.SetupOptions{Port: port, Bind: bind, FPS: fps})
+			result, err := remote.Setup(remote.SetupOptions{Port: port, Bind: bind, FPS: fps})
 			if err != nil {
 				return err
 			}

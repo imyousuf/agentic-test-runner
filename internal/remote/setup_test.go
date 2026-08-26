@@ -1,4 +1,4 @@
-package rdp
+package remote
 
 import (
 	"os"
@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-// "atr rdp setup --check" is documented to change nothing, so the lookup it
+// "atr remote setup --check" is documented to change nothing, so the lookup it
 // uses must not create a directory or mint a token.
 func TestLookupTokenWritesNothing(t *testing.T) {
 	home := t.TempDir()
@@ -80,11 +80,11 @@ func TestWriteSecretTightensAnExistingFile(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Windows has no POSIX mode bits")
 	}
-	path := filepath.Join(t.TempDir(), "rdp.env")
+	path := filepath.Join(t.TempDir(), "remote.env")
 	if err := os.WriteFile(path, []byte("old"), 0o644); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	if err := writeSecret(path, []byte("ATR_RDP_TOKEN=x\n")); err != nil {
+	if err := writeSecret(path, []byte("ATR_REMOTE_TOKEN=x\n")); err != nil {
 		t.Fatalf("writeSecret: %v", err)
 	}
 	info, err := os.Stat(path)
@@ -108,7 +108,7 @@ func TestLookupTokenReportsAReadFailure(t *testing.T) {
 	if _, _, err := EnsureToken(); err != nil {
 		t.Fatalf("EnsureToken: %v", err)
 	}
-	path := filepath.Join(home, ".atr", "rdp.env")
+	path := filepath.Join(home, ".atr", "remote.env")
 	if err := os.Chmod(path, 0o000); err != nil {
 		t.Fatalf("chmod: %v", err)
 	}

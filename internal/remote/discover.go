@@ -1,5 +1,5 @@
-// Package rdp serves a live view of the browser that ATR drives.
-package rdp
+// Package remote serves a live view of the browser that ATR drives.
+package remote
 
 import (
 	"encoding/json"
