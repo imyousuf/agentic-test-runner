@@ -3,7 +3,35 @@ package rdp
 import (
 	"slices"
 	"testing"
+
+	"github.com/go-rod/rod/lib/proto"
 )
+
+// Verified against Chrome 151: with "none" on the moves, dragstart never fires
+// and an HTML5 drag cannot begin. Chrome decides a move continues a drag from
+// "button", not from the held bitmask.
+func TestHeldButtonNamesTheButtonADragIsUsing(t *testing.T) {
+	cases := []struct {
+		name    string
+		buttons int
+		want    proto.InputMouseButton
+	}{
+		{"nothing held is a hover", 0, proto.InputMouseButtonNone},
+		{"left", 1, proto.InputMouseButtonLeft},
+		{"right", 2, proto.InputMouseButtonRight},
+		{"middle", 4, proto.InputMouseButtonMiddle},
+		{"left wins when several are held", 1 | 2, proto.InputMouseButtonLeft},
+		{"right before middle", 2 | 4, proto.InputMouseButtonRight},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := heldButton(c.buttons); got != c.want {
+				t.Errorf("heldButton(%d) = %q, want %q", c.buttons, got, c.want)
+			}
+		})
+	}
+}
 
 // Chrome runs no built-in editing action for a synthetic key event unless the
 // command travels with it, so the mapping is the whole of what makes Ctrl+A

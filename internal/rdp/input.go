@@ -97,6 +97,25 @@ func mouseButton(name string) proto.InputMouseButton {
 	}
 }
 
+// heldButton names the button a move should report, taken from CDP's held
+// bitmask (1 left, 2 right, 4 middle).
+//
+// A move carries no button of its own, but Chrome decides whether one
+// continues a drag by looking at "button", not at the held bitmask. Reporting
+// "none" while a button is down means dragstart never fires and an HTML5 drag
+// can never begin.
+func heldButton(buttons int) proto.InputMouseButton {
+	switch {
+	case buttons&1 != 0:
+		return proto.InputMouseButtonLeft
+	case buttons&2 != 0:
+		return proto.InputMouseButtonRight
+	case buttons&4 != 0:
+		return proto.InputMouseButtonMiddle
+	}
+	return proto.InputMouseButtonNone
+}
+
 // Mouse dispatches a pointer event.
 func (s *Streamer) Mouse(m MouseMsg) error {
 	if err := s.viewOnly(); err != nil {
@@ -136,7 +155,7 @@ func (s *Streamer) Mouse(m MouseMsg) error {
 		Buttons:    &buttons,
 	}
 	if kind == proto.InputDispatchMouseEventTypeMouseMoved && m.Button == "" {
-		ev.Button = proto.InputMouseButtonNone
+		ev.Button = heldButton(m.Buttons)
 		ev.ClickCount = 0
 	}
 	if err := ev.Call(page); err != nil {
