@@ -43,17 +43,16 @@ $(BUILD_DIR):
 all: build
 
 ## web: Build the live view web application into web/dist (needs Node 22+)
-##      Run this once before "make build"; web/dist is not committed.
+##      web/dist is committed: run this after changing web/src, and commit it.
 web:
 ifeq ($(wildcard web/node_modules),)
 	cd web && npm ci --no-audit --no-fund
 endif
 	cd web && npm run build
 
-# web/dist is gitignored build output, and every target that compiles Go needs
-# it to exist for //go:embed. Listing the sources means make rebuilds it when
-# they change and skips it otherwise, so a fresh clone works and an ordinary
-# build does not shell out to npm.
+# web/dist is committed, so //go:embed is satisfied on a fresh clone with no
+# Node. Listing the sources still means make refreshes it when they change and
+# skips it otherwise, so an ordinary build does not shell out to npm.
 WEB_SRC=$(wildcard web/src/*) web/index.html web/package.json \
 	web/package-lock.json web/vite.config.ts web/tsconfig.json
 

@@ -437,8 +437,9 @@ Build:
 
 - `make web` runs `npm ci && npm run build` into `web/dist`.
 - `web/embed.go` embeds it with `//go:embed all:dist`.
-- `web/dist` is build output and is not committed. `make web` runs before
-  `make build`, and both CI workflows build it before any Go step.
+- `web/dist` is build output but is committed, so `go install ...@latest` and a
+  fresh `go build ./...` work without Node. Run `make web` after changing
+  `web/src` and commit the result; CI rebuilds it and fails on drift.
 - A `noweb` build tag serves a short message, so a contributor without Node can build the Go
   code.
 

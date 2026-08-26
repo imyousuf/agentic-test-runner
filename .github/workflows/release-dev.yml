@@ -61,19 +61,10 @@ jobs:
             libxtst-dev libxss-dev libpng-dev \
             libxkbcommon-dev libx11-dev xclip xsel
 
-      # web/dist is build output and is not committed. It must exist before the
-      # test step, which compiles, not just before the build step.
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: npm
-          cache-dependency-path: web/package-lock.json
-
-      - name: Build web assets
-        working-directory: web
-        shell: bash
-        run: npm ci && npm run build
+      # No Node step: web/dist is committed, so the embedded assets are already
+      # present. CI's "web-assets" job is what guarantees they match web/src.
+      # Rebuilding here would ship whatever this runner produced instead of the
+      # reviewed artifact.
 
       # The build step goes through the Makefile so the version stamping has a
       # single definition, but GNU Make is not on the Windows runner's PATH.
