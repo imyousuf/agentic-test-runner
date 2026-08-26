@@ -79,11 +79,15 @@ func (b *Browser) StartRecording(initialURL string) error {
 				b.recording = nil
 				return fmt.Errorf("failed to navigate: %w", err)
 			}
-			page.MustWaitLoad()
+			// Not MustWaitLoad: a page that never finishes loading is a
+			// reason to record from where we are, not to kill the daemon.
+			_ = page.WaitLoad()
 		}
 		session.startURL = initialURL
 	} else if b.current >= 0 && b.current < len(b.pages) {
-		session.startURL = b.pages[b.current].MustInfo().URL
+		if info, err := b.pages[b.current].Info(); err == nil {
+			session.startURL = info.URL
+		}
 	}
 
 	// Inject recorder AFTER navigation so bindings are in the correct JS context

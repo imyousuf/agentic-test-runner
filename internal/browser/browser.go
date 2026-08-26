@@ -4,6 +4,7 @@ package browser
 import (
 	"archive/zip"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -11,8 +12,10 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/go-rod/rod"
@@ -177,6 +180,16 @@ func (b *Browser) Launch(ctx context.Context) error {
 		if err := os.MkdirAll(userDataDir, 0700); err != nil {
 			return fmt.Errorf("failed to create browser data directory %s: %w", userDataDir, err)
 		}
+
+		// A persisted profile keeps Chrome's single-instance lock. Stopping
+		// the daemon kills Chrome outright, so that lock routinely survives
+		// pointing at a process that no longer exists — and the next Chrome
+		// sees it, tries to hand the profile to an instance that is gone, and
+		// exits before rod can talk to it. The daemon then comes up with no
+		// browser behind it and the first command fails with a bare EOF.
+		clearStaleProfileLock(userDataDir)
+		markProfileCleanExit(userDataDir)
+		clearSessionRestore(userDataDir)
 		l = l.UserDataDir(userDataDir)
 	}
 
@@ -491,7 +504,12 @@ func (b *Browser) Connect(ctx context.Context, cdpEndpoint string) error {
 
 	// Ignore HTTPS certificate errors if configured (useful for local dev with self-signed certs)
 	if b.config.IgnoreHTTPSErrors {
-		browser.MustIgnoreCertErrors(true)
+		// Not the Must form: a browser that refuses this is still usable for
+		// everything that is not a self-signed certificate, and panicking
+		// here would take down a daemon that was about to work fine.
+		if err := browser.IgnoreCertErrors(true); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not disable certificate checking: %v\n", err)
+		}
 	}
 
 	b.browser = browser
@@ -593,7 +611,7 @@ func (b *Browser) NewPage(ctx context.Context, url string) error {
 		return fmt.Errorf("browser not launched")
 	}
 
-	page, err := rodBrowser.Page(proto.TargetCreateTarget{URL: url})
+	page, err := rodBrowser.Page(proto.TargetCreateTarget{URL: normalizeURL(url)})
 	if err != nil {
 		return fmt.Errorf("failed to create page: %w", err)
 	}
@@ -625,7 +643,10 @@ func (b *Browser) NewPage(ctx context.Context, url string) error {
 		_ = b.attachHudSession(hud, page)
 	}
 
-	info := page.MustInfo()
+	info, err := page.Info()
+	if err != nil {
+		return fmt.Errorf("failed to read the new page's target info: %w", err)
+	}
 
 	b.mu.Lock()
 	// The target listener may have registered this page already; either way
@@ -739,19 +760,54 @@ func (b *Browser) CurrentPage() (*rod.Page, error) {
 
 // ListPages returns information about all open pages.
 func (b *Browser) ListPages() []PageInfo {
-	b.mu.RLock()
-	defer b.mu.RUnlock()
+	b.mu.Lock()
+	defer b.mu.Unlock()
 
-	infos := make([]PageInfo, len(b.pages))
+	// A page can die without us hearing about it: the tab is closed from
+	// inside the browser, the renderer crashes, or a persisted profile is
+	// reopened and the old targets are gone. Asking such a page for its Info
+	// fails, and the Must form of that call panics — which, on the daemon,
+	// takes the whole server down and surfaces to the client as an
+	// unexplained EOF. Skip the dead ones and drop them from the list, so a
+	// stale tab costs a line of output rather than the process.
+	live := b.pages[:0]
+	infos := make([]PageInfo, 0, len(b.pages))
+	current := b.current
+
 	for i, page := range b.pages {
-		info := page.MustInfo()
-		infos[i] = PageInfo{
-			Index:   i,
+		info, err := page.Info()
+		if err != nil {
+			if i == b.current {
+				current = -1
+			} else if i < b.current {
+				current--
+			}
+			delete(b.targetIDs, proto.TargetTargetID(page.TargetID))
+			delete(b.ownedPages, page)
+			continue
+		}
+		infos = append(infos, PageInfo{
+			Index:   len(live),
 			URL:     info.URL,
 			Title:   info.Title,
 			Current: i == b.current,
-		}
+		})
+		live = append(live, page)
 	}
+
+	b.pages = live
+	if current >= len(b.pages) {
+		current = len(b.pages) - 1
+	}
+	if current < 0 && len(b.pages) > 0 {
+		// The selected tab is the one that died. Fall back to another rather
+		// than leaving the browser with nothing selected, which would turn
+		// every later command into "no page selected" until the user
+		// happened to run select-page.
+		current = 0
+	}
+	b.current = current
+
 	return infos
 }
 
@@ -812,6 +868,58 @@ func (b *Browser) HasPage() bool {
 	return len(b.pages) > 0
 }
 
+// normalizeURL supplies a scheme when the caller left one out.
+//
+// Chrome rejects "example.com" outright with "Cannot navigate to invalid
+// URL", which is a poor answer to something every address bar accepts. A
+// scheme is only ever added when there is none: anything already carrying one
+// — including about:, file:, data: and chrome: — passes through untouched.
+//
+// Loopback hosts get http rather than https. A dev server on localhost:3000
+// is overwhelmingly plain HTTP, and defaulting it to https produces a TLS
+// error that reads as if the server itself were broken.
+func normalizeURL(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return raw
+	}
+	if strings.Contains(trimmed, "://") {
+		return trimmed
+	}
+	// A scheme-like prefix carrying no "//" — about:blank, data:text/html,...
+	// The digits check keeps "localhost:3000" a host:port rather than a scheme.
+	if i := strings.Index(trimmed, ":"); i > 0 {
+		head := trimmed[:i]
+		if !strings.ContainsAny(head, "./") && !startsWithPort(trimmed[i+1:]) {
+			return trimmed
+		}
+	}
+
+	host := trimmed
+	if i := strings.IndexAny(host, "/:"); i >= 0 {
+		host = host[:i]
+	}
+	switch strings.ToLower(host) {
+	case "localhost", "127.0.0.1", "0.0.0.0", "[::1]":
+		return "http://" + trimmed
+	}
+	return "https://" + trimmed
+}
+
+// startsWithPort reports whether s begins with a bare port number.
+func startsWithPort(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r >= '0' && r <= '9' {
+			continue
+		}
+		return r == '/' || r == '?' || r == '#'
+	}
+	return true
+}
+
 // Navigate navigates the current page to the given URL.
 func (b *Browser) Navigate(ctx context.Context, url string) error {
 	page, err := b.CurrentPage()
@@ -819,7 +927,7 @@ func (b *Browser) Navigate(ctx context.Context, url string) error {
 		return err
 	}
 
-	if err := page.Navigate(url); err != nil {
+	if err := page.Navigate(normalizeURL(url)); err != nil {
 		return fmt.Errorf("navigation failed: %w", err)
 	}
 
@@ -859,7 +967,10 @@ func (b *Browser) CurrentURL() string {
 	if err != nil {
 		return ""
 	}
-	info := page.MustInfo()
+	info, err := page.Info()
+	if err != nil {
+		return ""
+	}
 	return info.URL
 }
 
@@ -869,7 +980,10 @@ func (b *Browser) PageTitle() string {
 	if err != nil {
 		return ""
 	}
-	info := page.MustInfo()
+	info, err := page.Info()
+	if err != nil {
+		return ""
+	}
 	return info.Title
 }
 
@@ -1084,9 +1198,10 @@ func (b *Browser) WaitForText(text string, timeout time.Duration) error {
 		return err
 	}
 
-	page = page.Timeout(timeout)
-	el := page.MustElementR("*", text)
-	if el == nil {
+	// ElementR rather than MustElementR: the Must form panics when the text
+	// never appears, which is the ordinary outcome of a wait that times out.
+	el, err := page.Timeout(timeout).ElementR("*", text)
+	if err != nil || el == nil {
 		return fmt.Errorf("text not found: %s", text)
 	}
 	return nil
@@ -1139,9 +1254,13 @@ func (b *Browser) startTargetListener() {
 		}
 	}()
 
-	// Register existing pages in target map
+	// Register existing pages in target map. A page that cannot be identified
+	// is already gone; tracking it would only produce a panic later.
 	for _, page := range b.pages {
-		info := page.MustInfo()
+		info, err := page.Info()
+		if err != nil {
+			continue
+		}
 		b.targetIDs[proto.TargetTargetID(info.TargetID)] = page
 	}
 
@@ -1311,7 +1430,10 @@ func (b *Browser) syncExistingPages() {
 	}
 
 	for _, page := range pages {
-		info := page.MustInfo()
+		info, err := page.Info()
+		if err != nil {
+			continue
+		}
 
 		// Skip non-page targets (though Pages() should only return pages)
 		if info.Type != "page" {
@@ -1359,5 +1481,136 @@ func (b *Browser) syncExistingPages() {
 
 	if len(b.pages) > 0 && b.current < 0 {
 		b.current = 0
+	}
+}
+
+// singletonFiles are the markers Chrome uses to enforce one instance per
+// profile. SingletonLock is a symlink whose name encodes the owning host and
+// pid, e.g. "myhost-12345".
+var singletonFiles = []string{"SingletonLock", "SingletonCookie", "SingletonSocket"}
+
+// clearStaleProfileLock removes Chrome's single-instance markers when the
+// process that created them is gone.
+//
+// Deliberately conservative: if the recorded pid is still alive, or the lock
+// was created on another host, or it cannot be read at all, the markers are
+// left exactly as they are. A real second instance must keep working, and
+// deleting a live lock would corrupt the profile of whoever owns it.
+func clearStaleProfileLock(userDataDir string) {
+	lock := filepath.Join(userDataDir, "SingletonLock")
+
+	target, err := os.Readlink(lock)
+	if err != nil {
+		// No lock, or not a symlink: nothing that can be reasoned about.
+		return
+	}
+
+	// "host-pid" — the pid is everything after the final dash.
+	dash := strings.LastIndex(target, "-")
+	if dash < 0 {
+		return
+	}
+	host, pidText := target[:dash], target[dash+1:]
+
+	pid, err := strconv.Atoi(pidText)
+	if err != nil || pid <= 0 {
+		return
+	}
+	if name, err := os.Hostname(); err != nil || name != host {
+		// Another machine wrote this lock — a profile on shared storage.
+		// Its owner may well still be running.
+		return
+	}
+	if processAlive(pid) {
+		return
+	}
+
+	for _, name := range singletonFiles {
+		_ = os.Remove(filepath.Join(userDataDir, name))
+	}
+}
+
+// processAlive reports whether a pid refers to a running process.
+func processAlive(pid int) bool {
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+	// On Unix FindProcess always succeeds, so the signal is what actually
+	// answers the question. Signal 0 performs the permission and existence
+	// checks without delivering anything.
+	return proc.Signal(syscall.Signal(0)) == nil
+}
+
+// markProfileCleanExit tells Chrome the profile was closed properly.
+//
+// Stopping the daemon kills Chrome rather than closing it, so a persisted
+// profile is left recorded as "Crashed" every single time. On the next launch
+// Chrome goes into crash recovery and session restore, and that machinery
+// tears down the target rod has just created — the page is made, its CDP
+// session dies underneath it, and the first command comes back as a bare EOF.
+// A fresh profile works, which is what makes this look like corruption rather
+// than a startup mode.
+//
+// Rewriting the two exit fields is the same thing every browser-automation
+// harness does. Nothing else in Preferences is touched, and any problem
+// reading or parsing the file means leaving it exactly as it was: a profile
+// that cannot be adjusted is still a profile the user may want to open.
+func markProfileCleanExit(userDataDir string) {
+	prefs := filepath.Join(userDataDir, "Default", "Preferences")
+
+	raw, err := os.ReadFile(prefs)
+	if err != nil {
+		return
+	}
+
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return
+	}
+
+	profile, ok := doc["profile"].(map[string]any)
+	if !ok {
+		return
+	}
+	if profile["exit_type"] == "Normal" && profile["exited_cleanly"] == true {
+		return
+	}
+	profile["exit_type"] = "Normal"
+	profile["exited_cleanly"] = true
+
+	updated, err := json.Marshal(doc)
+	if err != nil {
+		return
+	}
+
+	// Write through a temporary file so an interrupted write cannot leave the
+	// profile with truncated Preferences, which Chrome treats as a reset.
+	tmp := prefs + ".atr-tmp"
+	if err := os.WriteFile(tmp, updated, 0600); err != nil {
+		return
+	}
+	if err := os.Rename(tmp, prefs); err != nil {
+		_ = os.Remove(tmp)
+	}
+}
+
+// clearSessionRestore drops Chrome's saved open-tab state from a persisted
+// profile before launching.
+//
+// Chrome writes Sessions/ and Tabs/ on every run and replays them on the
+// next. In a normal browser that restores your tabs; under automation it
+// races the target rod has just created, and the created page's CDP session
+// is torn down underneath it — the caller gets a bare EOF from what looks
+// like a perfectly ordinary navigate, and it recurs on every start because
+// each successful run writes the state again.
+//
+// Only the open-tab bookkeeping is removed. Cookies, localStorage, saved
+// logins and every other reason to run --persist-session live elsewhere in
+// the profile and are left untouched, so the session the user actually cares
+// about survives.
+func clearSessionRestore(userDataDir string) {
+	for _, dir := range []string{"Sessions", "Tabs"} {
+		_ = os.RemoveAll(filepath.Join(userDataDir, "Default", dir))
 	}
 }

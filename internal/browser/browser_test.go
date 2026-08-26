@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -927,4 +928,145 @@ func TestBrowserFindElementByCSS_PseudoSelector(t *testing.T) {
 	if len(data) == 0 {
 		t.Error("card:first-child screenshot returned empty data")
 	}
+}
+
+// A page can die without the daemon hearing about it — a tab closed from
+// inside the browser, a crashed renderer, a persisted profile reopened with
+// stale targets. Asking such a page for its Info fails, and the Must form of
+// that call panics. On the daemon that panic kills the HTTP server, and the
+// client sees an unexplained EOF rather than an error.
+func TestListPagesSurvivesADeadPage(t *testing.T) {
+	resetFixture(t)
+	ctx := context.Background()
+
+	if err := testBrowser.NewPage(ctx, testFixtureURL+"/test_fixture.html"); err != nil {
+		t.Fatalf("NewPage: %v", err)
+	}
+	before := len(testBrowser.ListPages())
+	if before < 2 {
+		t.Fatalf("expected at least 2 pages, got %d", before)
+	}
+
+	// Close the newest tab behind the daemon's back, the way a user closing a
+	// tab in the browser window does — the daemon's bookkeeping is not told.
+	testBrowser.mu.RLock()
+	victim := testBrowser.pages[len(testBrowser.pages)-1]
+	testBrowser.mu.RUnlock()
+	if err := victim.Close(); err != nil {
+		t.Fatalf("closing the page directly: %v", err)
+	}
+
+	// Must not panic, and must drop the dead entry.
+	got := testBrowser.ListPages()
+	if len(got) != before-1 {
+		t.Errorf("ListPages returned %d pages, want %d after one died", len(got), before-1)
+	}
+	for _, p := range got {
+		if p.URL == "" {
+			t.Errorf("a dead page was reported instead of dropped: %+v", p)
+		}
+	}
+
+	// The browser must still be usable afterwards.
+	if err := testBrowser.Navigate(ctx, testFixtureURL+"/test_fixture.html"); err != nil {
+		t.Errorf("browser unusable after a dead page: %v", err)
+	}
+}
+
+// Chrome rejects a URL with no scheme, which is not a reasonable answer to
+// something every address bar accepts.
+func TestNormalizeURL(t *testing.T) {
+	tests := []struct{ in, want string }{
+		{"example.com", "https://example.com"},
+		{"example.com/path", "https://example.com/path"},
+		{"https://example.com", "https://example.com"},
+		{"http://example.com", "http://example.com"},
+		{"about:blank", "about:blank"},
+		{"file:///tmp/x.html", "file:///tmp/x.html"},
+		{"data:text/html,hi", "data:text/html,hi"},
+		// Loopback is overwhelmingly plain HTTP; https would give a TLS error
+		// that reads as if the dev server were broken.
+		{"localhost:3000", "http://localhost:3000"},
+		{"localhost", "http://localhost"},
+		{"127.0.0.1:8080/app", "http://127.0.0.1:8080/app"},
+		{"example.com:8443/x", "https://example.com:8443/x"},
+		{"", ""},
+	}
+	for _, tt := range tests {
+		if got := normalizeURL(tt.in); got != tt.want {
+			t.Errorf("normalizeURL(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
+
+// A persisted profile keeps Chrome's single-instance lock, and stopping the
+// daemon kills Chrome outright — so the lock routinely survives pointing at a
+// process that no longer exists. The next Chrome sees it, tries to hand the
+// profile to an instance that is gone, and exits before rod can talk to it:
+// the daemon comes up with no browser behind it and the first command fails
+// with a bare EOF.
+func TestClearStaleProfileLock(t *testing.T) {
+	host, err := os.Hostname()
+	if err != nil {
+		t.Skip("no hostname")
+	}
+
+	write := func(t *testing.T, dir, target string) {
+		t.Helper()
+		if err := os.Symlink(target, filepath.Join(dir, "SingletonLock")); err != nil {
+			t.Fatal(err)
+		}
+		for _, extra := range []string{"SingletonCookie", "SingletonSocket"} {
+			if err := os.Symlink("whatever", filepath.Join(dir, extra)); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	exists := func(dir, name string) bool {
+		_, err := os.Lstat(filepath.Join(dir, name))
+		return err == nil
+	}
+
+	t.Run("dead pid is cleared", func(t *testing.T) {
+		dir := t.TempDir()
+		// PID 2^30 is far above any real pid on Linux.
+		write(t, dir, fmt.Sprintf("%s-%d", host, 1<<30))
+
+		clearStaleProfileLock(dir)
+
+		for _, name := range singletonFiles {
+			if exists(dir, name) {
+				t.Errorf("%s survived a stale lock", name)
+			}
+		}
+	})
+
+	// A genuinely running second instance must keep its profile.
+	t.Run("live pid is left alone", func(t *testing.T) {
+		dir := t.TempDir()
+		write(t, dir, fmt.Sprintf("%s-%d", host, os.Getpid()))
+
+		clearStaleProfileLock(dir)
+
+		if !exists(dir, "SingletonLock") {
+			t.Error("a live lock was deleted; that would corrupt the running instance's profile")
+		}
+	})
+
+	// A profile on shared storage may be locked by another machine whose
+	// pids mean nothing here.
+	t.Run("another host is left alone", func(t *testing.T) {
+		dir := t.TempDir()
+		write(t, dir, fmt.Sprintf("%s-%d", "some-other-host", 1<<30))
+
+		clearStaleProfileLock(dir)
+
+		if !exists(dir, "SingletonLock") {
+			t.Error("a lock from another host was deleted")
+		}
+	})
+
+	t.Run("no lock is not an error", func(t *testing.T) {
+		clearStaleProfileLock(t.TempDir())
+	})
 }
