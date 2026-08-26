@@ -424,7 +424,7 @@ func runBehaviorTest(ctx context.Context, cfg *config.Config, cwd string) error 
 
 		// When reusing a server, always open a new tab to isolate the test,
 		// then close it afterward to leave the server's tabs untouched.
-		testPageIndex := -1
+		testPageTarget := ""
 		if reusingServer {
 			tabURL := testBaseURL
 			if tabURL == "" {
@@ -435,7 +435,12 @@ func runBehaviorTest(ctx context.Context, cfg *config.Config, cwd string) error 
 				failedTests = append(failedTests, testFile)
 				continue
 			}
-			testPageIndex = len(b.ListPages()) - 1
+			// The tab's target id, not its index: closing a tab renumbers the
+			// ones after it, so an index captured now can name one of the
+			// user's own tabs by the time the test finishes.
+			if pages := b.ListPages(); len(pages) > 0 {
+				testPageTarget = pages[len(pages)-1].TargetID
+			}
 		} else if testBaseURL != "" {
 			// Not reusing server: navigate to base URL in a new tab
 			if err := b.NewPage(ctx, testBaseURL); err != nil {
@@ -453,7 +458,7 @@ func runBehaviorTest(ctx context.Context, cfg *config.Config, cwd string) error 
 				BaseURL:     testBaseURL,
 			})
 
-			closeTestTab(b, reusingServer, testPageIndex)
+			closeTestTab(b, reusingServer, testPageTarget)
 
 			if err != nil {
 				fmt.Printf("✗ Test execution failed: %v\n", err)
@@ -499,7 +504,7 @@ func runBehaviorTest(ctx context.Context, cfg *config.Config, cwd string) error 
 			},
 		})
 
-		closeTestTab(b, reusingServer, testPageIndex)
+		closeTestTab(b, reusingServer, testPageTarget)
 
 		if err != nil {
 			fmt.Printf("✗ %v\n", err)

@@ -2,6 +2,7 @@ package browser
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +12,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/go-rod/rod"
+	"github.com/go-rod/rod/lib/cdp"
 
 	"github.com/imyousuf/agentic-test-runner/internal/config"
 )
@@ -60,9 +64,10 @@ func TestMain(m *testing.M) {
 // closing any extra tabs opened by previous tests.
 func resetFixture(t *testing.T) {
 	t.Helper()
-	// Close extra pages (keep only the first one)
-	for len(testBrowser.ListPages()) > 1 {
-		testBrowser.ClosePage(len(testBrowser.ListPages()) - 1)
+	// Close extra pages (keep only the first one). Index rather than length:
+	// a listing can leave a gap where a page did not answer.
+	for pages := testBrowser.ListPages(); len(pages) > 1; pages = testBrowser.ListPages() {
+		testBrowser.ClosePage(pages[len(pages)-1].Index)
 	}
 	if len(testBrowser.ListPages()) > 0 {
 		testBrowser.SelectPage(0)
@@ -935,6 +940,13 @@ func TestBrowserFindElementByCSS_PseudoSelector(t *testing.T) {
 // stale targets. Asking such a page for its Info fails, and the Must form of
 // that call panics. On the daemon that panic kills the HTTP server, and the
 // client sees an unexplained EOF rather than an error.
+//
+// The dead page is put back into the bookkeeping by hand, after the browser's
+// own targetDestroyed event has been allowed to arrive and be applied. Closing
+// a tab and listing straight afterwards races that event: the worker usually
+// removes the page first, so the listing is correct whether or not ListPages
+// handles a dead page at all, and the test passes against code that panics in
+// production.
 func TestListPagesSurvivesADeadPage(t *testing.T) {
 	resetFixture(t)
 	ctx := context.Background()
@@ -953,19 +965,40 @@ func TestListPagesSurvivesADeadPage(t *testing.T) {
 	if !opened {
 		t.Skip("could not open a second tab: the browser stalled on page load")
 	}
-	before := len(testBrowser.ListPages())
-	if before < 2 {
-		t.Fatalf("expected at least 2 pages, got %d", before)
-	}
 
-	// Close the newest tab behind the daemon's back, the way a user closing a
-	// tab in the browser window does — the daemon's bookkeeping is not told.
 	testBrowser.mu.RLock()
 	victim := testBrowser.pages[len(testBrowser.pages)-1]
 	testBrowser.mu.RUnlock()
+
+	// Close the tab behind the daemon's back, the way a user closing a tab in
+	// the browser window does.
 	if err := victim.Close(); err != nil {
 		t.Fatalf("closing the page directly: %v", err)
 	}
+	if _, err := victim.Info(); err == nil {
+		t.Fatal("the page still answers after Close, so this test would prove nothing")
+	}
+
+	// Let the targetDestroyed event land, so what follows is not racing it.
+	deadline := time.Now().Add(10 * time.Second)
+	for tracked(victim) {
+		if time.Now().After(deadline) {
+			t.Fatal("the browser never reported the closed tab")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	// Now put the dead page back, which is the state the event cannot produce:
+	// a page in the bookkeeping that is gone, with nothing on its way to say
+	// so. Selecting it as well pins the fallback — the daemon must not be
+	// left pointing at a tab that no longer exists.
+	testBrowser.mu.Lock()
+	testBrowser.pages = append(testBrowser.pages, victim)
+	testBrowser.targetIDs[victim.TargetID] = victim
+	testBrowser.ownedPages[victim] = true
+	testBrowser.current = len(testBrowser.pages) - 1
+	before := len(testBrowser.pages)
+	testBrowser.mu.Unlock()
 
 	// Must not panic, and must drop the dead entry.
 	got := testBrowser.ListPages()
@@ -977,11 +1010,41 @@ func TestListPagesSurvivesADeadPage(t *testing.T) {
 			t.Errorf("a dead page was reported instead of dropped: %+v", p)
 		}
 	}
+	if tracked(victim) {
+		t.Error("the dead page is still in the bookkeeping; nothing else will ever remove it")
+	}
+
+	// Every index the listing reports has to be one the daemon still accepts,
+	// and exactly one of them has to be the selected tab.
+	currents := 0
+	for _, p := range got {
+		if err := testBrowser.SelectPage(p.Index); err != nil {
+			t.Errorf("ListPages reported index %d, which SelectPage rejects: %v", p.Index, err)
+		}
+		if p.Current {
+			currents++
+		}
+	}
+	if len(got) > 0 && currents != 1 {
+		t.Errorf("the listing marked %d tabs as current, want exactly 1", currents)
+	}
 
 	// The browser must still be usable afterwards.
 	if err := testBrowser.Navigate(ctx, testFixtureURL+"/test_fixture.html"); err != nil {
 		t.Errorf("browser unusable after a dead page: %v", err)
 	}
+}
+
+// tracked reports whether the daemon still has the page in its bookkeeping.
+func tracked(page *rod.Page) bool {
+	testBrowser.mu.RLock()
+	defer testBrowser.mu.RUnlock()
+	for _, p := range testBrowser.pages {
+		if p == page {
+			return true
+		}
+	}
+	return false
 }
 
 // Chrome rejects a URL with no scheme, which is not a reasonable answer to
@@ -1002,6 +1065,22 @@ func TestNormalizeURL(t *testing.T) {
 		{"127.0.0.1:8080/app", "http://127.0.0.1:8080/app"},
 		{"example.com:8443/x", "https://example.com:8443/x"},
 		{"", ""},
+
+		// A path is not a host. Giving one a scheme turned a local file into
+		// a request to a name someone else can register.
+		{"login.html", "login.html"},
+		{"./login.html", "./login.html"},
+		{"../pages/login.html", "../pages/login.html"},
+		{"/tmp/x.html", "/tmp/x.html"},
+		{"pages/login.htm", "pages/login.htm"},
+		{"fixtures", "fixtures"},
+		{"fixtures/page", "fixtures/page"},
+		// A port says it is a machine after all.
+		{"buildbox:8080", "https://buildbox:8080"},
+		{"buildbox:8080/app", "https://buildbox:8080/app"},
+		// A real host that merely serves a page keeps its scheme: the last
+		// label is what decides, and "com" is a domain while "html" is not.
+		{"example.com/login.html", "https://example.com/login.html"},
 	}
 	for _, tt := range tests {
 		if got := normalizeURL(tt.in); got != tt.want {
@@ -1020,6 +1099,14 @@ func TestClearStaleProfileLock(t *testing.T) {
 	host, err := os.Hostname()
 	if err != nil {
 		t.Skip("no hostname")
+	}
+
+	// Creating a symlink on Windows needs SeCreateSymbolicLinkPrivilege, which
+	// the release runner does not have, and the lock this reasons about is a
+	// symlink Chrome writes. Where one cannot be made there is nothing here to
+	// test, and failing would report a missing privilege as a defect.
+	if err := os.Symlink("target", filepath.Join(t.TempDir(), "probe")); err != nil {
+		t.Skipf("symlinks are not available here: %v", err)
 	}
 
 	write := func(t *testing.T, dir, target string) {
@@ -1080,4 +1167,140 @@ func TestClearStaleProfileLock(t *testing.T) {
 	t.Run("no lock is not an error", func(t *testing.T) {
 		clearStaleProfileLock(t.TempDir())
 	})
+}
+
+// Only an error that says the tab is gone may evict it. A timeout or a dropped
+// message says nothing about whether the tab is still open, and forgetting one
+// on that basis strands it: still open, unreachable by every accessor, and no
+// longer closed by Close().
+func TestTargetGone(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"closed target", &cdp.Error{Code: -32602, Message: "No target with given id found"}, true},
+		{"closed session", &cdp.Error{Code: -32001, Message: "Session with given id not found"}, true},
+		{"wrapped", fmt.Errorf("reading info: %w", &cdp.Error{Message: "No target with given id found"}), true},
+		{"other cdp failure", &cdp.Error{Code: -32000, Message: "Runtime.evaluate timed out"}, false},
+		{"deadline", context.DeadlineExceeded, false},
+		{"plain", errors.New("websocket: close 1006 (abnormal closure)"), false},
+		{"nil", nil, false},
+	}
+	for _, tc := range cases {
+		if got := targetGone(tc.err); got != tc.want {
+			t.Errorf("targetGone(%s) = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+// waitLoad is what keeps a stalled page from becoming a stalled daemon. Every
+// caller that holds b.mu across it — StartRecording does — depends on this
+// returning.
+func TestWaitLoadIsBounded(t *testing.T) {
+	resetFixture(t)
+	// The tab this opens never finishes loading. Leaving it in the shared
+	// browser would hand every later test a target that is still navigating.
+	t.Cleanup(func() { resetFixture(t) })
+
+	hang := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(http.StatusOK)
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+		// Hold the response open, so the document never finishes and the load
+		// event never fires.
+		<-hang
+	}))
+	defer func() {
+		close(hang)
+		srv.Close()
+	}()
+
+	testBrowser.config.PageTimeout = time.Second
+	defer func() { testBrowser.config.PageTimeout = 0 }()
+
+	done := make(chan error, 1)
+	go func() { done <- testBrowser.NewPage(context.Background(), srv.URL) }()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("a page that never loads must not report success")
+		}
+		if !strings.Contains(err.Error(), "did not finish loading") {
+			t.Errorf("error = %v, want it to name the load timeout", err)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("waiting for a page that never loads did not come back; anything holding b.mu across this hangs the daemon")
+	}
+}
+
+// WaitForText takes text a person typed, and ElementR takes a regular
+// expression. Without quoting, ordinary punctuation is read as syntax: this
+// pattern matches "Sign up free" and not the string actually on the page.
+func TestWaitForTextTakesLiteralText(t *testing.T) {
+	resetFixture(t)
+
+	// This navigates the shared page away from the fixture.
+	t.Cleanup(func() { resetFixture(t) })
+
+	const phrase = "Sign up (free)"
+	if err := testBrowser.Navigate(context.Background(),
+		"data:text/html,<p>Sign%20up%20(free)</p>"); err != nil {
+		t.Fatalf("navigate: %v", err)
+	}
+
+	if err := testBrowser.WaitForText(phrase, 5*time.Second); err != nil {
+		t.Errorf("WaitForText(%q) = %v, want it found", phrase, err)
+	}
+}
+
+// A wait that times out has to say so. Collapsing every failure into "text not
+// found" threw away the only information the caller had.
+func TestWaitForTextKeepsTheRealError(t *testing.T) {
+	resetFixture(t)
+
+	err := testBrowser.WaitForText("no such text is on this page", 300*time.Millisecond)
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("error = %v, want it to wrap context.DeadlineExceeded", err)
+	}
+}
+
+// Chrome records microsecond timestamps in Preferences, which are far above
+// what a float64 holds exactly. Round-tripping the file through map[string]any
+// rewrote them on every start.
+func TestMarkProfileCleanExitKeepsLargeNumbersExact(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "Default"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	prefs := filepath.Join(dir, "Default", "Preferences")
+
+	const stamp = "13390000000000123"
+	original := `{"profile":{"exit_type":"Crashed","exited_cleanly":false,` +
+		`"last_engagement_time":` + stamp + `},"other":{"big":9007199254740993}}`
+	if err := os.WriteFile(prefs, []byte(original), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	markProfileCleanExit(dir)
+
+	updated, err := os.ReadFile(prefs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{stamp, "9007199254740993"} {
+		if !strings.Contains(string(updated), want) {
+			t.Errorf("%s was rewritten; Preferences is now %s", want, updated)
+		}
+	}
+	if !strings.Contains(string(updated), `"exit_type":"Normal"`) {
+		t.Errorf("the exit type was not marked clean: %s", updated)
+	}
 }

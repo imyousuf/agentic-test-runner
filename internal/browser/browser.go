@@ -3,6 +3,7 @@ package browser
 
 import (
 	"archive/zip"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -18,10 +20,12 @@ import (
 	"time"
 
 	"github.com/go-rod/rod"
+	"github.com/go-rod/rod/lib/cdp"
 	"github.com/go-rod/rod/lib/launcher"
 	"github.com/go-rod/rod/lib/proto"
 
 	"github.com/imyousuf/agentic-test-runner/internal/config"
+	"github.com/imyousuf/agentic-test-runner/internal/process"
 )
 
 // Browser manages browser lifecycle and page interactions.
@@ -644,6 +648,11 @@ func (b *Browser) NewPage(ctx context.Context, url string) error {
 
 	info, err := page.Info()
 	if err != nil {
+		// The tab exists even though it cannot be identified, and nothing has
+		// taken ownership of it: it is not in b.ownedPages, so Close() will
+		// not clean it up, and without a target id no accessor can reach it.
+		// Left alone it stays open for the life of the browser.
+		_ = page.Close()
 		return fmt.Errorf("failed to read the new page's target info: %w", err)
 	}
 
@@ -758,64 +767,138 @@ func (b *Browser) CurrentPage() (*rod.Page, error) {
 }
 
 // ListPages returns information about all open pages.
+//
+// The Info() probes run without b.mu held, for the reason NewPage documents:
+// each one is a CDP round trip that Chrome can be slow to answer, or never
+// answer at all when the renderer is wedged, and holding the browser lock
+// across them freezes every other caller and the target-event worker with
+// them. The lock is taken twice and briefly: once to copy the slice, once to
+// commit what the probes found.
 func (b *Browser) ListPages() []PageInfo {
-	b.mu.Lock()
-	defer b.mu.Unlock()
+	b.mu.RLock()
+	pages := make([]*rod.Page, len(b.pages))
+	copy(pages, b.pages)
+	b.mu.RUnlock()
 
 	// A page can die without us hearing about it: the tab is closed from
 	// inside the browser, the renderer crashes, or a persisted profile is
 	// reopened and the old targets are gone. Asking such a page for its Info
 	// fails, and the Must form of that call panics — which, on the daemon,
 	// takes the whole server down and surfaces to the client as an
-	// unexplained EOF. Skip the dead ones and drop them from the list, so a
-	// stale tab costs a line of output rather than the process.
-	live := b.pages[:0]
-	infos := make([]PageInfo, 0, len(b.pages))
-	current := b.current
-
-	for i, page := range b.pages {
+	// unexplained EOF.
+	//
+	// A page that fails for any other reason is not proven dead. It keeps its
+	// place in the bookkeeping and is merely absent from this listing, so a
+	// timeout or a dropped message cannot strand a tab that is still open --
+	// unreachable ever after, and no longer closed by Close().
+	live := make(map[*rod.Page]*proto.TargetTargetInfo, len(pages))
+	var gone []*rod.Page
+	for _, page := range pages {
 		info, err := page.Info()
-		if err != nil {
-			if i == b.current {
-				current = -1
-			} else if i < b.current {
-				current--
-			}
-			delete(b.targetIDs, proto.TargetTargetID(page.TargetID))
-			delete(b.ownedPages, page)
+		switch {
+		case err == nil:
+			live[page] = info
+		case targetGone(err):
+			gone = append(gone, page)
+		}
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	b.forgetPages(gone)
+
+	// Index is the page's real position in b.pages, not its position in this
+	// slice, so every index reported here is one SelectPage and ClosePage can
+	// still be given. A page that was opened while the probes were running has
+	// no info to report and is left for the next call, which is the only way
+	// this listing can have a gap in it.
+	infos := make([]PageInfo, 0, len(b.pages))
+	for i, page := range b.pages {
+		info, ok := live[page]
+		if !ok {
 			continue
 		}
 		infos = append(infos, PageInfo{
-			Index:   len(live),
-			URL:     info.URL,
-			Title:   info.Title,
-			Current: i == b.current,
+			Index:    i,
+			TargetID: string(info.TargetID),
+			URL:      info.URL,
+			Title:    info.Title,
+			Current:  i == b.current,
 		})
-		live = append(live, page)
 	}
-
-	b.pages = live
-	if current >= len(b.pages) {
-		current = len(b.pages) - 1
-	}
-	if current < 0 && len(b.pages) > 0 {
-		// The selected tab is the one that died. Fall back to another rather
-		// than leaving the browser with nothing selected, which would turn
-		// every later command into "no page selected" until the user
-		// happened to run select-page.
-		current = 0
-	}
-	b.current = current
-
 	return infos
 }
 
+// forgetPages drops pages that are known to be gone, exactly as
+// handleTargetDestroyed does for the ones the browser tells us about. Callers
+// must hold b.mu.
+//
+// The selected tab moving is the reason this is a step of its own rather than
+// something ListPages does in passing: a caller that asked for a listing has
+// no reason to expect the daemon's idea of the current tab to change under it.
+func (b *Browser) forgetPages(gone []*rod.Page) {
+	for _, dead := range gone {
+		for i, page := range b.pages {
+			if page != dead {
+				continue
+			}
+			b.pages = append(b.pages[:i], b.pages[i+1:]...)
+			delete(b.targetIDs, proto.TargetTargetID(dead.TargetID))
+			delete(b.ownedPages, dead)
+			switch {
+			case b.current == i:
+				// The selected tab is the one that died. Fall back to another
+				// rather than leaving the browser with nothing selected,
+				// which would turn every later command into "no page
+				// selected" until the user happened to run select-page.
+				b.current = 0
+			case b.current > i:
+				b.current--
+			}
+			break
+		}
+	}
+	if b.current >= len(b.pages) {
+		b.current = len(b.pages) - 1
+	}
+}
+
+// targetGone reports whether an error from a page means the tab itself is
+// gone, rather than a browser that is merely slow or briefly unreachable.
+//
+// Only the first kind justifies forgetting a page. Chrome answers a request
+// for a target it no longer has with a CDP error saying so, and that is the
+// signal; a timeout, a dropped websocket or a renderer that has not replied
+// yet says nothing about whether the tab is still open.
+func targetGone(err error) bool {
+	var cdpErr *cdp.Error
+	if !errors.As(err, &cdpErr) {
+		return false
+	}
+	for _, phrase := range []string{
+		"No target with given id",
+		"Session with given id not found",
+		"Target closed",
+	} {
+		if strings.Contains(cdpErr.Message, phrase) {
+			return true
+		}
+	}
+	return false
+}
+
 // PageInfo contains information about a page.
+//
+// Index is a position, and positions move: closing a tab renumbers the ones
+// after it. TargetID does not, so anything that has to name the same tab twice
+// — across a test run, across a REST call — should hold on to that instead.
 type PageInfo struct {
-	Index   int    `json:"index"`
-	URL     string `json:"url"`
-	Title   string `json:"title"`
-	Current bool   `json:"current"`
+	Index    int    `json:"index"`
+	TargetID string `json:"target_id"`
+	URL      string `json:"url"`
+	Title    string `json:"title"`
+	Current  bool   `json:"current"`
 }
 
 // SelectPage switches to the page at the given index.
@@ -902,7 +985,47 @@ func normalizeURL(raw string) string {
 	case "localhost", "127.0.0.1", "0.0.0.0", "[::1]":
 		return "http://" + trimmed
 	}
+
+	// A path is not a host, and giving one a scheme turns a local file into a
+	// request to a stranger: "login.html" would have fetched https://login.html,
+	// a name anyone may register, and "/tmp/x.html" the nonsense
+	// "https:///tmp/x.html". Chrome refusing a bare path says something true;
+	// both of those say something false and one of them leaves the machine.
+	if looksLikePath(trimmed, host) {
+		return trimmed
+	}
+
 	return "https://" + trimmed
+}
+
+// looksLikePath reports whether the input is a filesystem path rather than a
+// host name. host is the first segment, already split off by the caller.
+//
+// Anchored paths are unambiguous. A first segment with no dot in it cannot be
+// a public host, and one ending in .html or .htm is a file — neither is a
+// delegated top-level domain, so this is exact rather than a guess. It stops
+// there deliberately: .zip, .mov, .app and .dev all are real domains, and a
+// longer list of "obviously not a TLD" suffixes would start being wrong.
+func looksLikePath(trimmed, host string) bool {
+	switch {
+	case strings.HasPrefix(trimmed, "/"),
+		strings.HasPrefix(trimmed, "./"),
+		strings.HasPrefix(trimmed, "../"),
+		trimmed == "." || trimmed == "..":
+		return true
+	}
+	if !strings.Contains(host, ".") {
+		// A port makes it a host after all: "buildbox:8080" is a machine on
+		// the network, while "buildbox" on its own is far more likely to name
+		// a file in the tree.
+		rest := trimmed[len(host):]
+		return !strings.HasPrefix(rest, ":") || !startsWithPort(rest[1:])
+	}
+	switch strings.ToLower(host[strings.LastIndex(host, ".")+1:]) {
+	case "html", "htm":
+		return true
+	}
+	return false
 }
 
 // startsWithPort reports whether s begins with a bare port number.
@@ -1199,8 +1322,16 @@ func (b *Browser) WaitForText(text string, timeout time.Duration) error {
 
 	// ElementR rather than MustElementR: the Must form panics when the text
 	// never appears, which is the ordinary outcome of a wait that times out.
-	el, err := page.Timeout(timeout).ElementR("*", text)
-	if err != nil || el == nil {
+	//
+	// ElementR matches a regular expression, and every caller of this passes
+	// text a person typed. Quoting it keeps ordinary punctuation — "Sign up
+	// (free)", "20% off" — from being read as syntax and reported as text
+	// that never appeared, or as an invalid-pattern error nobody expected.
+	el, err := page.Timeout(timeout).ElementR("*", regexp.QuoteMeta(text))
+	if err != nil {
+		return fmt.Errorf("waiting for text %q: %w", text, err)
+	}
+	if el == nil {
 		return fmt.Errorf("text not found: %s", text)
 	}
 	return nil
@@ -1520,7 +1651,7 @@ func clearStaleProfileLock(userDataDir string) {
 		// Its owner may well still be running.
 		return
 	}
-	if processAlive(pid) {
+	if process.Alive(pid) {
 		return
 	}
 
@@ -1551,8 +1682,14 @@ func markProfileCleanExit(userDataDir string) {
 		return
 	}
 
+	// UseNumber, because this round-trips the whole file: Chrome stores
+	// microsecond timestamps well above 2^53, and decoding those into float64
+	// would quietly round them on every start. json.Number carries the
+	// original text through untouched.
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
 	var doc map[string]any
-	if err := json.Unmarshal(raw, &doc); err != nil {
+	if err := decoder.Decode(&doc); err != nil {
 		return
 	}
 

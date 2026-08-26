@@ -852,7 +852,18 @@ func SelectPage(_ context.Context, b *browser.Browser, req SelectPageRequest) (S
 	if err := b.SelectPage(req.Index); err != nil {
 		return SelectPageResult{}, fmt.Errorf("failed to select page: %w", err)
 	}
-	return SelectPageResult{Pages: b.ListPages(), Current: req.Index}, nil
+	// Current comes from the listing rather than from the request: listing can
+	// discover that a tab has died and renumber the ones after it, and echoing
+	// the requested index back would then name a tab nobody selected.
+	pages := b.ListPages()
+	current := req.Index
+	for _, p := range pages {
+		if p.Current {
+			current = p.Index
+			break
+		}
+	}
+	return SelectPageResult{Pages: pages, Current: current}, nil
 }
 
 // ClosePageRequest closes a tab by index.

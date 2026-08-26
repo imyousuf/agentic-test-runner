@@ -14,13 +14,24 @@ import (
 )
 
 // closeTestTab drops the isolated tab a test ran in, when one was opened.
-func closeTestTab(b *browser.Browser, reusingServer bool, testPageIndex int) {
-	if !reusingServer || testPageIndex < 0 || testPageIndex >= len(b.ListPages()) {
+//
+// The tab is found by target id and closed at whatever index it holds now. An
+// index captured when the tab was opened does not survive the run: any tab
+// closing before this point renumbers the ones after it, and closing a stale
+// index would take one of the user's own tabs instead.
+func closeTestTab(b *browser.Browser, reusingServer bool, testPageTarget string) {
+	if !reusingServer || testPageTarget == "" {
 		return
 	}
-	b.ClosePage(testPageIndex)
-	if len(b.ListPages()) > 0 {
-		b.SelectPage(0)
+	for _, p := range b.ListPages() {
+		if p.TargetID != testPageTarget {
+			continue
+		}
+		b.ClosePage(p.Index)
+		if len(b.ListPages()) > 0 {
+			b.SelectPage(0)
+		}
+		return
 	}
 }
 

@@ -75,13 +75,17 @@ func (b *Browser) StartRecording(initialURL string) error {
 			}
 		} else {
 			page := b.pages[b.current]
-			if err := page.Navigate(initialURL); err != nil {
+			if err := page.Navigate(normalizeURL(initialURL)); err != nil {
 				b.recording = nil
 				return fmt.Errorf("failed to navigate: %w", err)
 			}
-			// Not MustWaitLoad: a page that never finishes loading is a
-			// reason to record from where we are, not to kill the daemon.
-			_ = page.WaitLoad()
+			// b.waitLoad rather than page.WaitLoad: this runs with b.mu held,
+			// and rod's WaitLoad has no deadline of its own, so a page that
+			// never fires load would hold the browser lock — and therefore
+			// every other daemon call — for as long as the process lives.
+			// Bounded, a stalled page is a reason to record from where we
+			// are, which is what the ignored error means.
+			_ = b.waitLoad(page)
 		}
 		session.startURL = initialURL
 	} else if b.current >= 0 && b.current < len(b.pages) {

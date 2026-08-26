@@ -6,8 +6,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"syscall"
 	"time"
+
+	"github.com/imyousuf/agentic-test-runner/internal/process"
 )
 
 const (
@@ -108,15 +109,13 @@ func RemoveState() error {
 }
 
 // IsProcessRunning checks if a process with the given PID is running.
+//
+// The test itself lives in internal/process because internal/browser needs the
+// same answer and cannot import this package. The copy that used to be here
+// sent signal 0, which Windows does not support: it fails for every pid, so a
+// running daemon reported as stopped.
 func IsProcessRunning(pid int) bool {
-	process, err := os.FindProcess(pid)
-	if err != nil {
-		return false
-	}
-
-	// On Unix, FindProcess always succeeds, so we need to send signal 0 to check
-	err = process.Signal(syscall.Signal(0))
-	return err == nil
+	return process.Alive(pid)
 }
 
 // GetRunningState returns the state if a browser server is running, nil otherwise.
