@@ -33,21 +33,6 @@ jobs:
             libxtst-dev libxss-dev libpng-dev \
             libxkbcommon-dev libx11-dev xclip xsel
 
-      # web/dist is build output and is not committed, so it has to exist
-      # before any Go step: //go:embed all:dist is a compile-time error without
-      # it, and `go test` compiles too.
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: npm
-          cache-dependency-path: web/package-lock.json
-
-      - name: Build web assets
-        working-directory: web
-        shell: bash
-        run: npm ci && npm run build
-
       - name: Download dependencies
         run: go mod download
 
@@ -91,21 +76,6 @@ jobs:
             libxtst-dev libxss-dev libpng-dev \
             libxkbcommon-dev libx11-dev xclip xsel
 
-      # web/dist is build output and is not committed, so it has to exist
-      # before any Go step: //go:embed all:dist is a compile-time error without
-      # it, and `go test` compiles too.
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: npm
-          cache-dependency-path: web/package-lock.json
-
-      - name: Build web assets
-        working-directory: web
-        shell: bash
-        run: npm ci && npm run build
-
       - name: Run go vet
         run: go vet ./...
 
@@ -119,5 +89,42 @@ jobs:
           if [ -n "$(gofmt -l .)" ]; then
             echo "Code is not formatted. Run 'gofmt -w .'"
             gofmt -l .
+            exit 1
+          fi
+
+  # web/dist is committed so that "go install ...@latest" works: //go:embed
+  # resolves on the installing user's machine, from a module zip that contains
+  # tracked files only. Committing build output risks it drifting from web/src,
+  # so rebuild it here and fail if the result differs from what is checked in.
+  # Linux only: the check compares bytes, and it is the platform the artifact
+  # is built on.
+  web-assets:
+    name: Web assets are current
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Rebuild web assets
+        working-directory: web
+        run: npm ci && npm run build
+
+      # Vite puts a content hash in each filename, so changed sources produce a
+      # new file and orphan the old one. "git diff" alone does not see the new
+      # file, so check the porcelain status too.
+      - name: Verify committed web/dist matches the rebuild
+        run: |
+          if ! git diff --quiet -- web/dist || [ -n "$(git status --porcelain -- web/dist)" ]; then
+            echo "web/dist is out of date. Run 'make web' and commit the result."
+            git status --porcelain -- web/dist
+            git diff --stat -- web/dist
             exit 1
           fi

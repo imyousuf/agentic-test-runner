@@ -9,9 +9,10 @@ This guide covers all methods for installing ATR.
 
 For building from source:
 - **Go 1.25** or later
-- **Node 22** or later, plus npm — the `atr rdp` live view is a web application
-  that is compiled into the binary. `web/dist` is build output and is not
-  committed, so the Makefile builds it as part of any target that compiles Go.
+- **Node 22** or later, plus npm — only if you change the `atr rdp` live view.
+  The live view is a web application that is compiled into the binary. Its build
+  output, `web/dist`, is committed, so building the Go code needs no Node at all.
+  Run `make web` after editing anything under `web/src`, and commit the result.
 
 ## Installation Methods
 
@@ -68,32 +69,30 @@ Expand-Archive -Path "atr.zip" -DestinationPath "C:\Program Files\atr"
 [Environment]::SetEnvironmentVariable("Path", $env:Path + ";C:\Program Files\atr", "Machine")
 ```
 
-### Method 3: Build from Source
+### Method 3: Go Install
 
-Building needs **Go 1.25+ and Node 22+**. The `atr rdp` live view is a web
-application that is embedded in the binary, and `web/dist` is build output
-rather than a checked-in artifact, so it is built first:
+```bash
+go install github.com/imyousuf/agentic-test-runner/cmd/atr@latest
+```
+
+Needs **Go 1.25+** and no Node. The live view assets are committed to the
+repository, so they travel in the module and are embedded during the build.
+
+### Method 4: Build from Source
 
 ```bash
 git clone https://github.com/imyousuf/agentic-test-runner.git
 cd agentic-test-runner
-make install    # builds web/dist if needed, then installs to GOPATH/bin
+make install    # installs to GOPATH/bin
 ```
 
-`make build` puts the binary in `bin/atr` instead of installing it.
+`make build` puts the binary in `bin/atr` instead of installing it. A plain
+`go build ./...` also works on a fresh clone, because `web/dist` is checked in.
 
-`build`, `install`, `test`, `lint` and the cross-compile targets all depend on
-`web/dist`, and the Makefile rebuilds it whenever anything under `web/src` (or
-the web config) has changed. `make web` forces a rebuild.
-
-Building the Go code directly with `go build ./cmd/atr` skips that step, so on a
-fresh checkout it fails with `pattern all:dist: no matching files found`. That
-is the embedded web application missing, not a broken checkout — run `make web`
-first, or go through the Makefile.
-
-> **Note on `go install`:** `go install github.com/imyousuf/agentic-test-runner/cmd/atr@latest`
-> no longer works on its own, because the module does not carry the built web
-> assets. Use the install script or build from source.
+Node is needed only to change the live view. `make web` rebuilds `web/dist` from
+`web/src`, and the Makefile skips it when the sources have not changed. Commit
+the rebuilt assets with your change: CI rebuilds them and fails if the committed
+copy has drifted.
 
 #### Without Node
 

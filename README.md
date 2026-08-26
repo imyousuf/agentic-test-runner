@@ -31,17 +31,21 @@ curl -fsSL https://raw.githubusercontent.com/imyousuf/agentic-test-runner/main/i
 irm https://raw.githubusercontent.com/imyousuf/agentic-test-runner/main/install.ps1 | iex
 ```
 
-**From source** (needs Go 1.25+ and Node 22+):
+**With Go** (needs Go 1.25+):
+```bash
+go install github.com/imyousuf/agentic-test-runner/cmd/atr@latest
+```
+
+**From source** (needs Go 1.25+):
 ```bash
 git clone https://github.com/imyousuf/agentic-test-runner.git
 cd agentic-test-runner
-make web && make install
+make install
 ```
 
-`make web` builds the `atr rdp` live view that is embedded in the binary;
-`web/dist` is build output and is not committed. Without Node, build with
-`go build -tags noweb ./cmd/atr` — every command still works except the live
-view's web page.
+The `atr rdp` live view is a web application embedded in the binary. Its build
+output, `web/dist`, is committed, so neither path needs Node. Node 22+ is needed
+only to change the live view: run `make web` and commit the rebuilt assets.
 
 Or download from [Releases](https://github.com/imyousuf/agentic-test-runner/releases).
 
@@ -366,7 +370,7 @@ See [Configuration Guide](docs/configuration.md) for all options including CLI b
 
 ## Requirements
 
-- Go 1.25+ and Node 22+ with npm (for building from source)
+- Go 1.25+ (for building from source); Node 22+ with npm only to change the live view
 - One of the following LLM backends:
   - **Claude CLI** or **Gemini CLI** (recommended - no API key needed)
   - Google Gemini API key
