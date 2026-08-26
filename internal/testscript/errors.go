@@ -53,6 +53,16 @@ const (
 	// still means "the app is broken".
 	KindEnvironment FailureKind = "environment"
 
+	// KindConfig: the test asked for an input this checkout does not define.
+	// Nothing is wrong with the application or the script — the machine is
+	// not set up to run this test.
+	//
+	// Deliberately NOT repairable. The tempting "fix" for a missing value is
+	// to inline the literal back into the script, which would undo the whole
+	// reason inputs live outside it. The fix is to add the value, and a
+	// person has to decide what it should be.
+	KindConfig FailureKind = "config"
+
 	// KindScript: the generated JavaScript is itself wrong — a syntax error,
 	// a bad API call, a reference to an undefined variable. Always the
 	// agent's fault and always a repair candidate.
