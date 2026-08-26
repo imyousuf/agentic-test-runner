@@ -79,6 +79,9 @@ func (s *Server) registerRoutes() {
 
 	// AI-powered
 	s.mux.HandleFunc("/api/v1/ask", s.handleAsk)
+	s.mux.HandleFunc("/api/v1/hud/enable", s.handleHudEnable)
+	s.mux.HandleFunc("/api/v1/hud/disable", s.handleHudDisable)
+	s.mux.HandleFunc("/api/v1/hud/status", s.handleHudStatus)
 
 	// Recording
 	s.mux.HandleFunc("/api/v1/record/start", s.handleRecordStart)

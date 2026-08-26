@@ -241,6 +241,19 @@ server:
   read_timeout: "30s"
   write_timeout: "30s"
 
+# Secret References (used by the in-page agent HUD)
+#
+# Each entry maps a name to a command that prints the secret on stdout. ATR
+# runs the command and types the output straight into the field; the value is
+# never shown to the agent and never enters the conversation history.
+#
+# secrets:
+#   timeout: "60s"       # How long to wait for the password manager
+#   refs:
+#     github/password: "secret-tool lookup service atr account github/password"
+#     work/vpn: "pass show work/vpn"
+#     aws/key: "op read op://Private/aws/credential"
+
 # Update Configuration
 update:
   auto_update_dev: true  # Auto-update dev versions every 2 days

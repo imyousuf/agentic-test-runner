@@ -443,8 +443,34 @@ func (b *Browser) Snapshot(verbose bool) ([]ElementInfo, error) {
 
 // findElement finds an element using various strategies.
 // tryFind attempts to find an element using the given function with a per-attempt timeout.
+// elementActionTimeout bounds what a caller does with an element after
+// finding it — reading a property, selecting text, typing, clicking.
+// Generous, because rod waits for the element to become interactable and the
+// page may still be settling.
+const elementActionTimeout = 30 * time.Second
+
 func tryFind(page *rod.Page, timeout time.Duration, fn func(*rod.Page) (*rod.Element, error)) (*rod.Element, error) {
-	return fn(page.Timeout(timeout))
+	el, err := fn(page.Timeout(timeout))
+	if err != nil {
+		return nil, err
+	}
+
+	// Rebind the element to a fresh, action-sized deadline.
+	//
+	// page.Timeout(d) hands fn a page whose context expires after d, and an
+	// element found through it inherits that context. That timeout is meant
+	// to bound the *search*; left in place it follows the element into
+	// whatever the caller does next. Fill, for instance, then makes three
+	// more CDP calls (Property, SelectAllText, Input) against whatever is
+	// left of a 500ms UID budget — which is enough when the connection is
+	// idle and not enough when anything else is talking to the same target,
+	// so fills fail with "context deadline exceeded" only under load.
+	//
+	// Rebinding to the page's own context would fix that but leave the action
+	// unbounded, and rod waits for interactability: an element that never
+	// becomes interactable would block the caller forever. So the action gets
+	// its own budget instead.
+	return el.Context(page.Timeout(elementActionTimeout).GetContext()), nil
 }
 
 func (b *Browser) findElement(page *rod.Page, target string) (*rod.Element, error) {
@@ -557,6 +583,8 @@ func (b *Browser) GetElementScreenshot(target string) ([]byte, error) {
 		return nil, err
 	}
 
+	defer b.hideHud(page)()
+
 	el, err := b.findElement(page, target)
 	if err != nil {
 		return nil, err
@@ -582,6 +610,8 @@ func (b *Browser) GetElementScreenshotByCSS(selector string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	defer b.hideHud(page)()
 
 	el, err := b.findElementByCSS(page, selector)
 	if err != nil {

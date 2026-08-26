@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/viper"
 
+	"github.com/imyousuf/agentic-test-runner/internal/secret"
 	"github.com/imyousuf/agentic-test-runner/pkg/llm"
 )
 
@@ -47,6 +48,9 @@ type Config struct {
 
 	// Executor contains command execution configuration.
 	Executor ExecutorConfig `mapstructure:"executor"`
+
+	// Secrets contains named secret references for the browser HUD agent.
+	Secrets secret.Config `mapstructure:"secrets"`
 
 	// Behavior contains browser behavior testing configuration.
 	Behavior BehaviorConfig `mapstructure:"behavior"`
@@ -336,6 +340,11 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("agent.temperature", 0.3)
 
 	// Executor defaults
+	// Secrets have no default refs: an entry only exists once the user has
+	// pointed it at a command in their own password manager.
+	v.SetDefault("secrets.timeout", "60s")
+	v.SetDefault("secrets.keep_trailing_newline", false)
+
 	v.SetDefault("executor.command_timeout", "2m")
 	v.SetDefault("executor.max_output_size", 10485760) // 10MB
 	v.SetDefault("executor.environment.auto_detect", true)

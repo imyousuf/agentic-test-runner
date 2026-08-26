@@ -958,3 +958,50 @@ func Ask(ctx context.Context, run AskRunner, req AskRequest) (AskResult, error) 
 	}
 	return AskResult{Answer: answer}, nil
 }
+
+// --- HUD --------------------------------------------------------------------
+
+// HudEnableRequest asks for the in-page agent panel to be installed on every
+// page of the browser. As with Ask, execution needs an LLM client, so the
+// surface supplies the handler factory.
+type HudEnableRequest struct {
+	WorkingDir string `json:"working_dir,omitempty" jsonschema_description:"Directory the agent's shell, read and search tools operate in. Defaults to the daemon's working directory."`
+}
+
+// HudResult reports the state of the panel.
+type HudResult struct {
+	Enabled bool `json:"enabled"`
+}
+
+// HudHandlerFactory builds the handler that executes HUD turns. Surfaces
+// (REST) supply this — the ops layer doesn't know about the LLM client/agent
+// stack.
+type HudHandlerFactory func(workingDir string) (browser.HudHandler, error)
+
+// HudEnable installs the in-page agent panel.
+func HudEnable(_ context.Context, b *browser.Browser, newHandler HudHandlerFactory, req HudEnableRequest) (HudResult, error) {
+	if newHandler == nil {
+		return HudResult{}, fmt.Errorf("hud handler factory not configured")
+	}
+	handler, err := newHandler(req.WorkingDir)
+	if err != nil {
+		return HudResult{}, err
+	}
+	if err := b.EnableHud(handler); err != nil {
+		return HudResult{}, fmt.Errorf("enabling hud: %w", err)
+	}
+	return HudResult{Enabled: true}, nil
+}
+
+// HudDisable removes the panel from every page.
+func HudDisable(_ context.Context, b *browser.Browser) (HudResult, error) {
+	if err := b.DisableHud(); err != nil {
+		return HudResult{}, fmt.Errorf("disabling hud: %w", err)
+	}
+	return HudResult{Enabled: false}, nil
+}
+
+// HudStatus reports whether the panel is installed.
+func HudStatus(_ context.Context, b *browser.Browser) (HudResult, error) {
+	return HudResult{Enabled: b.HudEnabled()}, nil
+}

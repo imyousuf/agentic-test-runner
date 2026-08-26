@@ -194,7 +194,36 @@ atr browser clean-snapshot <selector> [flags] # Get cleaned DOM subtree
 atr browser font-check <font-family>          # Check if a font is loaded
 atr browser viewport [width height] [flags]   # Get or set viewport size
 atr browser ask <question>                    # Ask AI about the page
+atr browser hud on|off|status                 # In-page agent panel
 ```
+
+#### `atr browser hud`
+
+Shows a floating agent panel inside the browser window, so you can hand work to
+the agent without leaving the page. Headed browsers only.
+
+```bash
+atr browser start --hud          # start headed with the panel showing
+atr browser hud on               # or turn it on later
+atr browser hud on --working-dir ~/src/myapp
+atr browser hud status
+atr browser hud off
+```
+
+The panel's agent can drive the browser, run shell commands, read files and
+search code. It fills passwords without ever seeing them — you give it the
+command, ATR runs it and types the output into the field:
+
+```
+fill the password field by running: pass show github/password
+```
+
+Name entries instead of commands by adding `secrets.refs` to
+`~/.atr/config.yaml`. See [In-Page Agent HUD](browser-hud.md).
+
+| Flag | Description |
+|------|-------------|
+| `--working-dir <dir>` | Directory the agent's shell, read and search tools operate in (default: current directory) |
 
 #### screenshot flags
 

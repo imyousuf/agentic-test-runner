@@ -76,16 +76,80 @@ For LLM-driven use, any LLM with shell access can drive ATR via plain `atr <subc
 
 ### Other Key Packages
 
-- **`internal/cli/`** — Cobra command definitions (run, config, browser, computer, mcp, test, version, update). Browser subcommands include: navigate, click, fill, hover, drag, wait, scroll, screenshot (with --selector, --selector-all, --full, --timeout), snapshot, clean-snapshot, computed-styles (with --selector, --selector-all), computed-styles-diff (with --selector), text, font-check, download-images, viewport, batch, eval, ask, record (with --output, --url), console, network, errors. Computer subcommands include: start, stop, status, screenshot, click, move, drag, scroll, hover, type, key, chord, position, displays, window (list/active/focus/minimize/maximize/restore/close/move/resize), app (launch/quit), reset-approvals, ask (LLM agent loop for natural-language tasks).
+- **`internal/cli/`** — Cobra command definitions (run, config, browser, computer, mcp, test, version, update). Browser subcommands include: navigate, click, fill, hover, drag, wait, scroll, screenshot (with --selector, --selector-all, --full, --timeout), snapshot, clean-snapshot, computed-styles (with --selector, --selector-all), computed-styles-diff (with --selector), text, font-check, download-images, viewport, batch, eval, ask, record (with --output, --url), console, network, errors, hud (on/off/status). Computer subcommands include: start, stop, status, screenshot, click, move, drag, scroll, hover, type, key, chord, position, displays, window (list/active/focus/minimize/maximize/restore/close/move/resize), app (launch/quit), reset-approvals, ask (LLM agent loop for natural-language tasks).
 - **`internal/config/`** — Configuration loading from `~/.atr/config.yaml`, env vars, and CLI flags via Viper
 - **`internal/executor/`** — Cross-platform shell execution with environment detection (Python venv, nvm)
 - **`internal/browser/`** — Browser lifecycle management using `go-rod/rod` (Chromium via CDP)
 - **`internal/computer/`** — Cross-platform desktop control via `go-vgo/robotgo` (mouse/keyboard/screen) and `xgbutil/ewmh` for X11 window management. Linux-X11 only in v1; macOS/Windows window management is stubbed. Includes a configurable countdown safety gate (`per-request` / `per-app` / `off`) before each gated action, abortable via SIGINT.
 - **`internal/api/`** — REST daemon (the execution engine). Holds session state and runs primitives. Started by `atr browser start` / `atr computer start`; CLI subcommands HTTP into it.
 - **`internal/mcp/`** — MCP JSON-RPC server for Claude Code integration (`atr mcp serve`). Peer surface to CLI/REST: embeds its own `Browser`/`Computer` and calls the same package methods.
+- **`internal/secret/`** — Fetches secrets by running the user's password-manager command. Used by `browser_fill_secret` so a credential is fetched and consumed inside one tool call and never becomes a tool result (which would put it in the LLM message history, re-sent on every later turn).
 - **`internal/capture/`** — Test failure context capture
 - **`internal/output/`** — Output formatting (text, file, summarization)
 - **`pkg/behavior/`** and **`pkg/result/`** — Public result types
+
+### Browser Concurrency Invariants (`internal/browser/browser.go`)
+
+Three rules, each learned from a deadlock. Break one and the symptom is a
+hang or a spurious `context deadline exceeded`, usually only under load:
+
+1. **Never block rod's event-dispatch goroutine.** `page.EachEvent` /
+   `browser.EachEvent` callbacks run on it; blocking there stops rod reading
+   further CDP messages, including the responses a blocked call is waiting
+   for. Target callbacks therefore hand work to `queueTargetEvent`, which is
+   drained by one worker (one, not one-per-event, so created/destroyed pairs
+   stay ordered).
+2. **Never hold `b.mu` across a CDP call.** `Runtime.enable` can stall
+   indefinitely when a renderer is wedged, and holding the lock through it
+   freezes every other caller. `NewPage` and `handleTargetCreated` both read
+   what they need under `RLock`, do the CDP setup unlocked, then take the
+   write lock only for the bookkeeping — and re-check the target map, since
+   the other path may have registered it meanwhile.
+3. **`go page.EachEvent(cb)()` spawns only `wait()`.** The `EachEvent(cb)`
+   call itself — including the `EnableDomain` it performs — runs on the
+   *calling* goroutine. Calling it inline (`wait := page.EachEvent(cb)`)
+   deadlocks: it subscribes and then blocks on `Runtime.enable` before
+   returning the `wait()` that drains the subscription.
+
+Related: `tryFind` rebinds a found element to a fresh action-sized deadline.
+The search timeout it was found under (500ms on the UID path) must not follow
+the element into the caller's next operations — `Fill` makes three more CDP
+calls after finding, which fit in the leftover budget on an idle connection
+and do not when anything else is talking to the same target.
+
+### In-Page Agent HUD (`internal/browser/hud.go`, `internal/agent/hud.go`)
+
+`atr browser hud on` injects a floating agent panel into every page of a headed
+browser. Notes for anyone touching it:
+
+- The panel is injected into a **named isolated world**, not the page's main
+  world, and talks to Go over a **CDP binding** rather than the network. A
+  `fetch`/WebSocket transport would be blocked by `connect-src` on any
+  strict-CSP site; a CDP binding is not a network request. Isolated-world
+  globals are also invisible to page script.
+- The UI lives in a **closed shadow root**. That is what keeps it out of
+  `Snapshot()`, which uses `querySelectorAll` and does not pierce shadow
+  boundaries. Screenshot paths call `hideHud(page)` to keep it out of captures.
+- **Nothing on the event-dispatch path may take `b.mu` or make a blocking CDP
+  call.** `page.EachEvent` callbacks run on rod's dispatch goroutine; blocking
+  there stalls every other listener. `handleHudMessage` takes the `*hudSession`
+  as a parameter for exactly this reason, and pushes replies from a goroutine.
+- `page.EachEvent` must be spawned (`go page.EachEvent(...)()`), never called
+  inline: it subscribes and *then* makes a blocking `Runtime.enable` call
+  before returning the `wait()` that drains the subscription. The resulting
+  window where the injected script has run but the subscription is not yet live
+  is covered by the panel retrying its `hello` until answered.
+- Panel pushes go through an **outbox queue**, never inline. Chrome serialises
+  commands per target, so a `Runtime.evaluate` painting the transcript in
+  between the agent's own commands eats into the budget of the very next
+  click or fill. The outbox is never closed — senders would race and panic;
+  `deliverLoop` exits on `done`.
+- `hud.attached` is keyed by **target ID, not `*rod.Page`**. `PageFromTarget`
+  returns a fresh Page value for a target it has already returned, so a
+  pointer key lets one tab be attached twice — and every panel message then
+  gets dispatched twice.
+- The HUD is deliberately **not exposed over MCP** — an agent enabling an
+  in-page panel for itself is not a useful operation.
 
 ### Claude Code Integration
 

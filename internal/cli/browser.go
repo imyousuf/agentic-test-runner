@@ -29,6 +29,7 @@ var (
 	browserDataDir      string
 	browserPersistFlag  bool
 	browserHeadless     bool
+	browserHud          bool
 	browserSandbox      bool // opt-in to enable sandbox (default: disabled for compatibility)
 	browserSystemChrome bool
 )
@@ -116,6 +117,7 @@ to control a browser via shell commands.`,
 
 	// AI-powered
 	browserCmd.AddCommand(newBrowserAskCmd())
+	browserCmd.AddCommand(newBrowserHudCmd())
 
 	// Recording
 	browserCmd.AddCommand(newBrowserRecordCmd())
@@ -143,6 +145,8 @@ func newBrowserStartCmd() *cobra.Command {
 		"Enable Chrome sandbox (disabled by default for Ubuntu 23.10+ compatibility)")
 	cmd.Flags().BoolVar(&browserSystemChrome, "system-chrome", false,
 		"Use system-installed Google Chrome (falls back to bundled browser if not found)")
+	cmd.Flags().BoolVar(&browserHud, "hud", false,
+		"Show the in-page agent panel once the browser is up")
 	return cmd
 }
 
@@ -205,6 +209,12 @@ func runBrowserStart(cmd *cobra.Command, args []string) error {
 	state, err := api.StartDaemon(browserPort)
 	if err != nil {
 		return err
+	}
+
+	// Before the JSON branch below returns early: --hud must work in both
+	// output modes.
+	if browserHud {
+		enableHudAfterStart()
 	}
 
 	if browserJSONOutput {

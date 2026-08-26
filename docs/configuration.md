@@ -568,3 +568,34 @@ Vertex AI is available in multiple regions. Choose one close to you:
 | `asia-southeast1` | Singapore |
 
 Use `global` for automatic routing (may have higher latency).
+
+## Secret References
+
+Used by the [in-page agent HUD](browser-hud.md) to fill passwords without ever
+disclosing them to the model. Each entry maps a name to a command that prints
+the secret on stdout; ATR runs the command and types the output straight into
+the field.
+
+```yaml
+secrets:
+  timeout: "60s"                # how long to wait for the password manager
+  keep_trailing_newline: false  # keep whitespace the command emits
+  refs:
+    github/password: "secret-tool lookup service atr account github/password"
+    work/vpn: "pass show work/vpn"
+    aws/key: "op read op://Private/aws/credential"
+```
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `secrets.refs` | (none) | Map of name to command |
+| `secrets.timeout` | `60s` | Bounds one fetch. Generous by default because managers block on biometric or passphrase prompts |
+| `secrets.keep_trailing_newline` | `false` | By default surrounding whitespace is trimmed, since most managers emit a trailing newline that is not part of the secret |
+
+Refs are optional — the agent can also be handed a command directly ("fill the
+password by running `pass show github/password`"). Configuring them means the
+command never has to be typed into the panel, where it would be visible on
+screen.
+
+Any manager that prints to stdout works: `pass`, `secret-tool`, `security`
+(macOS Keychain), `op`, `bw`, `gopass`, or your own script.

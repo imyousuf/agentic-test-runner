@@ -64,8 +64,31 @@ atr browser console          # Get console messages
 atr browser network          # Get network requests
 atr browser errors           # Get failed requests
 
+# In-page agent HUD (headed browsers only; for a human at the keyboard)
+atr browser start --hud      # Start headed with the agent panel showing
+atr browser hud on           # Or turn it on later
+atr browser hud off
+
 # Stop browser
 atr browser stop
+```
+
+### Filling passwords without leaking them
+
+The HUD agent has a `browser_fill_secret` tool that takes a field and either a
+configured `ref` or a `command`. ATR runs the command and types the output
+straight into the field; the value is never returned to the model.
+
+Never fetch a credential with `execute_command` and pass the result to
+`browser_fill` — tool results join the message history and are re-sent to the
+provider on every later turn, so one fill would put the password in every
+subsequent request.
+
+Configure named refs in `~/.atr/config.yaml`:
+```yaml
+secrets:
+  refs:
+    github/password: "pass show github/password"
 ```
 
 ## Browser Server Architecture

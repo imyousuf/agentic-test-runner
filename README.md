@@ -132,6 +132,7 @@ Files Examined:
 - **[CLI Reference](docs/cli-reference.md)** - All commands and flags
 - **[Behavior Testing](docs/behavior-testing.md)** - Write browser tests in natural language
 - **[Browser Server](docs/browser-server.md)** - HTTP server for programmatic browser control
+- **[In-Page Agent HUD](docs/browser-hud.md)** - Agent panel inside the browser window, with leak-free password filling
 - **[MCP Server](docs/mcp-server.md)** - MCP protocol server for CLI tool integration
 - **[Architecture](docs/architecture.md)** - How ATR works internally
 - **[llms.txt](docs/llms.txt)** - Quick reference for AI agents
@@ -156,7 +157,7 @@ ATR includes Claude Code skills for seamless AI-assisted browser automation. Ins
 
 | Skill | Description |
 |-------|-------------|
-| **atr-browser** | Control browser via ATR server (navigate, click, fill, screenshot, `browser ask`) |
+| **atr-browser** | Control browser via ATR server (navigate, click, fill, screenshot, `browser ask`, `browser hud`) |
 | **atr-computer** | Cross-platform desktop control (mouse, keyboard, screen, windows, apps, multi-monitor) plus `computer ask` — an in-process LLM agent that takes a natural-language instruction and drives the desktop end-to-end |
 | **atr-analyze** | Run tests with AI analysis (default for test suites - keeps context clean) |
 | **atr-behavior** | Run natural language browser tests |

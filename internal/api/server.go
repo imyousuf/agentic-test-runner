@@ -8,10 +8,13 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"sync"
 	"time"
 
+	"github.com/imyousuf/agentic-test-runner/internal/agent"
 	"github.com/imyousuf/agentic-test-runner/internal/browser"
 	"github.com/imyousuf/agentic-test-runner/internal/config"
+	"github.com/imyousuf/agentic-test-runner/pkg/llm"
 )
 
 // Server is the HTTP server for browser control.
@@ -21,6 +24,12 @@ type Server struct {
 	endpoint   string
 	mux        *http.ServeMux
 	appConfig  *config.Config
+
+	// The in-page agent HUD keeps a long-lived LLM client and conversation,
+	// unlike the per-request client used by /ask.
+	hudMu      sync.Mutex
+	hudSession *agent.HudSession
+	hudLLM     llm.Client
 }
 
 // ServerConfig holds configuration for the server.
@@ -125,6 +134,8 @@ func (s *Server) Shutdown() {
 			fmt.Fprintf(os.Stderr, "Warning: HTTP server shutdown error: %v\n", err)
 		}
 	}
+
+	s.shutdownHud()
 
 	if s.browser != nil {
 		s.browser.Close()

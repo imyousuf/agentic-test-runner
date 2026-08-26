@@ -53,6 +53,13 @@ type Browser struct {
 
 	// Recording session (nil when not recording)
 	recording *RecordingSession
+
+	// In-page agent HUD (nil when not enabled)
+	hud *hudSession
+
+	// targetEvents serialises target bookkeeping off rod's event-dispatch
+	// goroutine. See queueTargetEvent.
+	targetEvents chan func()
 }
 
 // ConsoleMessage represents a browser console message.
@@ -540,23 +547,35 @@ func (b *Browser) Close() error {
 
 // NewPage creates a new page/tab and navigates to the URL.
 func (b *Browser) NewPage(ctx context.Context, url string) error {
-	b.mu.Lock()
-	defer b.mu.Unlock()
+	// The CDP setup below runs without b.mu held, deliberately.
+	//
+	// setupEventListeners enables the Runtime and Network domains, and those
+	// calls block until Chrome answers. Chrome can be slow to answer, or not
+	// answer at all when the renderer is wedged. Holding the browser lock
+	// across that would freeze every other caller — and the target-event
+	// worker with them — on a single unlucky page. The lock exists to guard
+	// the page bookkeeping, so it is taken only for that.
+	b.mu.RLock()
+	rodBrowser := b.browser
+	headless := b.config.Headless
+	viewport := b.config.Viewport
+	hudOn := b.hud != nil
+	b.mu.RUnlock()
 
-	if b.browser == nil {
+	if rodBrowser == nil {
 		return fmt.Errorf("browser not launched")
 	}
 
-	page, err := b.browser.Page(proto.TargetCreateTarget{URL: url})
+	page, err := rodBrowser.Page(proto.TargetCreateTarget{URL: url})
 	if err != nil {
 		return fmt.Errorf("failed to create page: %w", err)
 	}
 
-	if b.config.Headless {
+	if headless {
 		// In headless mode, override the viewport since there's no physical window
 		if err := page.SetViewport(&proto.EmulationSetDeviceMetricsOverride{
-			Width:  b.config.Viewport.Width,
-			Height: b.config.Viewport.Height,
+			Width:  viewport.Width,
+			Height: viewport.Height,
 		}); err != nil {
 			return fmt.Errorf("failed to set viewport: %w", err)
 		}
@@ -571,13 +590,31 @@ func (b *Browser) NewPage(ctx context.Context, url string) error {
 	// Set up event listeners
 	b.setupEventListeners(page)
 
-	// Register in target ID map for tracking
-	info := page.MustInfo()
-	b.targetIDs[proto.TargetTargetID(info.TargetID)] = page
+	// Install the agent HUD into new tabs if it is enabled
+	if hudOn {
+		b.mu.RLock()
+		hud := b.hud
+		b.mu.RUnlock()
+		_ = b.attachHudSession(hud, page)
+	}
 
-	b.pages = append(b.pages, page)
-	b.current = len(b.pages) - 1
+	info := page.MustInfo()
+
+	b.mu.Lock()
+	// The target listener may have registered this page already; either way
+	// the map and the slice must agree.
+	if _, exists := b.targetIDs[proto.TargetTargetID(info.TargetID)]; !exists {
+		b.pages = append(b.pages, page)
+		b.targetIDs[proto.TargetTargetID(info.TargetID)] = page
+	}
+	for i, p := range b.pages {
+		if p == page {
+			b.current = i
+			break
+		}
+	}
 	b.ownedPages[page] = true
+	b.mu.Unlock()
 
 	// Wait for page load
 	if err := page.WaitLoad(); err != nil {
@@ -816,6 +853,8 @@ func (b *Browser) Screenshot(fullPage bool) ([]byte, error) {
 		return nil, err
 	}
 
+	defer b.hideHud(page)()
+
 	if fullPage {
 		return page.Screenshot(true, nil)
 	}
@@ -1030,10 +1069,48 @@ func (b *Browser) WaitForText(text string, timeout time.Duration) error {
 // - New tabs opened manually
 // - Tabs closed
 // - Tab switches (when user clicks on a different tab)
+// targetEventQueueSize bounds the backlog of target bookkeeping waiting to be
+// applied. Deep enough that the overflow path below is unreachable in
+// practice.
+const targetEventQueueSize = 256
+
+// queueTargetEvent hands work to the single worker started by
+// startTargetListener.
+//
+// Target callbacks must not run on rod's event-dispatch goroutine. They take
+// b.mu, and the created-target path additionally makes blocking CDP calls
+// (PageFromTarget, EnableDomain, SetViewport). Anything that blocks there
+// stops rod from reading further CDP messages — including the responses the
+// blocked call is waiting for. That deadlocks against any code holding b.mu
+// across a CDP call, which NewPage does: it holds the lock while
+// setupEventListeners enables the Runtime and Network domains.
+//
+// One worker rather than a goroutine per event, so that created/destroyed
+// pairs for the same target are still applied in the order they arrived.
+func (b *Browser) queueTargetEvent(fn func()) {
+	select {
+	case b.targetEvents <- fn:
+	default:
+		// Backlog full. Running it on its own goroutine can reorder events,
+		// which is a far smaller problem than blocking the dispatcher.
+		go fn()
+	}
+}
+
 func (b *Browser) startTargetListener() {
 	if b.browser == nil {
 		return
 	}
+
+	// Never closed: sends can come from rod's dispatcher at any time, and a
+	// send on a closed channel would panic. The worker parks on an empty
+	// channel and costs nothing.
+	b.targetEvents = make(chan func(), targetEventQueueSize)
+	go func() {
+		for fn := range b.targetEvents {
+			fn()
+		}
+	}()
 
 	// Register existing pages in target map
 	for _, page := range b.pages {
@@ -1049,75 +1126,16 @@ func (b *Browser) startTargetListener() {
 				return
 			}
 
-			b.mu.Lock()
-			defer b.mu.Unlock()
-
-			// Check if we already have this page
-			if _, exists := b.targetIDs[e.TargetInfo.TargetID]; exists {
-				return
-			}
-
-			// Get page from target ID
-			page, err := b.browser.PageFromTarget(e.TargetInfo.TargetID)
-			if err != nil {
-				// Could be a transient target, skip silently
-				return
-			}
-
-			// Set up event listeners for the new page
-			b.setupEventListeners(page)
-
-			if b.config.Headless {
-				// In headless mode, override viewport since there's no physical window
-				if b.config.Viewport.Width > 0 && b.config.Viewport.Height > 0 {
-					_ = page.SetViewport(&proto.EmulationSetDeviceMetricsOverride{
-						Width:  b.config.Viewport.Width,
-						Height: b.config.Viewport.Height,
-					})
-				}
-			} else {
-				// In headed mode, clear any stale viewport override so the page uses the real window size
-				b.clearViewportOverride(page)
-			}
-
-			// Apply spoofed user agent
-			b.applyUserAgent(page)
-
-			// Inject recorder into new tabs if recording is active
-			if b.recording != nil && b.recording.active {
-				b.injectRecorder(page)
-			}
-
-			// Add to tracked pages
-			b.pages = append(b.pages, page)
-			b.targetIDs[e.TargetInfo.TargetID] = page
-
-			// If this is the first page, set it as current
-			if b.current < 0 {
-				b.current = len(b.pages) - 1
-			}
+			info := e.TargetInfo
+			b.queueTargetEvent(func() {
+				b.handleTargetCreated(info)
+			})
 		},
 		func(e *proto.TargetTargetDestroyed) {
-			b.mu.Lock()
-			defer b.mu.Unlock()
-
-			// Find and remove the destroyed page
-			if page, exists := b.targetIDs[e.TargetID]; exists {
-				delete(b.targetIDs, e.TargetID)
-
-				// Find and remove from pages slice
-				for i, p := range b.pages {
-					if p == page {
-						b.pages = append(b.pages[:i], b.pages[i+1:]...)
-
-						// Adjust current index
-						if b.current >= len(b.pages) {
-							b.current = len(b.pages) - 1
-						}
-						break
-					}
-				}
-			}
+			id := e.TargetID
+			b.queueTargetEvent(func() {
+				b.handleTargetDestroyed(id)
+			})
 		},
 		func(e *proto.TargetTargetInfoChanged) {
 			// Track tab switches - when a page becomes the active/focused tab
@@ -1125,26 +1143,133 @@ func (b *Browser) startTargetListener() {
 				return
 			}
 
-			b.mu.Lock()
-			defer b.mu.Unlock()
-
-			// Find the page in our tracked pages
-			if page, exists := b.targetIDs[e.TargetInfo.TargetID]; exists {
-				// Update current to this page if it's now attached (focused)
-				if e.TargetInfo.Attached {
-					for i, p := range b.pages {
-						if p == page {
-							b.current = i
-							break
-						}
-					}
-				}
-			}
+			info := e.TargetInfo
+			b.queueTargetEvent(func() {
+				b.handleTargetInfoChanged(info)
+			})
 		},
 	)
 
 	// Start the event loop in a background goroutine
 	go wait()
+}
+
+// handleTargetCreated registers a page opened outside NewPage — a target the
+// browser created itself, or a tab the user opened by hand. Runs on the
+// target-event worker, never on rod's dispatcher.
+func (b *Browser) handleTargetCreated(info *proto.TargetTargetInfo) {
+	// As in NewPage, the CDP setup runs without b.mu held: those calls block
+	// on Chrome, and the lock only guards the bookkeeping at the end.
+	b.mu.RLock()
+	rodBrowser := b.browser
+	headless := b.config.Headless
+	viewport := b.config.Viewport
+	_, known := b.targetIDs[info.TargetID]
+	recording := b.recording != nil && b.recording.active
+	hud := b.hud
+	b.mu.RUnlock()
+
+	if known || rodBrowser == nil {
+		return
+	}
+
+	// Get page from target ID
+	page, err := rodBrowser.PageFromTarget(info.TargetID)
+	if err != nil {
+		// Could be a transient target, skip silently
+		return
+	}
+
+	// Set up event listeners for the new page
+	b.setupEventListeners(page)
+
+	if headless {
+		// In headless mode, override viewport since there's no physical window
+		if viewport.Width > 0 && viewport.Height > 0 {
+			_ = page.SetViewport(&proto.EmulationSetDeviceMetricsOverride{
+				Width:  viewport.Width,
+				Height: viewport.Height,
+			})
+		}
+	} else {
+		// In headed mode, clear any stale viewport override so the page uses the real window size
+		b.clearViewportOverride(page)
+	}
+
+	// Apply spoofed user agent
+	b.applyUserAgent(page)
+
+	// Inject recorder into new tabs if recording is active
+	if recording {
+		b.injectRecorder(page)
+	}
+
+	// Install the agent HUD into new tabs if it is enabled
+	if hud != nil {
+		_ = b.attachHudSession(hud, page)
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	// Re-check: NewPage may have registered this target while the setup above
+	// was talking to Chrome.
+	if _, exists := b.targetIDs[info.TargetID]; exists {
+		return
+	}
+
+	// Add to tracked pages
+	b.pages = append(b.pages, page)
+	b.targetIDs[info.TargetID] = page
+
+	// If this is the first page, set it as current
+	if b.current < 0 {
+		b.current = len(b.pages) - 1
+	}
+}
+
+// handleTargetDestroyed drops a closed page from tracking.
+func (b *Browser) handleTargetDestroyed(id proto.TargetTargetID) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	// Find and remove the destroyed page
+	if page, exists := b.targetIDs[id]; exists {
+		delete(b.targetIDs, id)
+
+		// Find and remove from pages slice
+		for i, p := range b.pages {
+			if p == page {
+				b.pages = append(b.pages[:i], b.pages[i+1:]...)
+
+				// Adjust current index
+				if b.current >= len(b.pages) {
+					b.current = len(b.pages) - 1
+				}
+				break
+			}
+		}
+	}
+}
+
+// handleTargetInfoChanged follows tab switches so CurrentPage tracks the tab
+// the user is actually looking at.
+func (b *Browser) handleTargetInfoChanged(info *proto.TargetTargetInfo) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	// Find the page in our tracked pages
+	if page, exists := b.targetIDs[info.TargetID]; exists {
+		// Update current to this page if it's now attached (focused)
+		if info.Attached {
+			for i, p := range b.pages {
+				if p == page {
+					b.current = i
+					break
+				}
+			}
+		}
+	}
 }
 
 // syncExistingPages discovers and tracks all existing pages in a connected browser.
@@ -1194,6 +1319,11 @@ func (b *Browser) syncExistingPages() {
 		// Inject recorder into synced pages if recording is active
 		if b.recording != nil && b.recording.active {
 			b.injectRecorder(page)
+		}
+
+		// Install the agent HUD into synced pages if it is enabled
+		if b.hudActive() {
+			_ = b.attachHud(page)
 		}
 
 		b.pages = append(b.pages, page)

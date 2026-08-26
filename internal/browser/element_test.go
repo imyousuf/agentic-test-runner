@@ -1,6 +1,9 @@
 package browser
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 func TestIsHTMLTagName(t *testing.T) {
 	tests := []struct {
@@ -109,5 +112,47 @@ func TestLooksLikeCSSSelector(t *testing.T) {
 				t.Errorf("looksLikeCSSSelector(%q) = %v, want %v", tt.input, got, tt.want)
 			}
 		})
+	}
+}
+
+// Filling by snapshot UID must work, not just by CSS selector.
+//
+// UID lookup resolves through a 500ms per-attempt timeout. If the element
+// comes back still bound to that timeout's context, the typing that follows
+// inherits an all-but-expired deadline and fails with "context deadline
+// exceeded" — which is what happened before tryFind rebound the element to
+// the page's own context. Agents reach for UIDs by default, because that is
+// what browser_snapshot hands them, so this path matters more than the
+// selector one.
+func TestFillBySnapshotUID(t *testing.T) {
+	resetFixture(t)
+
+	elements, err := testBrowser.Snapshot(false)
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+
+	var uid string
+	for _, el := range elements {
+		if el.TagName == "input" && el.Attributes["type"] != "checkbox" && el.Attributes["type"] != "radio" {
+			uid = el.UID
+			break
+		}
+	}
+	if uid == "" {
+		t.Skip("fixture has no fillable input")
+	}
+
+	if err := testBrowser.Fill(context.Background(), uid, "typed-by-uid"); err != nil {
+		t.Fatalf("Fill by UID %s: %v", uid, err)
+	}
+
+	res, err := testBrowser.Evaluate(`document.querySelectorAll("button, input, select, textarea, a, [role], [aria-label], [data-testid]")[` +
+		uid[1:] + `].value`)
+	if err != nil {
+		t.Fatalf("reading back: %v", err)
+	}
+	if got, _ := res.(string); got != "typed-by-uid" {
+		t.Errorf("field holds %q, want %q", got, "typed-by-uid")
 	}
 }
