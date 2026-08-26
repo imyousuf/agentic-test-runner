@@ -1,11 +1,14 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 
 	"github.com/imyousuf/agentic-test-runner/internal/agent"
 	"github.com/imyousuf/agentic-test-runner/internal/browser"
+	"github.com/imyousuf/agentic-test-runner/internal/config"
+	"github.com/imyousuf/agentic-test-runner/internal/secret"
 	"github.com/imyousuf/agentic-test-runner/internal/testscript"
 	"github.com/imyousuf/agentic-test-runner/pkg/behavior"
 )
@@ -82,5 +85,26 @@ func printBehaviorOutcome(testFile string, outcome *agent.RunOutcome) {
 
 	if outcome.Triage != nil && outcome.Triage.Reason != "" {
 		fmt.Printf("  triage: %s\n", outcome.Triage.Reason)
+	}
+}
+
+// behaviorSecretFiller lets a compiled script fill a credential with
+// atr.fillSecret without the value passing through the script, the compiled
+// file, or any later triage prompt.
+//
+// The fetch and the fill happen inside one call: the vault produces the
+// value, the browser types it, and nothing in between ever returns it. That
+// is the same guarantee browser_fill_secret gives the HUD agent, and it is
+// why a behaviour test can log in without a password appearing anywhere it
+// could be committed or transmitted.
+func behaviorSecretFiller(b *browser.Browser, cfg *config.Config) testscript.SecretFiller {
+	vault := secret.New(cfg.Secrets)
+
+	return func(ctx context.Context, target, ref, command string) error {
+		value, err := vault.Fetch(ctx, secret.Request{Ref: ref, Command: command})
+		if err != nil {
+			return err
+		}
+		return b.Fill(ctx, target, value)
 	}
 }

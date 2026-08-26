@@ -481,6 +481,7 @@ func runBehaviorTest(ctx context.Context, cfg *config.Config, cwd string) error 
 			SpecPath:      testFile,
 			Spec:          string(content),
 			BaseURL:       testBaseURL,
+			SecretFiller:  behaviorSecretFiller(b, cfg),
 			Recompile:     recompileFlag,
 			NoCompile:     noCompileFlag,
 			NoRepair:      noRepairFlag,
