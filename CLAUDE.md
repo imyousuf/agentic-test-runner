@@ -91,6 +91,15 @@ model in the loop; the agent returns only to triage a failure.
   their deadline to it — without that, the most common drift case (a CSS
   selector that no longer matches) is misclassified as environmental and
   retried forever instead of repaired.
+- Test inputs live in a sibling `*.test.properties` (committed) layered under
+  `*.test.override.properties` (gitignored) and `ATR_VALUE_*` env vars. Values
+  support `$(command)` / `${VAR}`, expanded lazily at read time and cached per
+  run — which also means **a properties file is executable**, so a committed
+  one runs on every machine including CI.
+- A missing or unresolvable input is `KindConfig`: not repairable, not
+  retryable, and never sent to the model. The obvious "repair" is to inline the
+  literal back into the script, which would undo the reason inputs live
+  outside it.
 - Compiled scripts are **committed**, and carry an `atr-spec-sha256` header.
   A spec edit invalidates them; a whitespace-only edit does not, because a
   reformat should not cost tokens.

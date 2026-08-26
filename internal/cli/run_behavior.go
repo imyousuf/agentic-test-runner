@@ -6,6 +6,7 @@ import (
 
 	"github.com/imyousuf/agentic-test-runner/internal/agent"
 	"github.com/imyousuf/agentic-test-runner/internal/browser"
+	"github.com/imyousuf/agentic-test-runner/internal/testscript"
 	"github.com/imyousuf/agentic-test-runner/pkg/behavior"
 )
 
@@ -33,6 +34,9 @@ func printBehaviorOutcome(testFile string, outcome *agent.RunOutcome) {
 		fmt.Printf("  compiled → %s\n", outcome.ScriptPath)
 	case outcome.Repaired:
 		fmt.Printf("  repaired → %s\n", outcome.ScriptPath)
+	}
+	if outcome.ValuesPath != "" {
+		fmt.Printf("  inputs   → %s\n", outcome.ValuesPath)
 	}
 
 	if outcome.Result != nil {
@@ -69,6 +73,8 @@ func printBehaviorOutcome(testFile string, outcome *agent.RunOutcome) {
 			fmt.Println("  → the application did not behave as the spec requires")
 		case f.Kind.Repairable():
 			fmt.Println("  → the script no longer matches the page; re-run to let the agent repair it")
+		case f.Kind == testscript.KindConfig:
+			fmt.Println("  → this checkout is missing an input; add it to the properties file")
 		case f.Kind.Retryable():
 			fmt.Println("  → looks environmental rather than a real failure")
 		}

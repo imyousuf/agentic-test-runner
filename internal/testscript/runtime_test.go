@@ -346,3 +346,149 @@ func TestSecretFillerIsUsed(t *testing.T) {
 		t.Errorf("filler got target=%q ref=%q", gotTarget, gotRef)
 	}
 }
+
+// runWithValues executes a script with a given input set.
+func runWithValues(t *testing.T, source string, vals map[string]string) *Result {
+	t.Helper()
+
+	if err := testBrowser.Navigate(context.Background(), fixtureURL); err != nil {
+		t.Fatalf("navigate: %v", err)
+	}
+	res, err := Run(context.Background(), Options{
+		Browser: testBrowser,
+		Source:  source,
+		Name:    t.Name() + ".js",
+		BaseURL: fixtureURL,
+		Timeout: 30 * time.Second,
+		Values:  NewValues(vals),
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	return res
+}
+
+func TestValuesAreReadableFromScripts(t *testing.T) {
+	res := runWithValues(t, `
+		atr.step(1, "Use the configured inputs", () => {
+			atr.fill("#username", values.get("username"));
+			expect(atr.eval('document.querySelector("#username").value')).toBe(values.get("username"));
+			expect(values.int("retries")).toBe(3);
+			expect(values.bool("enabled")).toBeTruthy();
+			expect(values.has("nope")).toBeFalsy();
+			expect(values.get("nope", "fallback")).toBe("fallback");
+		});
+	`, map[string]string{"username": "testuser", "retries": "3", "enabled": "yes"})
+
+	if !res.Passed {
+		t.Fatalf("expected pass, got %v", res.Failure)
+	}
+}
+
+// A missing input must stop the run. Returning "" would have the test type
+// nothing into a field and then pass or fail for the wrong reason.
+func TestMissingValueFailsLoudly(t *testing.T) {
+	res := runWithValues(t, `
+		atr.step(1, "Use an input nobody defined", () => {
+			atr.fill("#username", values.get("undefined_key"));
+		});
+	`, map[string]string{"other": "x"})
+
+	if res.Passed {
+		t.Fatal("a test with an undefined input must not pass")
+	}
+	if res.Failure.Kind != KindConfig {
+		t.Errorf("kind = %q, want %q", res.Failure.Kind, KindConfig)
+	}
+	if !strings.Contains(res.Failure.Message, "undefined_key") {
+		t.Errorf("message should name the key, got %q", res.Failure.Message)
+	}
+}
+
+// The agent must never be allowed to "repair" a missing input, because the
+// obvious repair is to inline the literal back into the script — which undoes
+// the reason inputs live outside it.
+func TestConfigFailureIsNeitherRepairableNorRetryable(t *testing.T) {
+	if KindConfig.Repairable() {
+		t.Error("a missing input must not be repairable")
+	}
+	if KindConfig.Retryable() {
+		t.Error("retrying will not conjure a missing input")
+	}
+	if KindConfig.IsTestFailure() {
+		t.Error("a missing input does not mean the application is broken")
+	}
+}
+
+func TestMalformedValueIsAConfigFailure(t *testing.T) {
+	res := runWithValues(t, `
+		atr.step(1, "Read a number", () => { values.int("count"); });
+	`, map[string]string{"count": "not-a-number"})
+
+	if res.Passed {
+		t.Fatal("expected a failure")
+	}
+	if res.Failure.Kind != KindConfig {
+		t.Errorf("kind = %q, want %q", res.Failure.Kind, KindConfig)
+	}
+	if !strings.Contains(res.Failure.Message, "not-a-number") {
+		t.Errorf("message should show the offending value, got %q", res.Failure.Message)
+	}
+}
+
+// A script with no values configured at all must still fail clearly rather
+// than panicking on a nil set.
+func TestScriptWithNoValuesConfigured(t *testing.T) {
+	if err := testBrowser.Navigate(context.Background(), fixtureURL); err != nil {
+		t.Fatal(err)
+	}
+	res, err := Run(context.Background(), Options{
+		Browser: testBrowser,
+		Source:  `atr.step(1, "x", () => { values.get("anything"); });`,
+		BaseURL: fixtureURL,
+		Timeout: 30 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.Passed {
+		t.Fatal("expected a failure")
+	}
+	if res.Failure.Kind != KindConfig {
+		t.Errorf("kind = %q, want %q", res.Failure.Kind, KindConfig)
+	}
+}
+
+// A deadline can land while a step is blocked inside a host call rather than
+// between JS instructions. The step's callback then returns goja's
+// InterruptedError, and re-panicking that raw Go error sends something goja
+// does not recognise through RunProgram, which re-panics it out of the VM and
+// takes the process with it. A test runner reports failures; it never crashes
+// on one.
+func TestDeadlineInsideAHostCallDoesNotPanic(t *testing.T) {
+	if err := testBrowser.Navigate(context.Background(), fixtureURL); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := Run(context.Background(), Options{
+		Browser: testBrowser,
+		// The wait outlives the run's budget, so the interrupt arrives while
+		// the VM is inside Go.
+		Source:  `atr.step(1, "Wait too long", () => { atr.waitFor("#never", {timeout: 60000}); });`,
+		Name:    "deadline.js",
+		BaseURL: fixtureURL,
+		Timeout: 2 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("Run returned an error instead of a failure: %v", err)
+	}
+	if res.Passed {
+		t.Fatal("expected a failure")
+	}
+	if res.Failure.Kind != KindTimeout {
+		t.Errorf("kind = %q, want %q", res.Failure.Kind, KindTimeout)
+	}
+	if res.Failure.Step != 1 {
+		t.Errorf("Step = %d, want the step that was running", res.Failure.Step)
+	}
+}

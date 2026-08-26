@@ -1,6 +1,7 @@
 package testscript
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -79,6 +80,9 @@ func (r *runtime) install() error {
 	if err := r.vm.Set("atr", atr); err != nil {
 		return err
 	}
+	if err := r.installValues(); err != nil {
+		return err
+	}
 	return r.installExpect()
 }
 
@@ -111,6 +115,15 @@ func (r *runtime) jsStep(number int, description string, fn goja.Callable) {
 
 	if err != nil {
 		r.steps[idx].Status = behavior.StepStatusFailed
+		// Re-throw the original JS value so its kind survives. Panicking
+		// with the Go error instead sends something goja does not recognise
+		// through RunProgram, which re-panics it out of the VM entirely — a
+		// deadline landing mid-step would crash the process rather than
+		// being reported as a timeout.
+		var ex *goja.Exception
+		if errors.As(err, &ex) {
+			panic(ex.Value())
+		}
 		panic(err)
 	}
 

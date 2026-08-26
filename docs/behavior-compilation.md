@@ -52,6 +52,119 @@ no Node, no `npm install`, and ATR remains a single binary. There is also no
 DOM and no network: a script can only reach the browser through the `atr`
 library below.
 
+## Test inputs live outside the script
+
+Anything the test types, searches for, or expects as data is an *input*, and
+lives in a properties file rather than in the script. That is what makes a
+test portable: the script says which input it needs, each machine says what
+that input is.
+
+```
+shop.test.txt                    the spec
+shop.test.js                     compiled script
+shop.test.properties             committed — the defaults everyone shares
+shop.test.override.properties    gitignored — this machine's differences
+```
+
+Three layers, lowest priority first:
+
+```properties
+# shop.test.properties — committed
+base_url=http://localhost:3000
+search_term=widget
+expected_results=2
+```
+
+```properties
+# shop.test.override.properties — gitignored, yours alone
+base_url=https://staging.internal.example.com
+```
+
+```bash
+# environment wins over both — for CI, where writing files into a checkout is awkward
+ATR_VALUE_SEARCH_TERM=gadget atr run --behavior shop.test.txt --no-compile
+```
+
+The script reads them:
+
+```javascript
+values.get("search_term")             // fails the run if undefined
+values.get("promo_code", "none")      // falls back instead
+values.int("expected_results")
+values.bool("skip_onboarding")
+values.has("promo_code")
+```
+
+**A missing input stops the run.** `values.get("x")` on an undefined key
+throws rather than returning `""` — otherwise a test types nothing into a
+search box and then passes vacuously, or fails with a message pointing at the
+wrong thing. A test that cannot get its inputs has not failed; it has not run.
+The error names the key, all three places it could come from, and what is
+currently defined.
+
+`base_url` is special only in that ATR reads it when you do not pass
+`--browser-url`, so the same test runs against localhost here and staging
+there with no flags.
+
+### What not to externalise
+
+Selectors, the shape of the flow, and text that is part of the behaviour being
+asserted. A button labelled "Checkout" is part of the UI, not an input —
+externalising it would let a config change silently redefine what the test
+checks.
+
+### Values can defer to the machine
+
+A value may run a command or read an environment variable, resolved at run
+time:
+
+```properties
+password=$(cat ~/.secrets/shop.txt)
+api_token=$(pass show shop/token)
+base_url=https://${DEPLOY_HOST}/shop
+price_label=$$19.99
+```
+
+- `$(command)` runs through the shell and uses its output, with trailing
+  newlines stripped.
+- `${VAR}` reads an environment variable.
+- `$$` is a literal dollar sign, so `$$(19.99)` stays as text.
+
+Expansion is **lazy** — a command runs only if a test actually reads that
+value, so a suite of twenty tests does not trigger twenty password prompts to
+run one — and **cached per run**, so a manager is asked once no matter how
+often the value is read. A command that fails is a `config` failure naming the
+key; neither its output nor the command text appears in the error, because
+both routinely carry the secret.
+
+> **A properties file with `$(...)` in it is executable.** A committed one
+> runs on every machine that runs the suite, including CI, so a value added in
+> a pull request is a command someone else's laptop will execute. Review them
+> the way you would review a script, and prefer keeping expansions in the
+> gitignored override file where they only affect you.
+
+### Credentials do not go here
+
+A gitignored file is not an encrypted one, and it gets copied around. Put the
+secret in your password manager, put its *name* in a value, and let ATR fetch
+it:
+
+```properties
+password_ref=shop/test-account
+```
+
+```javascript
+atr.fillSecret("#password", {ref: values.get("password_ref")});
+```
+
+The value never reaches the script, the transcript, or a triage prompt.
+
+### The values file is yours to edit
+
+ATR generates it on first compile and then only ever *adds* keys to it.
+Recompiling never overwrites a value you set, because that file is where the
+hosts, accounts and quantities for your machine live.
+
 ## Why it fails matters more than that it failed
 
 A compiled test only pays for itself if a failure can be triaged without a
@@ -64,6 +177,7 @@ human. Three things can go wrong, and they have opposite correct responses:
 | `timeout` | Something was slow | Retry, then ask the agent |
 | `environment` | Browser/network/daemon problem | Retry, report as infra |
 | `script` | The generated code is wrong | Agent repairs the script |
+| `config` | An input this checkout does not define | **Add the value.** Never repaired. |
 
 The distinction that matters most is **assertion vs not_found**. A suite that
 repairs itself until it passes is a suite that launders regressions. So:
@@ -78,6 +192,9 @@ repairs itself until it passes is a suite that launders regressions. So:
   changed around it.
 - **Assertions are never weakened.** Repair rewrites how the script reaches
   the application, not what it demands of it.
+- **A missing input is never repaired either.** The tempting fix is to inline
+  the literal back into the script, which would undo the reason inputs live
+  outside it. The fix is to add the value, and a person decides what it is.
 
 This is why the generated code style matters. `atr.click("#buy")` failing
 means drift, so a script must never use a bare click to assert that a button
@@ -110,6 +227,10 @@ atr.base                                    // the base URL
 `atr.consoleErrors`, `atr.failedRequests`
 
 **Pages** — `atr.newPage`, `atr.listPages`, `atr.selectPage`, `atr.closePage`
+
+**Inputs** — `values.get(key[, fallback])`, `values.int`, `values.bool`,
+`values.has`, `values.keys()`. Values may contain `$(command)` and `${VAR}`,
+expanded at read time.
 
 **Assertions** — `expect(v).toBe/.toEqual/.toContain/.toMatch/.toBeTruthy/`
 `.toBeFalsy/.toBeGreaterThan/.toBeLessThan/.toHaveLength`

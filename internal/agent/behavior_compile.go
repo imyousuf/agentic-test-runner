@@ -119,6 +119,35 @@ failure it raised, and the wrong call produces the wrong diagnosis:
   page settle before asserting, wait for the state first — atr.waitForText or
   atr.waitFor — and then assert once.
 
+TEST INPUTS MUST NOT BE HARDCODED. Anything the test types, searches for,
+navigates to, or expects as data is an input, and belongs in the properties
+file rather than in the script:
+
+  values.get("search_term")            fails the run if undefined
+  values.get("search_term", "widget")  falls back instead
+  values.int("expected_results")
+  values.bool("skip_onboarding")
+  values.has("promo_code")
+
+This is what makes a test portable: the script says which input it needs, and
+each machine says what that input is. A literal baked into the script cannot
+be overridden by anyone.
+
+Externalise: URLs and paths, usernames, search terms, quantities, and expected
+values that depend on the data a particular environment holds (how many
+results a search returns, how many rows a report has).
+
+Do NOT externalise: selectors, the structure of the flow, or any literal the
+specification itself states. If the spec says 'Verify the message says "Order
+placed"', that string is the requirement being tested and belongs in the
+script — putting it in a properties file would let a config change silently
+redefine what the test checks, which is the same failure mode as weakening an
+assertion.
+
+Never put a password or token in a value. Values are stored in plain files.
+For a credential, put its *name* in a value and fetch it with
+atr.fillSecret(target, {ref: values.get("password_ref")}).
+
 Other rules:
 - One atr.step per numbered step in the spec, same numbers, same wording in
   the description.
@@ -140,7 +169,7 @@ type CompileRequest struct {
 
 // CompileBehavior drives the browser through the spec once and returns the
 // JavaScript that reproduces it.
-func (a *Agent) CompileBehavior(ctx context.Context, req CompileRequest) (string, error) {
+func (a *Agent) CompileBehavior(ctx context.Context, req CompileRequest) (script, properties string, err error) {
 	ctx, cancel := context.WithTimeout(ctx, a.timeout)
 	defer cancel()
 
@@ -153,16 +182,30 @@ step against the live application. Call browser_snapshot before interacting so
 you use selectors that exist rather than ones you assume. This phase is how
 you learn the real structure of the pages; do not skip it and do not guess.
 
-PHASE 2 — write the script. Once you have completed the whole spec, output the
-JavaScript that would have done the same thing, in a single fenced code block:
+PHASE 2 — write the script and its inputs. Once you have completed the whole
+spec, output two fenced blocks.
+
+First the script:
 
 ` + "```javascript" + `
 ...the script...
 ` + "```" + `
 
+Then the inputs it reads, as a properties file:
+
+` + "```properties" + `
+search_term=widget
+expected_results=2
+` + "```" + `
+
+Every key the script passes to values.get/int/bool without a fallback must
+appear in the properties block with the value you actually used. Emit the
+properties block even if it is empty.
+
 The script must reproduce what you just did, step for step, using the
 selectors that actually worked. It has to run unattended with no model
-involved, so anything you worked out by looking at the page must be baked in.
+involved, so anything you worked out by looking at the page must be baked in —
+except the inputs, which go in the properties block.
 
 ` + scriptAPIReference
 
@@ -183,14 +226,14 @@ Carry out this specification against the live application now, then emit the scr
 
 	content, err := a.runToolLoop(ctx, messages, "compile")
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 
-	script := extractCode(content)
+	script = extractCode(content)
 	if script == "" {
-		return "", fmt.Errorf("the compiler produced no script; last message: %s", truncate(content, 400))
+		return "", "", fmt.Errorf("the compiler produced no script; last message: %s", truncate(content, 400))
 	}
-	return script, nil
+	return script, extractProperties(content), nil
 }
 
 // TriageVerdict is what the agent decided to do about a failing run.
@@ -214,6 +257,8 @@ type Triage struct {
 	Reason  string        `json:"reason"`
 	// Script is the rewritten source, set only when Verdict is repaired.
 	Script string `json:"-"`
+	// Properties holds any new input keys the repair introduced.
+	Properties string `json:"-"`
 }
 
 // TriageRequest describes a failing run.
@@ -225,6 +270,9 @@ type TriageRequest struct {
 	Failure  *testscript.Failure
 	// Attempts is how many times the run has already been tried.
 	Attempts int
+	// ValueKeys lists the inputs currently defined, so a repair can reuse
+	// them rather than inventing new ones.
+	ValueKeys []string
 }
 
 // TriageFailure examines a failed run and either repairs the script or
@@ -275,7 +323,15 @@ Reply with a single fenced json block:
 ` + "```" + `
 
 When the verdict is "repaired", follow it with the complete rewritten script
-in a fenced javascript block. Emit the whole script, not a fragment.
+in a fenced javascript block. Emit the whole script, not a fragment. If the
+repair needs a new input, follow that with a properties block containing ONLY
+the new keys; existing values are left alone.
+
+A missing or malformed input is never repaired by hardcoding the literal back
+into the script — that would undo the reason inputs live outside it. If a
+value is missing, the answer is "test_failure" only if the application is
+broken; otherwise say so in the reason and answer "unresolved" so a person
+can decide what the value should be.
 
 ` + scriptAPIReference
 
@@ -292,11 +348,14 @@ The compiled script that failed:
 %s
 ---
 
+Inputs currently defined for this test: %s
+
 The failure (already classified by the runtime; %d attempt(s) made):
 %s
 
 Inspect the page and decide.`,
-		req.BaseURL, req.SpecPath, req.Spec, req.Script, req.Attempts, failureJSON)
+		req.BaseURL, req.SpecPath, req.Spec, req.Script,
+		describeKeys(req.ValueKeys), req.Attempts, failureJSON)
 
 	messages := []llm.Message{
 		{Role: llm.RoleSystem, Content: system},
@@ -319,6 +378,7 @@ Inspect the page and decide.`,
 			}, nil
 		}
 		triage.Script = script
+		triage.Properties = extractProperties(content)
 	}
 	return triage, nil
 }
@@ -381,9 +441,27 @@ func pruneImages(messages []llm.Message, keep int) {
 }
 
 var (
-	codeBlockRe = regexp.MustCompile("(?s)```(?:javascript|js)\\s*\\n(.*?)```")
-	jsonBlockRe = regexp.MustCompile("(?s)```(?:json)\\s*\\n(.*?)```")
+	codeBlockRe  = regexp.MustCompile("(?s)```(?:javascript|js)\\s*\\n(.*?)```")
+	jsonBlockRe  = regexp.MustCompile("(?s)```(?:json)\\s*\\n(.*?)```")
+	propsBlockRe = regexp.MustCompile("(?s)```(?:properties|ini|conf)\\s*\\n(.*?)```")
 )
+
+// extractProperties pulls the last properties block out of a reply.
+func extractProperties(content string) string {
+	matches := propsBlockRe.FindAllStringSubmatch(content, -1)
+	if len(matches) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(matches[len(matches)-1][1])
+}
+
+// describeKeys renders the defined input names for a prompt.
+func describeKeys(keys []string) string {
+	if len(keys) == 0 {
+		return "(none)"
+	}
+	return strings.Join(keys, ", ")
+}
 
 // extractCode pulls the last javascript block out of a reply. The last one,
 // not the first: a model that shows a wrong version before correcting itself

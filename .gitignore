@@ -37,3 +37,9 @@ go.work.sum
 # build output
 bin/
 atr
+
+# Per-machine behavior test inputs. The committed *.test.properties holds the
+# shared defaults; this is where one machine's differences go, so it must not
+# be checked in. Note that gitignored is not the same as secret — credentials
+# belong in a password manager, referenced by name via atr.fillSecret.
+*.override.properties

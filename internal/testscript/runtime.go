@@ -37,6 +37,9 @@ type Options struct {
 	// nil, atr.fillSecret reports that secrets are not configured rather than
 	// silently filling nothing.
 	SecretFiller SecretFiller
+	// Values supplies test inputs to the values global. Nil means the script
+	// can only use defaults it supplies inline.
+	Values *Values
 	// Log receives atr.log output.
 	Log func(string)
 }
@@ -67,6 +70,7 @@ type runtime struct {
 	browser *browser.Browser
 	opts    Options
 
+	values    *Values
 	steps     []behavior.StepResult
 	logs      []string
 	curStep   int
@@ -102,6 +106,7 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 		ctx:     ctx,
 		browser: opts.Browser,
 		opts:    opts,
+		values:  opts.Values,
 	}
 
 	// goja does not preempt: a script that loops forever, or a host call that
@@ -134,7 +139,7 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 	}
 
 	start := time.Now()
-	_, runErr := r.vm.RunProgram(program)
+	runErr := r.execute(program)
 	elapsed := time.Since(start)
 
 	result := &Result{
@@ -152,6 +157,30 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 	r.markFailedStep(result.Failure)
 	result.Steps = r.steps
 	return result, nil
+}
+
+// execute runs the program, converting any panic that escapes the VM into an
+// error.
+//
+// goja re-panics anything it does not recognise as a JS exception or an
+// interrupt, so a stray panic in a host function — or an interrupt delivered
+// at the wrong moment — would otherwise take the whole process down. A test
+// runner reports failures; it does not crash on them.
+func (r *runtime) execute(program *goja.Program) (err error) {
+	defer func() {
+		rec := recover()
+		if rec == nil {
+			return
+		}
+		if recErr, ok := rec.(error); ok {
+			err = recErr
+			return
+		}
+		err = fmt.Errorf("the script panicked: %v", rec)
+	}()
+
+	_, err = r.vm.RunProgram(program)
+	return err
 }
 
 // toFailure converts whatever came out of the VM into a classified Failure.

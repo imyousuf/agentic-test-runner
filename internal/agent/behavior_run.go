@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/imyousuf/agentic-test-runner/internal/testscript"
@@ -65,6 +66,8 @@ type RunOutcome struct {
 	Result *testscript.Result
 	// ScriptPath is where the compiled script lives.
 	ScriptPath string
+	// ValuesPath is where the test's inputs live, if any were written.
+	ValuesPath string
 	// Compiled is true if this run generated the script.
 	Compiled bool
 	// Repaired is true if the script was rewritten during this run.
@@ -106,6 +109,17 @@ func (a *Agent) RunBehavior(ctx context.Context, req RunRequest) (*RunOutcome, e
 		}
 	}
 
+	// A base URL in the properties file is what lets the same test run
+	// against localhost here and a staging host there.
+	if req.BaseURL == "" {
+		if v, err := testscript.LoadValues(req.SpecPath); err == nil {
+			if base, ok, err := v.Resolve(ctx, "base_url"); err == nil && ok && base != "" {
+				req.BaseURL = base
+				logf("base URL from values: %s", base)
+			}
+		}
+	}
+
 	if a.browser == nil {
 		return nil, fmt.Errorf("agent has no browser; build it with NewCompilerAgent")
 	}
@@ -113,6 +127,13 @@ func (a *Agent) RunBehavior(ctx context.Context, req RunRequest) (*RunOutcome, e
 	outcome := &RunOutcome{}
 
 	source, err := a.loadOrCompile(ctx, req, outcome, logf)
+	if err != nil {
+		return outcome, err
+	}
+
+	// Values are re-read on every attempt so a repair that added an input
+	// takes effect without a second run.
+	values, err := testscript.LoadValues(req.SpecPath)
 	if err != nil {
 		return outcome, err
 	}
@@ -130,6 +151,7 @@ func (a *Agent) RunBehavior(ctx context.Context, req RunRequest) (*RunOutcome, e
 			BaseURL:      req.BaseURL,
 			Timeout:      req.ScriptTimeout,
 			SecretFiller: req.SecretFiller,
+			Values:       values,
 			Log:          req.Log,
 		})
 		if err != nil {
@@ -146,6 +168,14 @@ func (a *Agent) RunBehavior(ctx context.Context, req RunRequest) (*RunOutcome, e
 
 		// The application is wrong. Nothing to repair, nothing to retry.
 		if failure.Kind.IsTestFailure() {
+			return outcome, nil
+		}
+
+		// A missing or unresolvable input is already fully diagnosed: the
+		// message names the key and every place it could come from. Asking a
+		// model to restate that costs tokens and risks it "fixing" the
+		// problem by inlining the literal back into the script.
+		if failure.Kind == testscript.KindConfig {
 			return outcome, nil
 		}
 
@@ -194,6 +224,19 @@ func (a *Agent) RunBehavior(ctx context.Context, req RunRequest) (*RunOutcome, e
 				return outcome, err
 			}
 			outcome.ScriptPath = path
+
+			if triage.Properties != "" {
+				added, err := testscript.MergeValues(req.SpecPath, triage.Properties)
+				if err != nil {
+					return outcome, err
+				}
+				if len(added) > 0 {
+					logf("added input(s): %s", strings.Join(added, ", "))
+				}
+			}
+			if values, err = testscript.LoadValues(req.SpecPath); err != nil {
+				return outcome, err
+			}
 			logf("agent repaired the script — %s", triage.Reason)
 			if err := a.reset(ctx, req); err != nil {
 				return outcome, err
@@ -246,7 +289,7 @@ func (a *Agent) loadOrCompile(ctx context.Context, req RunRequest, outcome *RunO
 	}
 
 	outcome.ModelCalls++
-	source, err := a.CompileBehavior(ctx, CompileRequest{
+	source, properties, err := a.CompileBehavior(ctx, CompileRequest{
 		SpecPath: req.SpecPath,
 		Spec:     req.Spec,
 		BaseURL:  req.BaseURL,
@@ -258,6 +301,15 @@ func (a *Agent) loadOrCompile(ctx context.Context, req RunRequest, outcome *RunO
 	path, err := testscript.Save(req.SpecPath, req.Spec, source)
 	if err != nil {
 		return "", err
+	}
+
+	if properties != "" {
+		valuesPath, err := testscript.SaveValues(req.SpecPath, req.BaseURL, properties)
+		if err != nil {
+			return "", err
+		}
+		outcome.ValuesPath = valuesPath
+		logf("wrote inputs to %s", valuesPath)
 	}
 	outcome.ScriptPath = path
 	outcome.Compiled = true
@@ -276,13 +328,15 @@ func (a *Agent) triage(ctx context.Context, req RunRequest, source string, failu
 	logf("asking the agent to triage a %s failure", failure.Kind)
 	outcome.ModelCalls++
 
+	keys, _ := testscript.LoadValues(req.SpecPath)
 	return a.TriageFailure(ctx, TriageRequest{
-		SpecPath: req.SpecPath,
-		Spec:     req.Spec,
-		Script:   source,
-		BaseURL:  req.BaseURL,
-		Failure:  failure,
-		Attempts: attempts,
+		SpecPath:  req.SpecPath,
+		Spec:      req.Spec,
+		Script:    source,
+		BaseURL:   req.BaseURL,
+		Failure:   failure,
+		Attempts:  attempts,
+		ValueKeys: keys.Keys(),
 	})
 }
 

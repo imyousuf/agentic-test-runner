@@ -19,6 +19,7 @@ import (
 	"github.com/imyousuf/agentic-test-runner/internal/config"
 	"github.com/imyousuf/agentic-test-runner/internal/executor"
 	"github.com/imyousuf/agentic-test-runner/internal/output"
+	"github.com/imyousuf/agentic-test-runner/internal/testscript"
 	"github.com/imyousuf/agentic-test-runner/pkg/llm"
 
 	// Import to register Gemini provider
@@ -408,11 +409,24 @@ func runBehaviorTest(ctx context.Context, cfg *config.Config, cwd string) error 
 			continue
 		}
 
+		// A test's own properties file can supply its base URL, which is what
+		// lets the same spec run against localhost here and staging there
+		// with no flags. Resolved per test, before the browser is pointed
+		// anywhere, because each spec has its own values.
+		testBaseURL := baseURL
+		if testBaseURL == "" {
+			if v, err := testscript.LoadValues(testFile); err == nil {
+				if base, ok, err := v.Resolve(ctx, "base_url"); err == nil && ok && base != "" {
+					testBaseURL = base
+				}
+			}
+		}
+
 		// When reusing a server, always open a new tab to isolate the test,
 		// then close it afterward to leave the server's tabs untouched.
 		testPageIndex := -1
 		if reusingServer {
-			tabURL := baseURL
+			tabURL := testBaseURL
 			if tabURL == "" {
 				tabURL = "about:blank"
 			}
@@ -422,9 +436,9 @@ func runBehaviorTest(ctx context.Context, cfg *config.Config, cwd string) error 
 				continue
 			}
 			testPageIndex = len(b.ListPages()) - 1
-		} else if baseURL != "" {
+		} else if testBaseURL != "" {
 			// Not reusing server: navigate to base URL in a new tab
-			if err := b.NewPage(ctx, baseURL); err != nil {
+			if err := b.NewPage(ctx, testBaseURL); err != nil {
 				fmt.Printf("✗ Failed to open page: %v\n", err)
 				failedTests = append(failedTests, testFile)
 				continue
@@ -436,7 +450,7 @@ func runBehaviorTest(ctx context.Context, cfg *config.Config, cwd string) error 
 			result, err := ag.ExecuteBehaviorTest(ctx, &agent.BehaviorRequest{
 				TestFile:    testFile,
 				TestContent: string(content),
-				BaseURL:     baseURL,
+				BaseURL:     testBaseURL,
 			})
 
 			closeTestTab(b, reusingServer, testPageIndex)
@@ -466,16 +480,16 @@ func runBehaviorTest(ctx context.Context, cfg *config.Config, cwd string) error 
 		outcome, err := ag.RunBehavior(ctx, agent.RunRequest{
 			SpecPath:      testFile,
 			Spec:          string(content),
-			BaseURL:       baseURL,
+			BaseURL:       testBaseURL,
 			Recompile:     recompileFlag,
 			NoCompile:     noCompileFlag,
 			NoRepair:      noRepairFlag,
 			ScriptTimeout: cfg.Agent.Timeout,
 			Reset: func(ctx context.Context) error {
-				if baseURL == "" {
+				if testBaseURL == "" {
 					return nil
 				}
-				return b.Navigate(ctx, baseURL)
+				return b.Navigate(ctx, testBaseURL)
 			},
 			Log: func(msg string) {
 				if verbose {
