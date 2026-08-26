@@ -307,7 +307,17 @@ func (s *Server) dispatch(msg inbound, v *viewer) {
 	// viewer -- but only for discrete actions. Pointer moves arrive once per
 	// animation frame, and reporting each failure would queue ~60 messages a
 	// second and re-render the client just as often.
-	if err == nil || v == nil || !worthReporting(msg) {
+	if v == nil || !worthReporting(msg) {
+		return
+	}
+	// A success ends the run of identical errors, so a failure that comes back
+	// later is reported again rather than being suppressed for the life of the
+	// connection. Only the actions that are worth reporting clear it: a pointer
+	// move succeeds ~60 times a second, so letting those clear the run would
+	// report every failed click all over again -- the very flood the
+	// worthReporting guard above exists to prevent.
+	if err == nil {
+		v.clearError()
 		return
 	}
 	if v.repeatError(err.Error()) {

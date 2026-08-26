@@ -28,7 +28,11 @@ type viewer struct {
 }
 
 // repeatError reports whether this message is the same as the last one sent,
-// so a failure that recurs on every action does not queue without bound.
+// so a failure that recurs on every action does not queue without bound. It
+// only ever collapses a consecutive run, because clearError ends the run as
+// soon as an action succeeds; without that, the first error of a session would
+// silence every later one carrying the same text, and a browser that wedged an
+// hour in would swallow every click with no banner at all.
 func (v *viewer) repeatError(msg string) bool {
 	v.mu.Lock()
 	defer v.mu.Unlock()
@@ -37,6 +41,14 @@ func (v *viewer) repeatError(msg string) bool {
 	}
 	v.lastErr = msg
 	return false
+}
+
+// clearError ends a run of identical errors, so the next failure is reported
+// even when it carries the same message as the last one.
+func (v *viewer) clearError() {
+	v.mu.Lock()
+	v.lastErr = ""
+	v.mu.Unlock()
 }
 
 func newViewer() *viewer {

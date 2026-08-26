@@ -1,6 +1,7 @@
 package rdp
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -186,4 +187,112 @@ func TestQueryTokenHandsOutACookie(t *testing.T) {
 		}
 	}
 	t.Fatal("no auth cookie was set")
+}
+
+// errorMessage takes the one error message waiting for a viewer.
+func errorMessage(t *testing.T, v *viewer) string {
+	t.Helper()
+	_, msgs := v.take()
+	if len(msgs) != 1 {
+		t.Fatalf("expected exactly 1 message, got %d", len(msgs))
+	}
+	var got struct {
+		T       string `json:"t"`
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(msgs[0], &got); err != nil {
+		t.Fatalf("the message is not valid JSON: %v", err)
+	}
+	if got.T != "error" {
+		t.Fatalf("message type = %q, want error", got.T)
+	}
+	return got.Message
+}
+
+// A failure that comes back after a success has to be reported again. The guard
+// in dispatch is only meant to collapse a run of identical failures: with no
+// reset it means "ever sent", so one "no page is selected" during an ordinary
+// tab switch would suppress that message for the rest of the connection, and a
+// browser that wedged an hour later would drop every click while the canvas
+// still looked live.
+func TestDispatchReportsTheSameErrorAgainAfterASuccess(t *testing.T) {
+	s := testServer(t, "", false)
+	v := newViewer()
+
+	// No browser is attached, so navigate fails, and fails identically twice.
+	failing := inbound{T: "navigate", URL: "http://example.com/"}
+
+	s.dispatch(failing, v)
+	first := errorMessage(t, v)
+
+	s.dispatch(failing, v)
+	if _, msgs := v.take(); len(msgs) != 0 {
+		t.Fatalf("an immediate repeat must be suppressed, got %d message(s)", len(msgs))
+	}
+
+	// policy is the one action that succeeds with no browser behind it.
+	s.dispatch(inbound{T: "policy", Foreground: "hold"}, v)
+	if _, msgs := v.take(); len(msgs) != 0 {
+		t.Fatalf("a successful action must send nothing, got %d message(s)", len(msgs))
+	}
+
+	s.dispatch(failing, v)
+	if again := errorMessage(t, v); again != first {
+		t.Fatalf("the error after a success = %q, want %q reported again", again, first)
+	}
+}
+
+// Continuous motion must stay out of the error channel entirely: a failing
+// pointer move arrives once per animation frame, so reporting it would queue
+// ~60 messages a second at the viewer.
+func TestDispatchNeverReportsPointerMotion(t *testing.T) {
+	s := testServer(t, "", false)
+	v := newViewer()
+
+	// Every one of these fails -- nothing is attached -- and none may be sent.
+	s.dispatch(inbound{T: "mouse", Kind: "moved", X: 10, Y: 10}, v)
+	s.dispatch(inbound{T: "wheel", DY: 40}, v)
+
+	if _, msgs := v.take(); len(msgs) != 0 {
+		t.Fatalf("motion must not be reported, got %d message(s)", len(msgs))
+	}
+}
+
+// A success ends the run of identical errors, but only a success that is worth
+// reporting. A pointer move succeeds ~60 times a second, so if motion ended the
+// run as well, every failed click against a wedged browser would be reported
+// all over again -- the flood the guard exists to prevent. Showing that needs a
+// live page, because a move only succeeds when there is one.
+func TestSuccessfulMotionDoesNotEndAnErrorRun(t *testing.T) {
+	st, pages := liveStreamer(t)
+	if err := st.Select(pages[0].ID); err != nil {
+		t.Fatalf("failed to select a tab: %v", err)
+	}
+	s := NewServer(st.hub, st, fstest.MapFS{}, "", false)
+	v := newViewer()
+
+	// Selecting a tab that does not exist fails, and fails without disturbing
+	// the stream, so the move below still has a live page under it.
+	failing := inbound{T: "selectPage", ID: "no-such-target"}
+	s.dispatch(failing, v)
+	first := errorMessage(t, v)
+
+	// This is the half that no unattached streamer can show: the move has to
+	// genuinely succeed for the test to be measuring anything.
+	if err := st.Mouse(MouseMsg{Kind: "moved", X: 5, Y: 5}); err != nil {
+		t.Fatalf("a move over a live page must succeed: %v", err)
+	}
+	s.dispatch(inbound{T: "mouse", Kind: "moved", X: 5, Y: 5}, v)
+
+	s.dispatch(failing, v)
+	if _, msgs := v.take(); len(msgs) != 0 {
+		t.Fatalf("motion must not end the run, got %d message(s)", len(msgs))
+	}
+
+	// A reportable success does end it.
+	s.dispatch(inbound{T: "policy", Foreground: "hold"}, v)
+	s.dispatch(failing, v)
+	if again := errorMessage(t, v); again != first {
+		t.Fatalf("after a reportable success the error = %q, want %q", again, first)
+	}
 }

@@ -50,10 +50,11 @@ type Streamer struct {
 	lastAt   time.Time
 	live     bool
 	closed   bool
-	// switching is true while stream() is between tearing the old stream down
-	// and committing the new one, so the watchdog does not mistake that window
-	// for a dead view. gen identifies the current stream, so a frame callback
-	// from a cancelled one cannot write over its successor's state.
+	// switching is true for the whole of stream(), from before it touches the
+	// old stream until it has committed the new one, so the watchdog does not
+	// mistake that window for a dead view. gen identifies the current stream, so
+	// a frame callback from a cancelled one cannot write over its successor's
+	// state.
 	switching bool
 	gen       int
 	policy    string // "follow" or "hold"
@@ -192,12 +193,30 @@ func (s *Streamer) stream(page *rod.Page) error {
 
 	// Close may have run while this call waited for streamMu. Bail rather than
 	// bringing a tab to the front during shutdown.
+	//
+	// switching goes up in that same critical section, before the first CDP call
+	// rather than after it. From here until this call commits, s.page is stale
+	// or nil, and both PageBringToFront and the stop() below are unbounded round
+	// trips: a watchdog tick landing anywhere in that window and finding
+	// s.page == nil with switching still false would read it as a view that had
+	// died, and start a competing Select("") behind this call's back. The
+	// deferred clear covers every way out of the window, the BringToFront
+	// failure included. Nothing is raised on the shutdown path, so that return
+	// needs no clear of its own.
 	s.mu.Lock()
 	closed := s.closed
+	if !closed {
+		s.switching = true
+	}
 	s.mu.Unlock()
 	if closed {
 		return fmt.Errorf("the live view is shutting down")
 	}
+	defer func() {
+		s.mu.Lock()
+		s.switching = false
+		s.mu.Unlock()
+	}()
 
 	// Chrome sends nothing for a background tab, so the page has to come to the
 	// front. Do it before tearing the old stream down: if it fails, the viewer
@@ -215,13 +234,7 @@ func (s *Streamer) stream(page *rod.Page) error {
 	s.seq = 0
 	s.gen++
 	gen := s.gen
-	s.switching = true
 	s.mu.Unlock()
-	defer func() {
-		s.mu.Lock()
-		s.switching = false
-		s.mu.Unlock()
-	}()
 
 	go bound.EachEvent(func(e *proto.PageScreencastFrame) {
 		// Acknowledge at once. Chrome stops the stream without this, and it

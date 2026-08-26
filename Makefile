@@ -42,19 +42,38 @@ $(BUILD_DIR):
 # Default target
 all: build
 
+# NPM_STAMP records the last successful install. Gating npm ci on the mere
+# presence of web/node_modules let a dependency bump through silently: WEB_SRC
+# lists web/package-lock.json, so bumping one does rebuild web/dist, but npm ci
+# was skipped and vite then compiled against the previous install. The stamp
+# lives inside node_modules so that deleting that tree invalidates it too, and
+# it is written after npm ci because npm ci starts by wiping the directory.
+# "echo >" rather than "touch" keeps this target usable under cmd.exe.
+NPM_STAMP=web/node_modules/.atr-npm-stamp
+
+$(NPM_STAMP): web/package.json web/package-lock.json
+	cd web && npm ci --no-audit --no-fund
+	@echo stamp > $(NPM_STAMP)
+
 ## web: Build the live view web application into web/dist (needs Node 22+)
 ##      Run this once before "make build"; web/dist is not committed.
-web:
-ifeq ($(wildcard web/node_modules),)
-	cd web && npm ci --no-audit --no-fund
-endif
+web: $(NPM_STAMP)
 	cd web && npm run build
 
 # web/dist is gitignored build output, and every target that compiles Go needs
 # it to exist for //go:embed. Listing the sources means make rebuilds it when
 # they change and skips it otherwise, so a fresh clone works and an ordinary
 # build does not shell out to npm.
-WEB_SRC=$(wildcard web/src/*) web/index.html web/package.json \
+#
+# rwildcard walks the tree, because a plain $(wildcard web/src/*) stops at the
+# top level: the day someone adds web/src/components/, edits there would stop
+# invalidating web/dist and the embedded assets would go stale with no sign of
+# it. It is built from make's own wildcard rather than from find, which is a
+# different program under cmd.exe, because this list feeds a prerequisite of
+# "build".
+rwildcard=$(foreach d,$(wildcard $(1)*),$(call rwildcard,$(d)/,$(2)) $(filter $(subst *,%,$(2)),$(d)))
+
+WEB_SRC=$(call rwildcard,web/src/,*) web/index.html web/package.json \
 	web/package-lock.json web/vite.config.ts web/tsconfig.json
 
 web/dist/index.html: $(WEB_SRC)

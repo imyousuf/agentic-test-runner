@@ -107,3 +107,25 @@ func TestEncodeFrameLayout(t *testing.T) {
 		t.Fatalf("image bytes changed: %v", body)
 	}
 }
+
+// The error guard must collapse a consecutive run and nothing more. Without a
+// reset it means "ever sent" rather than "the last one sent", so the first
+// "no page is selected" of a session silences every later one and a browser
+// that wedges hours in swallows every click with no banner.
+func TestViewerReportsAnErrorAgainAfterItIsCleared(t *testing.T) {
+	v := newViewer()
+	const msg = "no page is selected"
+
+	if v.repeatError(msg) {
+		t.Fatal("the first error must be reported")
+	}
+	if !v.repeatError(msg) {
+		t.Fatal("an immediate repeat must be suppressed")
+	}
+
+	v.clearError()
+
+	if v.repeatError(msg) {
+		t.Fatal("the same error after a clear must be reported again")
+	}
+}
