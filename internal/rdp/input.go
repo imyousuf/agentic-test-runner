@@ -2,6 +2,7 @@ package rdp
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/go-rod/rod/lib/proto"
 )
@@ -48,6 +49,39 @@ type KeyMsg struct {
 	VK   int    `json:"vk"`
 	Text string `json:"text"`
 	Mod  int    `json:"mod"`
+}
+
+// editingCommands names the built-in editing action that a control shortcut
+// should run.
+//
+// Chrome resolves these in the browser process, from the platform key binding
+// attached to a real key press. A synthetic key event carries no such binding,
+// so the renderer sees the keystroke and the modifier bit but runs no built-in
+// action: Ctrl+A moves the caret nowhere and selects nothing. Naming the
+// command explicitly is the documented way to restore it.
+//
+// Paste is absent on purpose. The client turns it into Input.insertText, which
+// carries the viewer's clipboard; "paste" here would use the remote browser's.
+func editingCommands(k KeyMsg) []string {
+	if k.Mod&(modCtrl|modMeta) == 0 {
+		return nil
+	}
+	switch strings.ToLower(k.Key) {
+	case "a":
+		return []string{"selectAll"}
+	case "z":
+		if k.Mod&modShift != 0 {
+			return []string{"redo"}
+		}
+		return []string{"undo"}
+	case "y":
+		return []string{"redo"}
+	case "x":
+		return []string{"cut"}
+	case "c":
+		return []string{"copy"}
+	}
+	return nil
 }
 
 func mouseButton(name string) proto.InputMouseButton {
@@ -159,6 +193,9 @@ func (s *Streamer) Key(k KeyMsg) error {
 		k.Mod&(modCtrl|modMeta) == 0 {
 		ev.Text = k.Text
 		ev.UnmodifiedText = k.Text
+	}
+	if kind == proto.InputDispatchKeyEventTypeKeyDown {
+		ev.Commands = editingCommands(k)
 	}
 
 	if err := ev.Call(page); err != nil {
