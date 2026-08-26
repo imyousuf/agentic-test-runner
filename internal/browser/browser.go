@@ -4,6 +4,7 @@ package browser
 import (
 	"archive/zip"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -545,6 +546,32 @@ func (b *Browser) Close() error {
 	return b.browser.Close()
 }
 
+// defaultPageLoadTimeout bounds waiting for a page to finish loading when the
+// config does not say.
+const defaultPageLoadTimeout = 45 * time.Second
+
+// waitLoad waits for a page to finish loading, bounded.
+//
+// rod's WaitLoad has no deadline of its own, and Chrome does occasionally
+// never answer the Runtime.evaluate it issues — a wedged renderer, or a
+// target created while the browser is under load. Unbounded, that turns a
+// stalled page into a hung process: the caller waits forever and there is
+// nothing to say why. Bounded, it is an ordinary error that can be reported
+// or retried.
+func (b *Browser) waitLoad(page *rod.Page) error {
+	timeout := b.config.PageTimeout
+	if timeout <= 0 {
+		timeout = defaultPageLoadTimeout
+	}
+	if err := page.Timeout(timeout).WaitLoad(); err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			return fmt.Errorf("page did not finish loading within %s", timeout)
+		}
+		return err
+	}
+	return nil
+}
+
 // NewPage creates a new page/tab and navigates to the URL.
 func (b *Browser) NewPage(ctx context.Context, url string) error {
 	// The CDP setup below runs without b.mu held, deliberately.
@@ -617,7 +644,7 @@ func (b *Browser) NewPage(ctx context.Context, url string) error {
 	b.mu.Unlock()
 
 	// Wait for page load
-	if err := page.WaitLoad(); err != nil {
+	if err := b.waitLoad(page); err != nil {
 		return fmt.Errorf("failed to wait for page load: %w", err)
 	}
 
@@ -796,7 +823,7 @@ func (b *Browser) Navigate(ctx context.Context, url string) error {
 		return fmt.Errorf("navigation failed: %w", err)
 	}
 
-	return page.WaitLoad()
+	return b.waitLoad(page)
 }
 
 // GoBack navigates back in history.
