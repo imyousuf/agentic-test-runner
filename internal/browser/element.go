@@ -3,6 +3,7 @@ package browser
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -449,6 +450,31 @@ func (b *Browser) Snapshot(verbose bool) ([]ElementInfo, error) {
 // page may still be settling.
 const elementActionTimeout = 30 * time.Second
 
+// asNotFound reports a failed lookup as ErrElementNotFound.
+//
+// These branches return early, so they never reach the ErrElementNotFound at
+// the end of the fallback chain. rod retries a selector until its context
+// expires and then surfaces the context error, which means "this selector
+// never matched" arrives as "context deadline exceeded". Callers classifying
+// a failure need to tell a vanished element apart from a slow one, and for a
+// lookup those are the same event — so only the deadline is translated, and
+// any other error is passed through as itself.
+func asNotFound(target string, err error) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return fmt.Errorf("%w: %s", ErrElementNotFound, target)
+	}
+	return err
+}
+
+// ErrElementNotFound is returned when no strategy locates a target. Callers
+// that need to tell "the page changed shape" apart from "the operation
+// failed" — the script runtime's failure taxonomy, for one — match on this
+// with errors.Is rather than on message text.
+var ErrElementNotFound = errors.New("element not found")
+
 func tryFind(page *rod.Page, timeout time.Duration, fn func(*rod.Page) (*rod.Element, error)) (*rod.Element, error) {
 	el, err := fn(page.Timeout(timeout))
 	if err != nil {
@@ -478,17 +504,19 @@ func (b *Browser) findElement(page *rod.Page, target string) (*rod.Element, erro
 
 	// XPath selectors
 	if strings.HasPrefix(target, "//") {
-		return tryFind(page, 3*time.Second, func(p *rod.Page) (*rod.Element, error) {
+		el, err := tryFind(page, 3*time.Second, func(p *rod.Page) (*rod.Element, error) {
 			return p.ElementX(target)
 		})
+		return el, asNotFound(target, err)
 	}
 
 	// CSS selectors: unambiguous prefixes or structural analysis
 	if strings.HasPrefix(target, "#") || strings.HasPrefix(target, ".") ||
 		strings.HasPrefix(target, "[") || looksLikeCSSSelector(target) {
-		return tryFind(page, 3*time.Second, func(p *rod.Page) (*rod.Element, error) {
+		el, err := tryFind(page, 3*time.Second, func(p *rod.Page) (*rod.Element, error) {
 			return p.Element(target)
 		})
+		return el, asNotFound(target, err)
 	}
 
 	// Try by UID (e.g., "e0", "e1")
@@ -573,7 +601,7 @@ func (b *Browser) findElement(page *rod.Page, target string) (*rod.Element, erro
 		return el, nil
 	}
 
-	return nil, fmt.Errorf("element not found: %s", target)
+	return nil, fmt.Errorf("%w: %s", ErrElementNotFound, target)
 }
 
 // GetElementScreenshot captures a screenshot of a specific element.
