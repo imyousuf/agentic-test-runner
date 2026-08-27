@@ -119,8 +119,9 @@ func (c *cliClient) Chat(ctx context.Context, messages []llm.Message, tools []ll
 	}
 
 	return &llm.Response{
-		Content:      result,
+		Content:      result.Content,
 		FinishReason: "stop",
+		Usage:        result.Usage,
 	}, nil
 }
 
@@ -215,13 +216,38 @@ func (c *cliClient) getAllowedTools(tools []llm.Tool) []string {
 		return nil
 	}
 
-	// Map internal tool names to MCP tool names
+	// ATR's tools come from two places and only one of them is MCP.
+	//
+	// The browser and computer tools are served by `atr mcp serve`, so they
+	// carry that server's prefix. The command-analysis tools are ATR's own —
+	// they are not in the MCP server at all, and naming them as though they
+	// were produced an allowlist made entirely of tools that do not exist. The
+	// CLI has its own equivalents, so those are what it is allowed to use.
+	seen := make(map[string]bool, len(tools))
 	var allowed []string
+	add := func(name string) {
+		if name == "" || seen[name] {
+			return
+		}
+		seen[name] = true
+		allowed = append(allowed, name)
+	}
+
 	for _, tool := range tools {
-		// Tools are exposed via MCP with mcp__atr-browser__ prefix
-		allowed = append(allowed, fmt.Sprintf("mcp__atr-browser__%s", tool.Name))
+		if native, ok := cliNativeTools[tool.Name]; ok {
+			add(native)
+			continue
+		}
+		add("mcp__atr-browser__" + tool.Name)
 	}
 	return allowed
+}
+
+// cliNativeTools maps ATR's own tool names onto the CLI's equivalents.
+var cliNativeTools = map[string]string{
+	"execute_command": "Bash",
+	"read_file":       "Read",
+	"search_code":     "Grep",
 }
 
 // verboseLog prints a debug message if verbose mode is enabled.
@@ -246,7 +272,7 @@ func (c *cliClient) sanitizeArgsForLog(args []string) []string {
 }
 
 // execute runs the CLI with the given prompt and configuration.
-func (c *cliClient) execute(ctx context.Context, prompt, mcpConfig string, allowedTools []string) (string, error) {
+func (c *cliClient) execute(ctx context.Context, prompt, mcpConfig string, allowedTools []string) (cliResult, error) {
 	// Create timeout context
 	execCtx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
@@ -302,10 +328,10 @@ func (c *cliClient) execute(ctx context.Context, prompt, mcpConfig string, allow
 		}
 
 		if execCtx.Err() == context.DeadlineExceeded {
-			return "", fmt.Errorf("CLI execution timed out after %v", c.timeout)
+			return cliResult{}, fmt.Errorf("CLI execution timed out after %v", c.timeout)
 		}
 		if ctx.Err() == context.Canceled {
-			return "", fmt.Errorf("CLI execution interrupted after %v", duration)
+			return cliResult{}, fmt.Errorf("CLI execution interrupted after %v", duration)
 		}
 		// Include both stdout and stderr in error message for debugging
 		errMsg := err.Error()
@@ -315,7 +341,7 @@ func (c *cliClient) execute(ctx context.Context, prompt, mcpConfig string, allow
 		if stdout.Len() > 0 {
 			errMsg = fmt.Sprintf("%s\nstdout: %s", errMsg, stdout.String())
 		}
-		return "", fmt.Errorf("CLI execution failed: %s", errMsg)
+		return cliResult{}, fmt.Errorf("CLI execution failed: %s", errMsg)
 	}
 
 	c.verboseLog("CLI process completed in %v", time.Since(startTime))
@@ -380,46 +406,83 @@ func (c *cliClient) buildGeminiArgs(prompt, _ string, _ []string) []string {
 	return args
 }
 
+// cliResult is what one CLI invocation produced.
+type cliResult struct {
+	Content string
+	Usage   *llm.Usage
+}
+
 // parseResponse parses the CLI output based on the provider.
-func (c *cliClient) parseResponse(output []byte) (string, error) {
+func (c *cliClient) parseResponse(output []byte) (cliResult, error) {
 	switch c.provider {
 	case llm.ProviderClaudeCLI:
 		return c.parseClaudeResponse(output)
 	case llm.ProviderGeminiCLI:
 		return c.parseGeminiResponse(output)
 	default:
-		return string(output), nil
+		return cliResult{Content: string(output)}, nil
 	}
 }
 
 // claudeJSONResponse represents Claude CLI JSON output.
 type claudeJSONResponse struct {
-	Type     string `json:"type"`
-	Subtype  string `json:"subtype"`
-	Result   string `json:"result"`
-	Duration int64  `json:"duration_ms,omitempty"`
-	Usage    *struct {
-		InputTokens  int `json:"input_tokens"`
-		OutputTokens int `json:"output_tokens"`
-	} `json:"usage,omitempty"`
-	TotalCostUSD float64 `json:"total_cost_usd,omitempty"`
-	SessionID    string  `json:"session_id,omitempty"`
+	Type    string `json:"type"`
+	Subtype string `json:"subtype"`
+	Result  string `json:"result"`
+	// IsError is how the CLI reports a failed run. Matching only on
+	// subtype=="error" missed it, and an error message was handed back to the
+	// caller as though it were the model's answer.
+	IsError      bool         `json:"is_error"`
+	Duration     int64        `json:"duration_ms,omitempty"`
+	Usage        *claudeUsage `json:"usage,omitempty"`
+	TotalCostUSD float64      `json:"total_cost_usd,omitempty"`
+	SessionID    string       `json:"session_id,omitempty"`
+}
+
+// claudeUsage mirrors the CLI's usage block. The cache figures are reported
+// separately from input_tokens, so a caller that ignores them undercounts the
+// prompt badly on any run that reuses a cached prefix.
+type claudeUsage struct {
+	InputTokens              int `json:"input_tokens"`
+	OutputTokens             int `json:"output_tokens"`
+	CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+	CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+}
+
+// toLLMUsage folds the cache figures into the prompt count, so the number is
+// comparable with what the other providers report.
+func (u *claudeUsage) toLLMUsage() *llm.Usage {
+	if u == nil {
+		return nil
+	}
+	prompt := u.InputTokens + u.CacheCreationInputTokens + u.CacheReadInputTokens
+	return &llm.Usage{
+		PromptTokens:     prompt,
+		CompletionTokens: u.OutputTokens,
+		TotalTokens:      prompt + u.OutputTokens,
+	}
 }
 
 // parseClaudeResponse parses Claude CLI JSON output.
-func (c *cliClient) parseClaudeResponse(output []byte) (string, error) {
+func (c *cliClient) parseClaudeResponse(output []byte) (cliResult, error) {
 	resp, err := decodeClaudeOutput(output)
 	if err != nil {
 		// Return error with raw output for debugging
-		return "", fmt.Errorf("failed to parse CLI response as JSON: %w\nRaw output: %s", err, string(output))
+		return cliResult{}, fmt.Errorf("failed to parse CLI response as JSON: %w\nRaw output: %s", err, string(output))
 	}
 
-	// Check for error response
-	if resp.Type == "result" && resp.Subtype == "error" {
-		return "", fmt.Errorf("CLI error: %s", resp.Result)
+	if resp.IsError || resp.Subtype == "error" {
+		return cliResult{}, fmt.Errorf("CLI error: %s", resp.Result)
 	}
 
-	return resp.Result, nil
+	if c.verbose && resp.Usage != nil {
+		c.verboseLog("tokens in=%d out=%d cache_read=%d cache_write=%d cost=$%.4f",
+			resp.Usage.InputTokens, resp.Usage.OutputTokens,
+			resp.Usage.CacheReadInputTokens, resp.Usage.CacheCreationInputTokens,
+			resp.TotalCostUSD)
+	}
+
+	return cliResult{Content: resp.Result, Usage: resp.Usage.toLLMUsage()}, nil
 }
 
 // decodeClaudeOutput reads the CLI's answer in either shape it produces.
@@ -453,9 +516,9 @@ func decodeClaudeOutput(output []byte) (claudeJSONResponse, error) {
 }
 
 // parseGeminiResponse parses Gemini CLI output.
-func (c *cliClient) parseGeminiResponse(output []byte) (string, error) {
-	// Gemini CLI outputs plain text by default
-	return string(output), nil
+func (c *cliClient) parseGeminiResponse(output []byte) (cliResult, error) {
+	// Gemini CLI outputs plain text by default, and reports no usage.
+	return cliResult{Content: string(output)}, nil
 }
 
 // findClaudeCLI looks for the Claude CLI in common installation locations.
