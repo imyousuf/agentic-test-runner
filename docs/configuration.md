@@ -271,7 +271,7 @@ vertex:
 # Model name overrides (advanced, API backends only)
 models:
   flash: "gemini-3.7-flash"
-  pro: "gemini-2.0-pro-exp"
+  pro: "gemini-3.1-pro-preview"
   sonnet: "claude-sonnet-5"   # vertex-claude
   opus: "claude-opus-5"       # vertex-claude
 

@@ -238,7 +238,7 @@ Default LLM models for `atr computer ask` (and `atr browser ask`):
 | Backend                        | Tier     | Model                      |
 |--------------------------------|----------|----------------------------|
 | `gemini-api` / `vertex-ai`     | flash    | `gemini-3.7-flash`         |
-| `gemini-api` / `vertex-ai`     | pro      | `gemini-3.2-pro-preview`   |
+| `gemini-api` / `vertex-ai`     | pro      | `gemini-3.1-pro-preview`   |
 | `vertex-claude`                | sonnet   | `claude-sonnet-5`          |
 | `vertex-claude`                | opus     | `claude-opus-5`            |
 

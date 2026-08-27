@@ -120,7 +120,7 @@ Default model aliases used by `/ask`:
 | Tier  | Model                          |
 |-------|--------------------------------|
 | flash | `gemini-3.7-flash`            |
-| pro   | `gemini-3.2-pro-preview`       |
+| pro   | `gemini-3.1-pro-preview`      |
 
 Backend `claude-cli` ignores the model alias and uses the Claude CLI subprocess via MCP.
 

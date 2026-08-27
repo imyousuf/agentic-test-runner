@@ -447,7 +447,7 @@ atr computer ask --max-steps 30 --timeout 10m "open the GNOME calculator and com
 | `--max-steps N` | Max agent iterations (default 20) |
 | `--timeout DURATION` | Max wall-clock time (default 5m) |
 
-The LLM backend and model are inherited from the global ATR config (`--backend`, `--model`, env vars, `~/.atr/config.yaml`). Default model aliases: `flash → gemini-3.7-flash`, `pro → gemini-3.2-pro-preview`. With `--backend claude-cli`, the model flag is ignored and Claude CLI drives the loop via MCP.
+The LLM backend and model are inherited from the global ATR config (`--backend`, `--model`, env vars, `~/.atr/config.yaml`). Default model aliases: `flash → gemini-3.7-flash`, `pro → gemini-3.1-pro-preview`. With `--backend claude-cli`, the model flag is ignored and Claude CLI drives the loop via MCP.
 
 The agent **cannot type passwords**. If a sudo / polkit / authentication prompt appears, it stops and reports the blocker.
 

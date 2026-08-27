@@ -144,7 +144,7 @@ The agent uses the LLM backend configured for ATR (`backend: gemini-api | vertex
 | Tier  | Model                          |
 |-------|--------------------------------|
 | flash | `gemini-3.7-flash`            |
-| pro   | `gemini-3.2-pro-preview`       |
+| pro   | `gemini-3.1-pro-preview`      |
 
 Override per-run with the global `--model` flag (e.g. `atr --model pro computer ask "..."`). With `backend: claude-cli`, the model flag is ignored and Claude CLI is invoked as a subprocess.
 
