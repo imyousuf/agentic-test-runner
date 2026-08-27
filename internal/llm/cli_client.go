@@ -408,8 +408,8 @@ type claudeJSONResponse struct {
 
 // parseClaudeResponse parses Claude CLI JSON output.
 func (c *cliClient) parseClaudeResponse(output []byte) (string, error) {
-	var resp claudeJSONResponse
-	if err := json.Unmarshal(output, &resp); err != nil {
+	resp, err := decodeClaudeOutput(output)
+	if err != nil {
 		// Return error with raw output for debugging
 		return "", fmt.Errorf("failed to parse CLI response as JSON: %w\nRaw output: %s", err, string(output))
 	}
@@ -420,6 +420,36 @@ func (c *cliClient) parseClaudeResponse(output []byte) (string, error) {
 	}
 
 	return resp.Result, nil
+}
+
+// decodeClaudeOutput reads the CLI's answer in either shape it produces.
+//
+// With --output-format json the CLI answers with one result object. Adding
+// --verbose turns the same flag into stream-json: an array of events for the
+// whole run — the session init, each assistant turn, each tool call — with the
+// answer in a final event of type "result". ATR passes --verbose through from
+// its own flag, so the shape changes underneath it depending on how the user
+// invoked atr, and only one of the two used to parse.
+//
+// The last result event wins: earlier ones belong to earlier turns.
+func decodeClaudeOutput(output []byte) (claudeJSONResponse, error) {
+	trimmed := bytes.TrimSpace(output)
+	if !bytes.HasPrefix(trimmed, []byte("[")) {
+		var resp claudeJSONResponse
+		err := json.Unmarshal(trimmed, &resp)
+		return resp, err
+	}
+
+	var events []claudeJSONResponse
+	if err := json.Unmarshal(trimmed, &events); err != nil {
+		return claudeJSONResponse{}, err
+	}
+	for i := len(events) - 1; i >= 0; i-- {
+		if events[i].Type == "result" {
+			return events[i], nil
+		}
+	}
+	return claudeJSONResponse{}, fmt.Errorf("no result event in %d streamed events", len(events))
 }
 
 // parseGeminiResponse parses Gemini CLI output.
