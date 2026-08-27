@@ -52,9 +52,27 @@ func newClaudeCLIClient(_ context.Context, cfg llm.Config) (llm.Client, error) {
 		provider:   llm.ProviderClaudeCLI,
 		executable: path,
 		model:      model,
-		timeout:    10 * time.Minute, // CLI needs longer timeout for browser automation
+		timeout:    cliTimeout(cfg),
 		verbose:    cfg.Verbose,
 	}, nil
+}
+
+// defaultCLITimeout bounds one CLI invocation when the config does not say.
+//
+// Long, because a CLI backend does not make an API round trip: one invocation
+// drives an entire browser run and emits a script at the end of it.
+const defaultCLITimeout = 10 * time.Minute
+
+// cliTimeout honours the configured cli.timeout.
+//
+// It used to be hardcoded, so `cli.timeout: 30m` was reported by
+// `atr config show` and then ignored: compiles died at exactly ten minutes
+// however high the setting was.
+func cliTimeout(cfg llm.Config) time.Duration {
+	if cfg.Timeout > 0 {
+		return cfg.Timeout
+	}
+	return defaultCLITimeout
 }
 
 // normalizeClaudeModel converts model names to Claude CLI model IDs.
@@ -90,7 +108,7 @@ func newGeminiCLIClient(_ context.Context, cfg llm.Config) (llm.Client, error) {
 	return &cliClient{
 		provider:   llm.ProviderGeminiCLI,
 		executable: path,
-		timeout:    10 * time.Minute, // CLI needs longer timeout for browser automation
+		timeout:    cliTimeout(cfg),
 		verbose:    cfg.Verbose,
 	}, nil
 }

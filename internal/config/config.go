@@ -530,6 +530,7 @@ func (c *Config) GetLLMConfig() llm.Config {
 	return llm.Config{
 		Provider:        provider,
 		Model:           model,
+		Timeout:         c.GetCLITimeout(),
 		APIKey:          c.Gemini.APIKey,
 		Project:         c.Vertex.Project,
 		Location:        c.Vertex.Location,

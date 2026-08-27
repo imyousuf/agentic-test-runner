@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"fmt"
+	"time"
 )
 
 // Client is the interface for interacting with LLM providers.
@@ -62,6 +63,11 @@ type Config struct {
 
 	// Verbose enables debug logging for CLI backends.
 	Verbose bool
+
+	// Timeout bounds a single call to the provider. It matters most for the
+	// CLI backends, where one invocation drives a whole browser run rather
+	// than making one API round trip. Zero means the provider's own default.
+	Timeout time.Duration
 }
 
 // Validate checks that the configuration is valid.

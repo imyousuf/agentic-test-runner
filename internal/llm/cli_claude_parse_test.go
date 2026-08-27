@@ -3,6 +3,7 @@ package llm
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/imyousuf/agentic-test-runner/pkg/llm"
 )
@@ -140,5 +141,16 @@ func TestNoToolsMeansNoAllowlist(t *testing.T) {
 	c := &cliClient{provider: "claude-cli"}
 	if got := c.getAllowedTools(nil); got != nil {
 		t.Errorf("allowed = %v, want nil", got)
+	}
+}
+
+// The configured timeout has to win over the provider's default, or a long
+// browser compile is cut off at ten minutes whatever the config says.
+func TestConfiguredTimeoutIsUsed(t *testing.T) {
+	if got := cliTimeout(llm.Config{Timeout: 30 * time.Minute}); got != 30*time.Minute {
+		t.Errorf("cliTimeout = %v, want the configured 30m", got)
+	}
+	if got := cliTimeout(llm.Config{}); got != defaultCLITimeout {
+		t.Errorf("cliTimeout = %v, want the %v default when unset", got, defaultCLITimeout)
 	}
 }
