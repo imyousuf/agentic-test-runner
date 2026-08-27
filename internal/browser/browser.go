@@ -230,8 +230,10 @@ func (b *Browser) Launch(ctx context.Context) error {
 	// Store the control URL for external access (e.g., MCP servers)
 	b.controlURL = controlURL
 
-	// Connect to browser
-	browser := rod.New().ControlURL(controlURL)
+	// NoDefaultDevice: rod otherwise emulates devices.LaptopWithMDPIScreen on
+	// every page it touches, so merely listing tabs pins them to 1280x800 and
+	// overrides whatever "atr browser viewport" was told to use.
+	browser := rod.New().ControlURL(controlURL).NoDefaultDevice()
 	if b.config.SlowMotion > 0 {
 		browser = browser.SlowMotion(b.config.SlowMotion)
 	}
@@ -500,7 +502,8 @@ func (b *Browser) Connect(ctx context.Context, cdpEndpoint string) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	browser := rod.New().ControlURL(cdpEndpoint)
+	// NoDefaultDevice: see Launch. Attaching must not resize the caller's tabs.
+	browser := rod.New().ControlURL(cdpEndpoint).NoDefaultDevice()
 	if b.config.SlowMotion > 0 {
 		browser = browser.SlowMotion(b.config.SlowMotion)
 	}
