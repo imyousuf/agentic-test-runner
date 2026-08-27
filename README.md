@@ -97,7 +97,7 @@ Directory: /path/to/project
 ✗ Command failed (exit code: 1, duration: 2.3s)
 
 Analyzing failure with AI agent...
-Using model: gemini-2.0-flash-exp (gemini-api)
+Using model: gemini-3.7-flash (gemini-api)
 
 ======================================================================
 ANALYSIS RESULTS
@@ -237,7 +237,7 @@ Default LLM models for `atr computer ask` (and `atr browser ask`):
 
 | Backend                        | Tier     | Model                      |
 |--------------------------------|----------|----------------------------|
-| `gemini-api` / `vertex-ai`     | flash    | `gemini-3.1-flash-preview` |
+| `gemini-api` / `vertex-ai`     | flash    | `gemini-3.7-flash`         |
 | `gemini-api` / `vertex-ai`     | pro      | `gemini-3.2-pro-preview`   |
 | `vertex-claude`                | sonnet   | `claude-sonnet-5`          |
 | `vertex-claude`                | opus     | `claude-opus-5`            |

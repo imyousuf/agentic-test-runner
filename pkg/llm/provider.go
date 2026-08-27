@@ -90,7 +90,7 @@ func (p Provider) CLIExecutable() string {
 func (p Provider) DefaultModel() string {
 	switch p {
 	case ProviderGemini, ProviderVertexAI:
-		return "gemini-3.0-flash"
+		return "gemini-3.7-flash"
 	case ProviderClaudeCLI:
 		return "" // CLI uses its own default model
 	case ProviderGeminiCLI:

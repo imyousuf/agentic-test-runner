@@ -12,7 +12,7 @@ func claudeConfig(model string) *Config {
 		Model:   model,
 		Vertex:  VertexConfig{Project: "some-project"},
 		Models: ModelsConfig{
-			Flash:  "gemini-3.1-flash-preview",
+			Flash:  "gemini-3.7-flash",
 			Pro:    "gemini-3.2-pro-preview",
 			Sonnet: "claude-sonnet-5",
 			Opus:   "claude-opus-5",

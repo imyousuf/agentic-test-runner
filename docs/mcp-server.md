@@ -149,7 +149,7 @@ Cross-platform desktop control. Coordinates default to **root coords** (the boun
 
 | Tool | Description | Parameters |
 |------|-------------|------------|
-| `computer_ask` | Run an in-process LLM agent loop to accomplish a desktop task. The daemon uses its configured LLM (gemini-3.1-flash-preview, gemini-3.2-pro-preview, or claude-cli) to screenshot, decide, and call lower-level tools until done. | `instruction` (required), `max_steps` (optional, default 20) |
+| `computer_ask` | Run an in-process LLM agent loop to accomplish a desktop task. The daemon uses its configured LLM (gemini-3.7-flash, gemini-3.2-pro-preview, or claude-cli) to screenshot, decide, and call lower-level tools until done. | `instruction` (required), `max_steps` (optional, default 20) |
 
 ## Integration with Claude CLI
 

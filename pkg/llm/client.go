@@ -32,7 +32,7 @@ type Config struct {
 	// Provider specifies which LLM provider to use.
 	Provider Provider
 
-	// Model is the model name/ID to use (e.g., "gemini-3.0-flash").
+	// Model is the model name/ID to use (e.g., "gemini-3.7-flash").
 	Model string
 
 	// APIKey is the API key for authentication (for API-based providers).

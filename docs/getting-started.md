@@ -113,7 +113,7 @@ Directory: /path/to/project
 ✗ Command failed (exit code: 1, duration: 2.3s)
 
 Analyzing failure with AI agent...
-Using model: gemini-2.0-flash-exp (gemini-api)
+Using model: gemini-3.7-flash (gemini-api)
 
 ======================================================================
 ANALYSIS RESULTS
@@ -180,7 +180,7 @@ The AI agent will:
 Found 1 behavior test(s)
 
 Launching browser...
-Using model: gemini-2.0-flash-exp (gemini-api)
+Using model: gemini-3.7-flash (gemini-api)
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Test 1/1: search.test.txt

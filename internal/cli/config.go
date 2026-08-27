@@ -192,7 +192,7 @@ model: "%s"
 
 # Model name overrides (optional)
 models:
-  flash: "gemini-3-flash-preview"
+  flash: "gemini-3.7-flash"
   pro: "gemini-3-pro-preview"
   sonnet: "claude-sonnet-5"
   opus: "claude-opus-5"

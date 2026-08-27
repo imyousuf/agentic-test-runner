@@ -335,7 +335,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("cli.timeout", "5m")
 
 	// Model name defaults
-	v.SetDefault("models.flash", "gemini-3.1-flash-preview")
+	v.SetDefault("models.flash", "gemini-3.7-flash")
 	v.SetDefault("models.pro", "gemini-3.2-pro-preview")
 	v.SetDefault("models.sonnet", "claude-sonnet-5")
 	v.SetDefault("models.opus", "claude-opus-5")
