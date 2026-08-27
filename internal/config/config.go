@@ -95,6 +95,10 @@ type ModelsConfig struct {
 	Flash string `mapstructure:"flash"`
 	// Pro is the model name for the pro tier.
 	Pro string `mapstructure:"pro"`
+	// Sonnet is the model name for the sonnet tier (vertex-claude backend).
+	Sonnet string `mapstructure:"sonnet"`
+	// Opus is the model name for the opus tier (vertex-claude backend).
+	Opus string `mapstructure:"opus"`
 }
 
 // AgentConfig holds agent behavior configuration.
@@ -333,6 +337,8 @@ func setDefaults(v *viper.Viper) {
 	// Model name defaults
 	v.SetDefault("models.flash", "gemini-3.1-flash-preview")
 	v.SetDefault("models.pro", "gemini-3.2-pro-preview")
+	v.SetDefault("models.sonnet", "claude-sonnet-5")
+	v.SetDefault("models.opus", "claude-opus-5")
 
 	// Agent defaults
 	v.SetDefault("agent.max_iterations", 100)
@@ -404,7 +410,7 @@ func (c *Config) Validate() error {
 		if c.Gemini.APIKey == "" {
 			return fmt.Errorf("gemini API key required: set GEMINI_API_KEY environment variable or configure in ~/.atr/config.yaml")
 		}
-	case "vertex-ai":
+	case "vertex-ai", "vertex-claude":
 		if c.Vertex.Project == "" {
 			return fmt.Errorf("vertex AI project required: set GOOGLE_CLOUD_PROJECT environment variable or configure in ~/.atr/config.yaml")
 		}
@@ -412,7 +418,7 @@ func (c *Config) Validate() error {
 		// CLI backends don't require API keys - they use the CLI's authentication
 		// Validation of CLI availability is done at runtime
 	default:
-		return fmt.Errorf("invalid backend: %s (must be 'gemini-api', 'vertex-ai', 'claude-cli', or 'gemini-cli')", c.Backend)
+		return fmt.Errorf("invalid backend: %s (must be 'gemini-api', 'vertex-ai', 'vertex-claude', 'claude-cli', or 'gemini-cli')", c.Backend)
 	}
 
 	// Validate model based on backend type
@@ -430,6 +436,13 @@ func (c *Config) Validate() error {
 			}
 		}
 		// gemini-cli model validation can be added when needed
+	} else if c.Backend == "vertex-claude" {
+		// The Claude tiers are sonnet and opus. flash/pro are accepted as
+		// aliases so that switching backend does not also force a model
+		// change: the stock config ships model "flash".
+		if !isClaudeTier(c.Model) {
+			return fmt.Errorf("invalid model tier: %s (must be 'sonnet' or 'opus')", c.Model)
+		}
 	} else {
 		// For API backends, validate model tier
 		if c.Model != "flash" && c.Model != "pro" {
@@ -466,6 +479,12 @@ For Vertex AI, set:
   - GOOGLE_CLOUD_PROJECT environment variable
   - backend: vertex-ai
 
+For Claude on Vertex AI (prompt caching, Application Default Credentials):
+  - Run: gcloud auth application-default login
+  - GOOGLE_CLOUD_PROJECT environment variable
+  - backend: vertex-claude
+  - model: sonnet (or opus)
+
 For CLI backends (no API key needed):
   - Install claude CLI and set: backend: claude-cli
   - Or install gemini CLI and set: backend: gemini-cli
@@ -484,6 +503,8 @@ func (c *Config) GetLLMConfig() llm.Config {
 		provider = llm.ProviderGemini
 	case "vertex-ai":
 		provider = llm.ProviderVertexAI
+	case "vertex-claude":
+		provider = llm.ProviderVertexClaude
 	case "claude-cli":
 		provider = llm.ProviderClaudeCLI
 	case "gemini-cli":
@@ -496,6 +517,8 @@ func (c *Config) GetLLMConfig() llm.Config {
 		// For CLI backends, pass the model directly (opus, sonnet, haiku)
 		// If not specified, CLI will use its default
 		model = c.Model
+	} else if c.Backend == "vertex-claude" {
+		model = c.claudeModelName()
 	} else {
 		// For API backends, use flash/pro tier mapping
 		model = c.Models.Flash
@@ -525,10 +548,33 @@ func (c *Config) GetCLITimeout() time.Duration {
 
 // GetModelName returns the full model name based on the model tier.
 func (c *Config) GetModelName() string {
+	if c.Backend == "vertex-claude" {
+		return c.claudeModelName()
+	}
 	if c.Model == "pro" {
 		return c.Models.Pro
 	}
 	return c.Models.Flash
+}
+
+// isClaudeTier reports whether tier names a Claude model tier. "flash" and
+// "pro" are accepted as aliases of sonnet and opus.
+func isClaudeTier(tier string) bool {
+	switch strings.ToLower(tier) {
+	case "sonnet", "opus", "flash", "pro", "":
+		return true
+	}
+	return false
+}
+
+// claudeModelName resolves the configured tier to a Vertex publisher model id.
+func (c *Config) claudeModelName() string {
+	switch strings.ToLower(c.Model) {
+	case "opus", "pro":
+		return c.Models.Opus
+	default:
+		return c.Models.Sonnet
+	}
 }
 
 // ConfigDir returns the path to the ATR configuration directory.

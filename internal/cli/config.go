@@ -61,7 +61,7 @@ func newConfigShowCmd() *cobra.Command {
 				} else {
 					fmt.Println("  API Key: [not set]")
 				}
-			case "vertex-ai":
+			case "vertex-ai", "vertex-claude":
 				fmt.Println("Vertex AI:")
 				fmt.Printf("  Project: %s\n", cfg.Vertex.Project)
 				fmt.Printf("  Location: %s\n", cfg.Vertex.Location)
@@ -162,7 +162,7 @@ func newConfigInitCmd() *cobra.Command {
 # See https://github.com/imyousuf/agentic-test-runner for documentation
 
 %s
-# LLM Backend: "gemini-api", "vertex-ai", "claude-cli", or "gemini-cli"
+# LLM Backend: "gemini-api", "vertex-ai", "vertex-claude", "claude-cli", or "gemini-cli"
 # CLI backends don't require API keys - they use the CLI's authentication
 backend: "%s"
 
@@ -170,7 +170,9 @@ backend: "%s"
 gemini:
   api_key: ""  # Or set GEMINI_API_KEY environment variable
 
-# Vertex AI Configuration (when backend: vertex-ai)
+# Vertex AI Configuration (when backend: vertex-ai or vertex-claude)
+# vertex-claude runs Claude models through Vertex with prompt caching, using
+# Application Default Credentials (gcloud auth application-default login).
 vertex:
   project: ""           # Or set GOOGLE_CLOUD_PROJECT environment variable
   location: "global"    # Use "global" for Gemini 3 preview models
@@ -183,6 +185,7 @@ cli:
 
 # Model Selection:
 #   API backends: "flash" (faster, cheaper) or "pro" (more capable)
+#   vertex-claude: "sonnet" (faster, cheaper) or "opus" (more capable)
 #   claude-cli: "sonnet", "opus", or "haiku"
 #   gemini-cli: "flash" or "pro"
 model: "%s"
@@ -191,6 +194,8 @@ model: "%s"
 models:
   flash: "gemini-3-flash-preview"
   pro: "gemini-3-pro-preview"
+  sonnet: "claude-sonnet-5"
+  opus: "claude-opus-5"
 
 # Agent Configuration
 agent:

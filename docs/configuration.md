@@ -28,9 +28,10 @@ atr config validate
 
 ## LLM Backend Authentication
 
-ATR supports four LLM backends:
+ATR supports five LLM backends:
 - **CLI Backends** (recommended): `claude-cli`, `gemini-cli` - No API keys needed
 - **API Backends**: `gemini-api`, `vertex-ai` - Requires API keys or GCP setup
+- **Claude on Vertex AI**: `vertex-claude` - Sonnet and Opus over the Messages API, with prompt caching. No API key; uses the same GCP credentials as `vertex-ai`.
 
 ### CLI Backends (Recommended)
 
@@ -241,7 +242,8 @@ Ensure the VM's service account has `roles/aiplatform.user` permission.
 ```yaml
 # ~/.atr/config.yaml
 
-# LLM Backend: "claude-cli", "gemini-cli", "gemini-api", or "vertex-ai"
+# LLM Backend: "claude-cli", "gemini-cli", "gemini-api", "vertex-ai",
+# or "vertex-claude"
 # CLI backends (claude-cli, gemini-cli) don't require API keys
 backend: claude-cli
 
@@ -251,6 +253,8 @@ cli:
   timeout: "5m"      # CLI execution timeout (default: 5m)
 
 # Model tier: "flash" (faster, cheaper) or "pro" (more capable)
+# For vertex-claude: "sonnet" (faster, cheaper) or "opus" (more capable);
+# flash and pro are accepted as aliases of those two.
 # Only used for API backends; CLI backends use their own models
 model: flash
 
@@ -268,6 +272,8 @@ vertex:
 models:
   flash: "gemini-2.0-flash-exp"
   pro: "gemini-2.0-pro-exp"
+  sonnet: "claude-sonnet-5"   # vertex-claude
+  opus: "claude-opus-5"       # vertex-claude
 
 # Agent settings
 agent:
@@ -333,7 +339,7 @@ All configuration can be set via environment variables with the `ATR_` prefix:
 
 | Variable | Config Path | Description |
 |----------|-------------|-------------|
-| `ATR_BACKEND` | `backend` | LLM backend (`claude-cli`, `gemini-cli`, `gemini-api`, `vertex-ai`) |
+| `ATR_BACKEND` | `backend` | LLM backend (`claude-cli`, `gemini-cli`, `gemini-api`, `vertex-ai`, `vertex-claude`) |
 | `ATR_CLI_TIMEOUT` | `cli.timeout` | CLI execution timeout |
 | `ATR_CLI_AUTO_DETECT` | `cli.auto_detect` | Auto-detect available CLIs |
 | `GEMINI_API_KEY` | `gemini.api_key` | Gemini API key |
@@ -381,6 +387,36 @@ vertex:
   project: my-gcp-project
   location: us-central1
 ```
+
+### Claude on Vertex AI
+
+```yaml
+backend: vertex-claude
+model: sonnet          # or opus
+vertex:
+  project: my-gcp-project
+  location: global
+```
+
+Authenticate the same way as `vertex-ai` — ADC, a service account key, or
+workload identity. Claude models are not served from every region; `global`
+lets Vertex route the request. Verify with `atr test`.
+
+Each request carries one prompt-cache checkpoint at the end of its fixed
+prefix: the tool schemas plus the system prompt, or — for the command-analysis
+loop, which has no system prompt — the end of the first message, covering the
+instructions and captured failure that stay fixed for the run. Every later
+iteration reads that prefix from cache instead of re-sending it.
+
+Two caveats worth knowing when reading token counts:
+
+- Prompts below the API's minimum cacheable size are never cached. Agents with
+  small tool sets will show no cache activity at all; this is expected.
+- A newly written entry takes a few seconds to become readable, so the first
+  iteration or two of a cold run may rewrite it before reads start landing.
+
+`ATR_DEBUG_LLM=1` logs per-request input, output, cache-read and cache-write
+token counts.
 
 ### Vertex AI with Service Account
 
