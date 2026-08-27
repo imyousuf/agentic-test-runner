@@ -410,7 +410,7 @@ func (a *Agent) runToolLoop(ctx context.Context, messages []llm.Message, label s
 			if execErr != nil {
 				out = fmt.Sprintf("Error: %v", execErr)
 			}
-			msg := llm.Message{Role: llm.RoleTool, Content: out, ToolCallID: tc.Name}
+			msg := llm.Message{Role: llm.RoleTool, Content: out, ToolCallID: tc.ID, ToolName: tc.Name}
 			if len(imgData) > 0 {
 				msg.ImageData = imgData
 				msg.ImageMIME = imgMIME

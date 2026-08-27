@@ -12,12 +12,11 @@ import (
 // Converting ATR's conversation shape to Anthropic's is not a field rename.
 // Two differences matter:
 //
-//  1. ATR identifies a tool result by the tool's *name*, because that is what
-//     Gemini matches on — internal/llm/gemini.go passes ToolCallID straight to
-//     NewPartFromFunctionResponse as the function name. Anthropic instead
-//     requires the id of the originating tool_use block. The two cannot be the
-//     same field, so the id is recovered here rather than by changing every
-//     caller and breaking Gemini.
+//  1. Anthropic requires each result to name the id of the tool_use block that
+//     asked for it. ATR carries that in ToolCallID, so the pairing is a
+//     lookup — but a history can be trimmed, or come from a provider that
+//     issued no ids at all, so position is kept as the fallback: results
+//     arrive in the order the calls were made.
 //
 //  2. ATR appends one RoleTool message per result. Anthropic requires every
 //     result for an assistant turn to arrive in a single user message, in the
@@ -25,9 +24,7 @@ import (
 //
 // Both are handled by walking the history a turn at a time: each assistant
 // message carries the tool calls, and the RoleTool messages that follow are
-// its results, in the same order the agent loop appended them. Position is
-// what pairs them, so a turn that calls one tool twice still resolves both
-// results correctly — which name matching could not do.
+// its results.
 
 // systemPrompt collects the leading system text. Anthropic carries the system
 // prompt outside the message list, so it is extracted rather than converted.
@@ -71,16 +68,11 @@ func toAnthropicMessages(messages []llm.Message) ([]anthropic.MessageParam, erro
 			continue
 
 		case llm.RoleTool:
-			// A result for the assistant turn immediately above. Pair it with
-			// the next unconsumed call, which is the one it answers.
-			var id string
-			if len(pending) > 0 {
-				id = pending[0].ID
-				if id == "" {
-					id = pending[0].Name
-				}
-				pending = pending[1:]
-			} else {
+			// A result for the assistant turn immediately above. Prefer the
+			// id it names; fall back to the next unconsumed call, which is
+			// the one it answers, when the id is missing or unknown.
+			id, ok := takeCall(&pending, msg.ToolCallID)
+			if !ok {
 				// No call to pair with: the history was trimmed between the
 				// call and its result. Anthropic rejects an unmatched
 				// tool_result, so the content is kept as plain user text
@@ -179,4 +171,31 @@ func toAnthropicTools(tools []llm.Tool) []anthropic.ToolUnionParam {
 		out = append(out, param)
 	}
 	return out
+}
+
+// takeCall consumes the call a result answers and returns the id to send back.
+//
+// The id the result names wins, because that is the only thing that survives
+// reordering. When it names nothing recognisable — an older history recorded
+// against the tool name, a provider that issued no ids, a call already
+// consumed — the next unconsumed call is used instead, which is correct
+// whenever results arrive in the order the calls were made.
+func takeCall(pending *[]llm.ToolCall, id string) (string, bool) {
+	if id != "" {
+		for i, call := range *pending {
+			if call.ID == id {
+				*pending = append((*pending)[:i:i], (*pending)[i+1:]...)
+				return call.ID, true
+			}
+		}
+	}
+	if len(*pending) == 0 {
+		return "", false
+	}
+	next := (*pending)[0]
+	*pending = (*pending)[1:]
+	if next.ID != "" {
+		return next.ID, true
+	}
+	return next.Name, true
 }

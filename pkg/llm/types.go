@@ -24,8 +24,15 @@ type Message struct {
 	Role Role `json:"role"`
 	// Content is the text content of the message.
 	Content string `json:"content"`
-	// ToolCallID is set when this message is a tool response.
+	// ToolCallID is set when this message is a tool response. It identifies
+	// the specific call being answered, which is what lets a turn contain two
+	// calls to the same tool.
 	ToolCallID string `json:"tool_call_id,omitempty"`
+	// ToolName is the name of the tool a response came from. Providers differ
+	// in what they match on — Gemini pairs a response to its call by name,
+	// Anthropic by the id of the tool_use block — so a tool response carries
+	// both and each provider uses the one it needs.
+	ToolName string `json:"tool_name,omitempty"`
 	// ToolCalls contains any tool calls made by the assistant.
 	ToolCalls []ToolCall `json:"tool_calls,omitempty"`
 	// ImageData holds optional inline image bytes for multimodal messages (e.g., screenshots).

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 
 	"google.golang.org/genai"
 
@@ -187,10 +188,22 @@ func (c *geminiClient) convertMessages(messages []llm.Message) []*genai.Content 
 
 		// Handle tool responses — batch consecutive tool messages into one Content
 		// so the function response part count matches the function call part count.
-		if msg.Role == llm.RoleTool && msg.ToolCallID != "" {
-			funcParts = append(funcParts, genai.NewPartFromFunctionResponse(msg.ToolCallID, map[string]any{
-				"result": msg.Content,
-			}))
+		if msg.Role == llm.RoleTool && (msg.ToolCallID != "" || msg.ToolName != "") {
+			// Name is what Gemini matches on and is required; the id is what
+			// disambiguates two calls to the same tool, and is sent only when
+			// it is one Gemini issued.
+			name := msg.ToolName
+			if name == "" {
+				name = msg.ToolCallID
+			}
+			resp := &genai.FunctionResponse{
+				Name:     name,
+				Response: map[string]any{"result": msg.Content},
+			}
+			if !isLocalCallID(msg.ToolCallID) {
+				resp.ID = msg.ToolCallID
+			}
+			funcParts = append(funcParts, &genai.Part{FunctionResponse: resp})
 			if len(msg.ImageData) > 0 {
 				pendingImages = append(pendingImages, pendingImage{data: msg.ImageData, mime: msg.ImageMIME})
 			}
@@ -352,9 +365,16 @@ func (c *geminiClient) convertResponse(resp *genai.GenerateContentResponse) *llm
 			}
 			if part.FunctionCall != nil {
 				tc := llm.ToolCall{
-					ID:        part.FunctionCall.Name, // Use name as ID for Gemini
+					ID:        part.FunctionCall.ID,
 					Name:      part.FunctionCall.Name,
 					Arguments: part.FunctionCall.Args,
+				}
+				// Gemini does not always issue an id. One is synthesised so
+				// that ATR can still tell two calls to the same tool apart in
+				// its own bookkeeping; localCallID marks it as ours so it is
+				// not echoed back as though the model had issued it.
+				if tc.ID == "" {
+					tc.ID = localCallID(len(response.ToolCalls))
 				}
 				// Capture thought signature if present (Gemini 3+)
 				if len(part.ThoughtSignature) > 0 {
@@ -380,4 +400,20 @@ func (c *geminiClient) convertResponse(resp *genai.GenerateContentResponse) *llm
 	}
 
 	return response
+}
+
+// Gemini may return a function call with no id of its own. ATR needs some
+// stable handle to pair a result with the call it answers — otherwise two
+// calls to the same tool in one turn are indistinguishable — so it makes one
+// up. The prefix keeps ours separable from an id the model issued, which
+// matters on the way back: echoing an invented id to Gemini would be claiming
+// it asked for something it did not.
+const localCallIDPrefix = "atr-call-"
+
+func localCallID(index int) string {
+	return fmt.Sprintf("%s%d", localCallIDPrefix, index)
+}
+
+func isLocalCallID(id string) bool {
+	return strings.HasPrefix(id, localCallIDPrefix)
 }

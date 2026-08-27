@@ -202,7 +202,8 @@ func (s *HudSession) Run(ctx context.Context, prompt string, emit func(browser.H
 			msg := llm.Message{
 				Role:       llm.RoleTool,
 				Content:    s.vault.Redact(result),
-				ToolCallID: tc.Name,
+				ToolCallID: tc.ID,
+				ToolName:   tc.Name,
 			}
 			if len(imgData) > 0 {
 				msg.ImageData = imgData

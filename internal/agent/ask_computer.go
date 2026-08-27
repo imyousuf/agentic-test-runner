@@ -128,6 +128,7 @@ func (a *Agent) ComputerAsk(ctx context.Context, instruction string) (string, er
 				Role:       llm.RoleTool,
 				Content:    toolResult,
 				ToolCallID: tc.ID,
+				ToolName:   tc.Name,
 			}
 			if len(imgData) > 0 {
 				msg.ImageData = imgData

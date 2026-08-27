@@ -167,7 +167,13 @@ func (c *cliClient) buildPrompt(messages []llm.Message) string {
 				parts = append(parts, "Previous assistant response: "+msg.Content)
 			}
 		case llm.RoleTool:
-			parts = append(parts, fmt.Sprintf("Tool result for %s: %s", msg.ToolCallID, msg.Content))
+			// The tool's name, not the call id: this is prose the model
+			// reads, and "Tool result for toolu_01Abc" tells it nothing.
+			label := msg.ToolName
+			if label == "" {
+				label = msg.ToolCallID
+			}
+			parts = append(parts, fmt.Sprintf("Tool result for %s: %s", label, msg.Content))
 		case llm.RoleSystem:
 			parts = append(parts, "System: "+msg.Content)
 		}

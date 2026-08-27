@@ -260,7 +260,8 @@ func (a *Agent) ExecuteBehaviorTest(ctx context.Context, req *BehaviorRequest) (
 			msg := llm.Message{
 				Role:       llm.RoleTool,
 				Content:    toolResult,
-				ToolCallID: tc.Name,
+				ToolCallID: tc.ID,
+				ToolName:   tc.Name,
 			}
 			if len(imgData) > 0 {
 				msg.ImageData = imgData
@@ -495,7 +496,8 @@ func (a *Agent) AnalyzeFailure(ctx context.Context, req *AnalysisRequest) (*resu
 			msg := llm.Message{
 				Role:       llm.RoleTool,
 				Content:    toolResult,
-				ToolCallID: tc.Name, // Use tool name as ID for Gemini
+				ToolCallID: tc.ID,
+				ToolName:   tc.Name,
 			}
 			if len(imgData) > 0 {
 				msg.ImageData = imgData

@@ -227,3 +227,57 @@ func TestEmptyHistoryIsAnError(t *testing.T) {
 		t.Error("expected an error for an empty conversation")
 	}
 }
+
+// With real ids the pairing no longer depends on results arriving in call
+// order — which is the whole point of carrying them.
+func TestResultsPairByIDEvenOutOfOrder(t *testing.T) {
+	messages := []llm.Message{
+		{Role: llm.RoleUser, Content: "check both"},
+		{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{
+			{ID: "toolu_first", Name: "read_file", Arguments: map[string]any{"path": "a"}},
+			{ID: "toolu_second", Name: "read_file", Arguments: map[string]any{"path": "b"}},
+		}},
+		// The slower tool answered first.
+		{Role: llm.RoleTool, ToolCallID: "toolu_second", ToolName: "read_file", Content: "contents of b"},
+		{Role: llm.RoleTool, ToolCallID: "toolu_first", ToolName: "read_file", Content: "contents of a"},
+	}
+
+	out, err := toAnthropicMessages(messages)
+	if err != nil {
+		t.Fatalf("convert: %v", err)
+	}
+	results := out[2].Content
+	if len(results) != 2 {
+		t.Fatalf("got %d result blocks, want 2", len(results))
+	}
+	if got := results[0].OfToolResult.ToolUseID; got != "toolu_second" {
+		t.Errorf("first result -> %q, want toolu_second: the id must win over position", got)
+	}
+	if got := results[1].OfToolResult.ToolUseID; got != "toolu_first" {
+		t.Errorf("second result -> %q, want toolu_first", got)
+	}
+}
+
+// A result naming an id that no call in this turn issued still has to land
+// somewhere valid — Anthropic rejects an unmatched tool_result outright.
+func TestResultWithAnUnknownIDFallsBackToPosition(t *testing.T) {
+	messages := []llm.Message{
+		{Role: llm.RoleUser, Content: "check it"},
+		{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{
+			{ID: "toolu_real", Name: "read_file", Arguments: map[string]any{}},
+		}},
+		{Role: llm.RoleTool, ToolCallID: "toolu_from_a_trimmed_turn", ToolName: "read_file", Content: "contents"},
+	}
+
+	out, err := toAnthropicMessages(messages)
+	if err != nil {
+		t.Fatalf("convert: %v", err)
+	}
+	result := out[2].Content[0].OfToolResult
+	if result == nil {
+		t.Fatal("the result did not become a tool_result block")
+	}
+	if result.ToolUseID != "toolu_real" {
+		t.Errorf("ToolUseID = %q, want the call actually made this turn", result.ToolUseID)
+	}
+}
