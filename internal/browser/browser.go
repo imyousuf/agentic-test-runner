@@ -45,6 +45,11 @@ type Browser struct {
 	// Separate from mu to avoid deadlock since SelectPage/GetComputedStyles acquire mu.
 	pageSwitchMu sync.Mutex
 
+	// adoptMu serialises taking ownership of a target. See adoptTarget: two
+	// callers reaching the same new target must not each attach a session to
+	// it. Held across CDP calls, so it is never taken while holding mu.
+	adoptMu sync.Mutex
+
 	// Event tracking
 	consoleMessages []ConsoleMessage
 	networkRequests []NetworkRequest
@@ -584,29 +589,92 @@ func (b *Browser) waitLoad(page *rod.Page) error {
 	if timeout <= 0 {
 		timeout = defaultPageLoadTimeout
 	}
-	if err := page.Timeout(timeout).WaitLoad(); err != nil {
-		if errors.Is(err, context.DeadlineExceeded) {
+
+	// The wait is taken in slices, with a liveness probe between them, rather
+	// than in one call for the whole budget.
+	//
+	// Waiting for load means asking the renderer, so a renderer that has
+	// stopped answering produces the same silence as a page that is slow —
+	// and the whole budget is spent before either is reported. Probing
+	// between slices tells the two apart in seconds: a page that is merely
+	// slow still evaluates script while it loads.
+	deadline := time.Now().Add(timeout)
+	for {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
 			return fmt.Errorf("page did not finish loading within %s", timeout)
 		}
-		return err
+		slice := loadProbeInterval
+		if slice > remaining {
+			slice = remaining
+		}
+
+		err := page.Timeout(slice).WaitLoad()
+		if err == nil {
+			return nil
+		}
+		if !errors.Is(err, context.DeadlineExceeded) {
+			return err
+		}
+		if !rendererResponds(page) {
+			return fmt.Errorf("%w after %s", ErrRendererUnresponsive,
+				time.Since(deadline.Add(-timeout)).Round(time.Second))
+		}
 	}
-	return nil
 }
+
+// loadProbeInterval is how long to wait for load before checking that the
+// renderer is still there. Long enough that an ordinary page load finishes
+// inside the first slice and never pays for a probe.
+const loadProbeInterval = 3 * time.Second
+
+// ErrRendererUnresponsive reports a page whose renderer has stopped answering.
+//
+// Distinct from a slow load: the target still answers browser-level calls such
+// as Target.getTargetInfo, so it looks alive and reports its URL, while every
+// command that has to reach the renderer — evaluating script, reading the DOM,
+// waiting for load — goes unanswered indefinitely. Nothing the caller does to
+// that page will work, so callers that can start again should.
+var ErrRendererUnresponsive = errors.New("the page's renderer stopped responding")
+
+// rendererResponds reports whether the page can still run script.
+//
+// The probe is deliberately trivial and short. A page that is merely slow to
+// load still evaluates script while it loads, so an answer here means the page
+// is working and simply is not finished; silence means the renderer is gone.
+func rendererResponds(page *rod.Page) bool {
+	_, err := proto.RuntimeEvaluate{Expression: "1"}.Call(page.Timeout(rendererProbeTimeout))
+	return err == nil
+}
+
+// rendererProbeTimeout bounds the liveness probe. Generous enough that a busy
+// renderer is not called dead, short enough that the answer is worth having.
+const rendererProbeTimeout = 5 * time.Second
 
 // NewPage creates a new page/tab and navigates to the URL.
 func (b *Browser) NewPage(ctx context.Context, url string) error {
-	// The CDP setup below runs without b.mu held, deliberately.
-	//
-	// setupEventListeners enables the Runtime and Network domains, and those
-	// calls block until Chrome answers. Chrome can be slow to answer, or not
-	// answer at all when the renderer is wedged. Holding the browser lock
-	// across that would freeze every other caller — and the target-event
-	// worker with them — on a single unlucky page. The lock exists to guard
-	// the page bookkeeping, so it is taken only for that.
+	// A fresh target's renderer occasionally comes up unable to answer
+	// anything — see ErrRendererUnresponsive. It cannot be prevented from
+	// here and it does not recover, but a second target almost always comes
+	// up healthy, so the wedged one is discarded and the tab opened again.
+	var lastErr error
+	for attempt := 0; attempt < 2; attempt++ {
+		err := b.openPage(ctx, url)
+		if err == nil {
+			return nil
+		}
+		if !errors.Is(err, ErrRendererUnresponsive) {
+			return err
+		}
+		lastErr = err
+	}
+	return lastErr
+}
+
+// openPage is one attempt at NewPage.
+func (b *Browser) openPage(ctx context.Context, url string) error {
 	b.mu.RLock()
 	rodBrowser := b.browser
-	headless := b.config.Headless
-	viewport := b.config.Viewport
 	hudOn := b.hud != nil
 	b.mu.RUnlock()
 
@@ -614,55 +682,46 @@ func (b *Browser) NewPage(ctx context.Context, url string) error {
 		return fmt.Errorf("browser not launched")
 	}
 
-	page, err := rodBrowser.Page(proto.TargetCreateTarget{URL: normalizeURL(url)})
+	// The target is created empty and navigated afterwards, rather than with
+	// rod's Browser.Page, so that the target id is known before anything
+	// attaches to it. Attaching is adoptTarget's job alone — see there for why
+	// a target must not end up with two sessions.
+	target, err := proto.TargetCreateTarget{
+		URL:              "about:blank",
+		BrowserContextID: rodBrowser.BrowserContextID,
+	}.Call(rodBrowser)
 	if err != nil {
 		return fmt.Errorf("failed to create page: %w", err)
 	}
 
-	if headless {
-		// In headless mode, override the viewport since there's no physical window
-		if err := page.SetViewport(&proto.EmulationSetDeviceMetricsOverride{
-			Width:  viewport.Width,
-			Height: viewport.Height,
-		}); err != nil {
-			return fmt.Errorf("failed to set viewport: %w", err)
+	discard := func() {
+		b.mu.Lock()
+		if tracked, ok := b.targetIDs[target.TargetID]; ok {
+			b.forgetPages([]*rod.Page{tracked})
 		}
-	} else {
-		// In headed mode, clear any viewport override so the page uses the real window size
-		b.clearViewportOverride(page)
+		b.mu.Unlock()
+		_, _ = proto.TargetCloseTarget{TargetID: target.TargetID}.Call(rodBrowser)
 	}
 
-	// Apply spoofed user agent
-	b.applyUserAgent(page)
+	page, _, err := b.adoptTarget(target.TargetID)
+	if err != nil {
+		// Nothing has taken ownership of the tab, so close it rather than
+		// leave it open for the life of the browser with no way to reach it.
+		_, _ = proto.TargetCloseTarget{TargetID: target.TargetID}.Call(rodBrowser)
+		return fmt.Errorf("failed to set up the new page: %w", err)
+	}
 
-	// Set up event listeners
-	b.setupEventListeners(page)
-
-	// Install the agent HUD into new tabs if it is enabled
+	// Install the agent HUD into new tabs if it is enabled.
 	if hudOn {
 		b.mu.RLock()
 		hud := b.hud
 		b.mu.RUnlock()
-		_ = b.attachHudSession(hud, page)
-	}
-
-	info, err := page.Info()
-	if err != nil {
-		// The tab exists even though it cannot be identified, and nothing has
-		// taken ownership of it: it is not in b.ownedPages, so Close() will
-		// not clean it up, and without a target id no accessor can reach it.
-		// Left alone it stays open for the life of the browser.
-		_ = page.Close()
-		return fmt.Errorf("failed to read the new page's target info: %w", err)
+		if hud != nil {
+			_ = b.attachHudSession(hud, page)
+		}
 	}
 
 	b.mu.Lock()
-	// The target listener may have registered this page already; either way
-	// the map and the slice must agree.
-	if _, exists := b.targetIDs[proto.TargetTargetID(info.TargetID)]; !exists {
-		b.pages = append(b.pages, page)
-		b.targetIDs[proto.TargetTargetID(info.TargetID)] = page
-	}
 	for i, p := range b.pages {
 		if p == page {
 			b.current = i
@@ -672,15 +731,96 @@ func (b *Browser) NewPage(ctx context.Context, url string) error {
 	b.ownedPages[page] = true
 	b.mu.Unlock()
 
-	// Wait for page load
+	if err := page.Navigate(normalizeURL(url)); err != nil {
+		discard()
+		return fmt.Errorf("failed to navigate the new page: %w", err)
+	}
+
 	if err := b.waitLoad(page); err != nil {
+		if errors.Is(err, ErrRendererUnresponsive) {
+			// Unusable and it will not recover; leaving it in the bookkeeping
+			// would leave the daemon pointing at a dead tab.
+			discard()
+			return err
+		}
 		return fmt.Errorf("failed to wait for page load: %w", err)
 	}
 
 	return nil
 }
 
-// setupEventListeners sets up console and network event listeners.
+// adoptTarget returns the one page ATR drives for a target, setting it up the
+// first time the target is seen.
+//
+// Two paths reach a new target: NewPage, which creates it, and the
+// target-created worker, which hears about it. Before this existed both could
+// attach — PageFromTarget hands out a fresh CDP session every time it is
+// called, so the target ended up with two, each enabling the Runtime and
+// Network domains and overriding the viewport. Intermittently, under tab
+// churn, that left the renderer never answering Runtime.evaluate again: the
+// page reported its Info happily while every evaluation against it timed out,
+// including the one rod's WaitLoad is built on. The symptom was a page that
+// "did not finish loading" for the full timeout and never recovered.
+//
+// The old code re-checked the target map after doing its setup and dropped
+// the duplicate page, which tidied the bookkeeping but only after the second
+// session had already been attached and its domains enabled.
+//
+// Returns the page and whether this call is the one that adopted it.
+func (b *Browser) adoptTarget(id proto.TargetTargetID) (*rod.Page, bool, error) {
+	b.adoptMu.Lock()
+	defer b.adoptMu.Unlock()
+
+	b.mu.RLock()
+	existing, known := b.targetIDs[id]
+	rodBrowser := b.browser
+	headless := b.config.Headless
+	viewport := b.config.Viewport
+	b.mu.RUnlock()
+
+	if known {
+		return existing, false, nil
+	}
+	if rodBrowser == nil {
+		return nil, false, fmt.Errorf("browser not launched")
+	}
+
+	page, err := rodBrowser.PageFromTarget(id)
+	if err != nil {
+		return nil, false, err
+	}
+
+	// The CDP setup runs without b.mu held, deliberately: those calls block
+	// on Chrome, which can be slow to answer or not answer at all when a
+	// renderer is wedged, and the lock only guards the bookkeeping.
+	b.setupEventListeners(page)
+
+	if headless {
+		// No physical window, so the viewport has to be stated.
+		if viewport.Width > 0 && viewport.Height > 0 {
+			_ = page.SetViewport(&proto.EmulationSetDeviceMetricsOverride{
+				Width:  viewport.Width,
+				Height: viewport.Height,
+			})
+		}
+	} else {
+		// Clear any stale override so the page uses the real window size.
+		b.clearViewportOverride(page)
+	}
+
+	b.applyUserAgent(page)
+
+	b.mu.Lock()
+	b.pages = append(b.pages, page)
+	b.targetIDs[id] = page
+	if b.current < 0 {
+		b.current = len(b.pages) - 1
+	}
+	b.mu.Unlock()
+
+	return page, true, nil
+}
+
 func (b *Browser) setupEventListeners(page *rod.Page) {
 	// Listen for console messages
 	go page.EachEvent(func(e *proto.RuntimeConsoleAPICalled) {
@@ -903,39 +1043,58 @@ type PageInfo struct {
 
 // SelectPage switches to the page at the given index.
 func (b *Browser) SelectPage(index int) error {
+	// Activate is a CDP call, so the lock is released before making it: the
+	// lock guards the bookkeeping, and holding it across a call Chrome may be
+	// slow to answer freezes every other caller and the target-event worker
+	// with them.
 	b.mu.Lock()
-	defer b.mu.Unlock()
-
 	if index < 0 || index >= len(b.pages) {
+		b.mu.Unlock()
 		return fmt.Errorf("invalid page index: %d (have %d pages)", index, len(b.pages))
 	}
-
 	b.current = index
-	_, err := b.pages[index].Activate()
+	page := b.pages[index]
+	b.mu.Unlock()
+
+	_, err := page.Activate()
 	return err
 }
 
 // ClosePage closes the page at the given index.
 func (b *Browser) ClosePage(index int) error {
+	// As in SelectPage, the lock is dropped before the CDP call. Close waits
+	// for Chrome to tear the target down, and the target-destroyed worker
+	// needs the lock to record that it did.
 	b.mu.Lock()
-	defer b.mu.Unlock()
-
 	if index < 0 || index >= len(b.pages) {
+		b.mu.Unlock()
 		return fmt.Errorf("invalid page index: %d", index)
 	}
-
 	if len(b.pages) == 1 {
+		b.mu.Unlock()
 		return fmt.Errorf("cannot close the last page")
 	}
+	page := b.pages[index]
+	b.mu.Unlock()
 
-	if err := b.pages[index].Close(); err != nil {
+	if err := page.Close(); err != nil {
 		return fmt.Errorf("failed to close page: %w", err)
 	}
 
-	// Remove from slice
-	b.pages = append(b.pages[:index], b.pages[index+1:]...)
+	b.mu.Lock()
+	defer b.mu.Unlock()
 
-	// Adjust current index
+	// By identity, not by index: the worker may have applied the destroyed
+	// event while the close was in flight, which renumbers what follows.
+	for i, p := range b.pages {
+		if p != page {
+			continue
+		}
+		b.pages = append(b.pages[:i], b.pages[i+1:]...)
+		delete(b.targetIDs, page.TargetID)
+		delete(b.ownedPages, page)
+		break
+	}
 	if b.current >= len(b.pages) {
 		b.current = len(b.pages) - 1
 	}
@@ -1434,73 +1593,27 @@ func (b *Browser) startTargetListener() {
 // browser created itself, or a tab the user opened by hand. Runs on the
 // target-event worker, never on rod's dispatcher.
 func (b *Browser) handleTargetCreated(info *proto.TargetTargetInfo) {
-	// As in NewPage, the CDP setup runs without b.mu held: those calls block
-	// on Chrome, and the lock only guards the bookkeeping at the end.
 	b.mu.RLock()
-	rodBrowser := b.browser
-	headless := b.config.Headless
-	viewport := b.config.Viewport
-	_, known := b.targetIDs[info.TargetID]
 	recording := b.recording != nil && b.recording.active
 	hud := b.hud
 	b.mu.RUnlock()
 
-	if known || rodBrowser == nil {
-		return
-	}
-
-	// Get page from target ID
-	page, err := rodBrowser.PageFromTarget(info.TargetID)
+	page, adopted, err := b.adoptTarget(info.TargetID)
 	if err != nil {
-		// Could be a transient target, skip silently
+		// Could be a transient target, skip silently.
+		return
+	}
+	if !adopted {
+		// Already ours: NewPage created it, or this event arrived twice.
 		return
 	}
 
-	// Set up event listeners for the new page
-	b.setupEventListeners(page)
-
-	if headless {
-		// In headless mode, override viewport since there's no physical window
-		if viewport.Width > 0 && viewport.Height > 0 {
-			_ = page.SetViewport(&proto.EmulationSetDeviceMetricsOverride{
-				Width:  viewport.Width,
-				Height: viewport.Height,
-			})
-		}
-	} else {
-		// In headed mode, clear any stale viewport override so the page uses the real window size
-		b.clearViewportOverride(page)
-	}
-
-	// Apply spoofed user agent
-	b.applyUserAgent(page)
-
-	// Inject recorder into new tabs if recording is active
 	if recording {
 		b.injectRecorder(page)
 	}
 
-	// Install the agent HUD into new tabs if it is enabled
 	if hud != nil {
 		_ = b.attachHudSession(hud, page)
-	}
-
-	b.mu.Lock()
-	defer b.mu.Unlock()
-
-	// Re-check: NewPage may have registered this target while the setup above
-	// was talking to Chrome.
-	if _, exists := b.targetIDs[info.TargetID]; exists {
-		return
-	}
-
-	// Add to tracked pages
-	b.pages = append(b.pages, page)
-	b.targetIDs[info.TargetID] = page
-
-	// If this is the first page, set it as current
-	if b.current < 0 {
-		b.current = len(b.pages) - 1
 	}
 }
 

@@ -951,19 +951,14 @@ func TestListPagesSurvivesADeadPage(t *testing.T) {
 	resetFixture(t)
 	ctx := context.Background()
 
-	// Chrome intermittently never answers the load event for a freshly
-	// created target, which is a browser-side stall this test is not about.
-	// Retry once, then skip: failing here would report a flake as a defect in
-	// the behaviour under test.
-	var opened bool
-	for attempt := 0; attempt < 2; attempt++ {
-		if err := testBrowser.NewPage(ctx, testFixtureURL+"/test_fixture.html"); err == nil {
-			opened = true
-			break
-		}
-	}
-	if !opened {
-		t.Skip("could not open a second tab: the browser stalled on page load")
+	// Chrome intermittently brings up a target whose renderer answers nothing
+	// — see ErrRendererUnresponsive. It is a browser-side condition this test
+	// is not about, and it cannot be retried around: a fresh same-origin tab
+	// lands in the very renderer that is stuck. Skipping on that one typed
+	// error keeps a real defect failing.
+	if err := testBrowser.NewPage(ctx, testFixtureURL+"/test_fixture.html"); err != nil {
+		skipIfRendererWedged(t, err)
+		t.Fatalf("opening a second tab: %v", err)
 	}
 
 	testBrowser.mu.RLock()
@@ -1031,6 +1026,7 @@ func TestListPagesSurvivesADeadPage(t *testing.T) {
 
 	// The browser must still be usable afterwards.
 	if err := testBrowser.Navigate(ctx, testFixtureURL+"/test_fixture.html"); err != nil {
+		skipIfRendererWedged(t, err)
 		t.Errorf("browser unusable after a dead page: %v", err)
 	}
 }

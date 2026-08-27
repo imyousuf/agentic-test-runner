@@ -143,6 +143,27 @@ hang or a spurious `context deadline exceeded`, usually only under load:
    deadlocks: it subscribes and then blocks on `Runtime.enable` before
    returning the `wait()` that drains the subscription.
 
+4. **One CDP session per target.** `PageFromTarget` hands out a *fresh*
+   session every time it is called, so a target reached by two paths ends up
+   with two — each enabling the Runtime and Network domains and overriding the
+   viewport. `NewPage` and the target-created worker both reach every new
+   target, so both go through `adoptTarget`, which is serialised on `adoptMu`
+   and returns the page already in use if there is one. Noticing the duplicate
+   afterwards is not enough: the old code re-checked the target map at the end
+   and discarded the second page, by which time the second session was
+   attached and its domains enabled.
+
+Chrome will still, under tab churn, occasionally bring up a target whose
+renderer answers nothing: browser-level calls such as `Target.getTargetInfo`
+succeed and report the URL, while everything needing the renderer — evaluating
+script, reading the DOM, waiting for load — goes unanswered and never
+recovers. It cannot be retried around, because a fresh same-origin tab lands in
+the same wedged renderer. `waitLoad` therefore takes its wait in slices and
+probes with a trivial `Runtime.evaluate` between them, so this is reported as
+`ErrRendererUnresponsive` in seconds rather than as "did not finish loading"
+after the whole page budget. Tests that are not about renderer health skip on
+that one typed error.
+
 Related: `tryFind` rebinds a found element to a fresh action-sized deadline.
 The search timeout it was found under (500ms on the UID path) must not follow
 the element into the caller's next operations — `Fill` makes three more CDP
