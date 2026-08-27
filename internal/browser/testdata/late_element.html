@@ -1,0 +1,16 @@
+<!doctype html>
+<title>Late element</title>
+<body>
+  <h1>Late element</h1>
+  <div id="slot"></div>
+  <script>
+    // Appears well after the old hardcoded 3s lookup budget, and well within
+    // a caller that says it is willing to wait longer.
+    const delay = Number(new URLSearchParams(location.search).get("ms") || 4500);
+    setTimeout(() => {
+      const input = document.createElement("input");
+      input.id = "username";
+      document.getElementById("slot").appendChild(input);
+    }, delay);
+  </script>
+</body>

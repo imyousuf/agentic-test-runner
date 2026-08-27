@@ -126,7 +126,7 @@ func (b *Browser) Click(ctx context.Context, target string, doubleClick bool) er
 		return err
 	}
 
-	el, err := b.findElement(page, target)
+	el, err := b.findElement(bindDeadline(page, ctx), target)
 	if err != nil {
 		return err
 	}
@@ -144,7 +144,7 @@ func (b *Browser) Fill(ctx context.Context, target, value string) error {
 		return err
 	}
 
-	el, err := b.findElement(page, target)
+	el, err := b.findElement(bindDeadline(page, ctx), target)
 	if err != nil {
 		return err
 	}
@@ -171,7 +171,7 @@ func (b *Browser) Hover(ctx context.Context, target string) error {
 		return err
 	}
 
-	el, err := b.findElement(page, target)
+	el, err := b.findElement(bindDeadline(page, ctx), target)
 	if err != nil {
 		return err
 	}
@@ -274,12 +274,12 @@ func (b *Browser) Drag(ctx context.Context, fromTarget, toTarget string) error {
 		return err
 	}
 
-	fromEl, err := b.findElement(page, fromTarget)
+	fromEl, err := b.findElement(bindDeadline(page, ctx), fromTarget)
 	if err != nil {
 		return fmt.Errorf("source element not found: %w", err)
 	}
 
-	toEl, err := b.findElement(page, toTarget)
+	toEl, err := b.findElement(bindDeadline(page, ctx), toTarget)
 	if err != nil {
 		return fmt.Errorf("target element not found: %w", err)
 	}
@@ -324,7 +324,7 @@ func (b *Browser) WaitForElement(ctx context.Context, target string, timeout tim
 	}
 
 	page = page.Timeout(timeout)
-	_, err = b.findElement(page, target)
+	_, err = b.findElementWithin(page, target, timeout)
 	return err
 }
 
@@ -450,6 +450,58 @@ func (b *Browser) Snapshot(verbose bool) ([]ElementInfo, error) {
 // page may still be settling.
 const elementActionTimeout = 30 * time.Second
 
+// How long a lookup may spend waiting for a target to appear.
+//
+// The floor is what a caller gets when it has set no deadline of its own; the
+// ceiling stops an ambient deadline — a behaviour step's 60s, say — from being
+// spent entirely on one selector that is never going to match.
+const (
+	minElementSearchTimeout = 3 * time.Second
+	maxElementSearchTimeout = 15 * time.Second
+)
+
+// searchTimeout is the budget a lookup gets on this page.
+//
+// It comes from the caller's own deadline, because a fixed budget is wrong in
+// both directions: a script step with 60s to spend used to give up on a slow
+// page after 3s, and an existence check that wanted an answer in 500ms had no
+// way to ask for one. A page carries whatever deadline its caller bound to it,
+// so that is what this reads.
+//
+// A caller asking for less than the floor gets exactly what it asked for —
+// that is a deliberately impatient lookup, not an under-specified one.
+func searchTimeout(ctx context.Context) time.Duration {
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return minElementSearchTimeout
+	}
+	switch remaining := time.Until(deadline); {
+	case remaining <= 0:
+		// Already past the deadline. Let the lookup run and fail on the
+		// context rather than inventing a budget the caller does not have.
+		return time.Millisecond
+	case remaining < minElementSearchTimeout:
+		return remaining
+	case remaining > maxElementSearchTimeout:
+		return maxElementSearchTimeout
+	default:
+		return remaining
+	}
+}
+
+// bindDeadline returns a page bound to the caller's context, so that a lookup
+// made through it can see how long the caller is prepared to wait. Without
+// this every action method takes a ctx and then drops it on the floor.
+func bindDeadline(page *rod.Page, ctx context.Context) *rod.Page {
+	if ctx == nil {
+		return page
+	}
+	if _, ok := ctx.Deadline(); !ok {
+		return page
+	}
+	return page.Context(ctx)
+}
+
 // asNotFound reports a failed lookup as ErrElementNotFound.
 //
 // These branches return early, so they never reach the ErrElementNotFound at
@@ -500,11 +552,26 @@ func tryFind(page *rod.Page, timeout time.Duration, fn func(*rod.Page) (*rod.Ele
 }
 
 func (b *Browser) findElement(page *rod.Page, target string) (*rod.Element, error) {
-	perAttempt := 500 * time.Millisecond
+	return b.findElementWithin(page, target, searchTimeout(page.GetContext()))
+}
+
+// findElementWithin is findElement with the budget stated outright, for
+// callers that have been given an explicit timeout to honour.
+func (b *Browser) findElementWithin(page *rod.Page, target string, budget time.Duration) (*rod.Element, error) {
+	// Each strategy in the fallback chain gets a slice of the budget rather
+	// than a fixed 500ms, so that a generous caller is generous all the way
+	// down. At the default budget this works out at the same 500ms as before.
+	perAttempt := budget / 6
+	if perAttempt < 500*time.Millisecond {
+		perAttempt = 500 * time.Millisecond
+	}
+	if perAttempt > minElementSearchTimeout {
+		perAttempt = minElementSearchTimeout
+	}
 
 	// XPath selectors
 	if strings.HasPrefix(target, "//") {
-		el, err := tryFind(page, 3*time.Second, func(p *rod.Page) (*rod.Element, error) {
+		el, err := tryFind(page, budget, func(p *rod.Page) (*rod.Element, error) {
 			return p.ElementX(target)
 		})
 		return el, asNotFound(target, err)
@@ -513,7 +580,7 @@ func (b *Browser) findElement(page *rod.Page, target string) (*rod.Element, erro
 	// CSS selectors: unambiguous prefixes or structural analysis
 	if strings.HasPrefix(target, "#") || strings.HasPrefix(target, ".") ||
 		strings.HasPrefix(target, "[") || looksLikeCSSSelector(target) {
-		el, err := tryFind(page, 3*time.Second, func(p *rod.Page) (*rod.Element, error) {
+		el, err := tryFind(page, budget, func(p *rod.Page) (*rod.Element, error) {
 			return p.Element(target)
 		})
 		return el, asNotFound(target, err)
