@@ -28,10 +28,11 @@ body {
 }
 
 .tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   max-width: 220px;
   overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
   padding: 6px 12px;
   border: 1px solid var(--line);
   border-bottom: none;
@@ -39,6 +40,20 @@ body {
   background: #171717;
   color: var(--dim);
   cursor: pointer;
+}
+
+/* The button is a flex row now, so the ellipsis belongs on the label. */
+.tab-label {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* flex: none, or a long title squeezes the icon to nothing. */
+.tab-icon {
+  width: 14px;
+  height: 14px;
+  flex: none;
 }
 
 .tab.active { background: var(--bg); color: var(--text); }

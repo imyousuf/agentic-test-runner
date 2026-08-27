@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useLiveView } from './useLiveView';
+import { TabIcon } from './TabIcon';
 import { Viewport } from './Viewport';
 
 export function App() {
@@ -34,7 +35,8 @@ export function App() {
             title={page.url}
             onClick={() => send({ t: 'selectPage', id: page.id })}
           >
-            {page.title || page.url || 'untitled'}
+            <TabIcon url={page.url} />
+            <span className="tab-label">{page.title || page.url || 'untitled'}</span>
           </button>
         ))}
       </div>
