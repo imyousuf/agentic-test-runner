@@ -184,6 +184,7 @@ func runCommand(cmd *cobra.Command, args []string) error {
 	// Create LLM client for environment detection and agent (may be nil if config invalid)
 	var llmClient llm.Client
 	llmCfg := cfg.GetLLMConfig()
+	llmCfg.Verbose = verbose
 	llmClient, err = llm.NewClient(ctx, llmCfg)
 	if err != nil {
 		// Log warning but continue - pattern matching fallback will be used for env detection

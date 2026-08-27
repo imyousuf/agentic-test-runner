@@ -9,7 +9,7 @@
 
 - **AI Failure Analysis**: Run any command and get intelligent analysis when it fails
 - **Browser Behavior Testing**: Write tests in natural language, let AI execute them
-- **Multiple LLM Backends**: Supports Google Gemini API, Vertex AI, and CLI tools (Claude, Gemini)
+- **Multiple LLM Backends**: Supports Google Gemini API, Vertex AI, Claude on Vertex AI (with prompt caching), and CLI tools (Claude, Gemini)
 - **CLI Backend Support**: Use Claude CLI or Gemini CLI as backends - no API keys needed
 - **Cross-platform Desktop Control**: Mouse, keyboard, screen capture, window/app management on Linux (X11), macOS, and Windows via `atr computer`, with multi-monitor support and an in-process LLM agent (`atr computer ask`)
 - **MCP Server**: Expose browser AND desktop tools to any MCP-compatible client
@@ -235,10 +235,12 @@ atr computer stop
 
 Default LLM models for `atr computer ask` (and `atr browser ask`):
 
-| Tier  | Model                          |
-|-------|--------------------------------|
-| flash | `gemini-3.1-flash-preview`     |
-| pro   | `gemini-3.2-pro-preview`       |
+| Backend                        | Tier     | Model                      |
+|--------------------------------|----------|----------------------------|
+| `gemini-api` / `vertex-ai`     | flash    | `gemini-3.1-flash-preview` |
+| `gemini-api` / `vertex-ai`     | pro      | `gemini-3.2-pro-preview`   |
+| `vertex-claude`                | sonnet   | `claude-sonnet-5`          |
+| `vertex-claude`                | opus     | `claude-opus-5`            |
 
 Switch with `atr --model pro computer ask "..."`. Backend `claude-cli` uses the Claude CLI subprocess via MCP and ignores the model flag.
 
@@ -265,7 +267,36 @@ gemini:
 vertex:
   project: your-project
   location: us-central1
+
+# Or Claude models through Vertex AI, with prompt caching:
+backend: vertex-claude
+model: sonnet        # or opus
+vertex:
+  project: your-project
+  location: global
 ```
+
+### Claude on Vertex AI
+
+`backend: vertex-claude` runs Sonnet and Opus over the Messages API through
+Vertex, authenticated with Application Default Credentials:
+
+```bash
+gcloud auth application-default login
+export GOOGLE_CLOUD_PROJECT=your-project
+atr test
+```
+
+No API key is stored anywhere. Each request marks one prompt-cache checkpoint
+at the end of its fixed prefix — the tool schemas and the system prompt — so
+the agent loop pays for that prefix once instead of on every iteration. Caching
+only applies above the API's minimum cacheable prompt size, so the agents with
+large tool sets and long loops are the ones that benefit; short prompts are
+sent uncached. A freshly written entry takes a few seconds to become readable,
+so reads typically start landing from the third call of a run onwards.
+
+Set `ATR_DEBUG_LLM=1` to log per-request token counts including cache reads and
+writes.
 
 See [Configuration Guide](docs/configuration.md) for all options including CLI backends, Vertex AI authentication methods (ADC, service account, workload identity), and MCP server configuration.
 

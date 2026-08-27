@@ -10,6 +10,11 @@ const (
 	// ProviderVertexAI is Google's Vertex AI.
 	ProviderVertexAI Provider = "vertex-ai"
 
+	// ProviderVertexClaude is Claude (Sonnet/Opus) served by Vertex AI and
+	// authenticated with Application Default Credentials. This is the
+	// non-subprocess alternative to the Claude CLI backend.
+	ProviderVertexClaude Provider = "vertex-claude"
+
 	// ProviderClaudeCLI is Claude CLI backend.
 	ProviderClaudeCLI Provider = "claude-cli"
 
@@ -37,7 +42,7 @@ func (p Provider) String() string {
 // IsValid checks if the provider is a known valid provider.
 func (p Provider) IsValid() bool {
 	switch p {
-	case ProviderGemini, ProviderVertexAI, ProviderClaudeCLI, ProviderGeminiCLI:
+	case ProviderGemini, ProviderVertexAI, ProviderVertexClaude, ProviderClaudeCLI, ProviderGeminiCLI:
 		return true
 	default:
 		return false
