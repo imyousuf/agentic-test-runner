@@ -167,6 +167,21 @@ func (a *Agent) RunBehavior(ctx context.Context, req RunRequest) (*RunOutcome, e
 		}
 		outcome.Result = result
 
+		// The script ran, so it is a script. Anything but a script fault means
+		// the program executed — an assertion that did not hold, a missing
+		// input, a page that changed — and none of those are reasons to
+		// recompile it from scratch next time.
+		//
+		// Stamping only on a pass would be far more expensive than it looks:
+		// an assertion failure means the script is right and the application
+		// is broken, so every run while the app stayed broken would pay for a
+		// full model compile.
+		if result.Failure == nil || result.Failure.Kind != testscript.KindScript {
+			if err := testscript.Stamp(req.SpecPath); err != nil {
+				return outcome, err
+			}
+		}
+
 		if result.Passed {
 			return outcome, nil
 		}
@@ -227,7 +242,7 @@ func (a *Agent) RunBehavior(ctx context.Context, req RunRequest) (*RunOutcome, e
 			repairs++
 			outcome.Repaired = true
 			source = triage.Script
-			path, err := testscript.Save(req.SpecPath, req.Spec, source)
+			path, err := testscript.SaveDraft(req.SpecPath, req.Spec, source)
 			if err != nil {
 				return outcome, err
 			}
@@ -282,6 +297,8 @@ func (a *Agent) loadOrCompile(ctx context.Context, req RunRequest, outcome *RunO
 		logf("recompiling on request")
 	case stored == nil:
 		logf("no compiled script yet; compiling")
+	case stored.Unverified:
+		logf("the compiled script has never completed a run; recompiling")
 	case !stored.Fresh(req.Spec):
 		logf("the spec changed since the script was compiled; recompiling")
 	default:
@@ -292,6 +309,9 @@ func (a *Agent) loadOrCompile(ctx context.Context, req RunRequest, outcome *RunO
 	if req.NoCompile {
 		if stored == nil {
 			return "", fmt.Errorf("no compiled script for %s and --no-compile is set; run without it once to compile", req.SpecPath)
+		}
+		if stored.Unverified {
+			return "", fmt.Errorf("%s has never completed a run and --no-compile is set; run without it once to prove it", stored.Path)
 		}
 		return "", fmt.Errorf("%s is stale (the spec changed) and --no-compile is set", stored.Path)
 	}
@@ -307,7 +327,7 @@ func (a *Agent) loadOrCompile(ctx context.Context, req RunRequest, outcome *RunO
 		return "", fmt.Errorf("compiling %s: %w", req.SpecPath, err)
 	}
 
-	path, err := testscript.Save(req.SpecPath, req.Spec, source)
+	path, err := testscript.SaveDraft(req.SpecPath, req.Spec, source)
 	if err != nil {
 		return "", err
 	}
