@@ -17,6 +17,10 @@ import (
 // caller importing internal/browser.
 var ErrElementNotFound = browser.ErrElementNotFound
 
+// ErrInvalidSelector is re-exported for the same reason: a caller classifying
+// a failure should not have to import the browser package.
+var ErrInvalidSelector = browser.ErrInvalidSelector
+
 // defaultStepTimeout bounds a single step. Generous: a step may legitimately
 // wait on a slow page load.
 const defaultStepTimeout = 60 * time.Second

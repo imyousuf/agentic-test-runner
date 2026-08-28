@@ -504,10 +504,20 @@ func runBehaviorTest(ctx context.Context, cfg *config.Config, cwd string) error 
 				}
 				return b.Navigate(ctx, testBaseURL)
 			},
+			// The script's own atr.log() output: the author's tracing, on
+			// request only.
 			Log: func(msg string) {
 				if verbose {
 					fmt.Printf("  %s\n", msg)
 				}
+			},
+			// What the runner is doing. Shown by default, on stderr so a
+			// piped stdout still carries only the result, and so --json is
+			// unaffected. Without this a compile printed nothing at all
+			// between opening the browser and finishing, and a wedged run
+			// looked exactly like a working one.
+			Progress: func(msg string) {
+				fmt.Fprintf(os.Stderr, "  %s\n", msg)
 			},
 		})
 

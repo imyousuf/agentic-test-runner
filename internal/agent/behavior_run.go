@@ -56,8 +56,16 @@ type RunRequest struct {
 	// ScriptTimeout bounds a single script run.
 	ScriptTimeout time.Duration
 
-	// Log receives progress lines.
+	// Log receives the script's own atr.log() output. Separate from Progress
+	// because the two have different audiences: this is the test author's
+	// tracing, shown on request.
 	Log func(string)
+
+	// Progress receives what the runner is doing — compiling, retrying,
+	// repairing, and which iteration it is on. Shown by default: without it a
+	// compile prints nothing between opening the browser and finishing, so a
+	// healthy minute-long run and a wedged one look identical.
+	Progress func(string)
 }
 
 // RunOutcome is the result of the whole compile/run/repair cycle.
@@ -104,8 +112,8 @@ func (a *Agent) RunBehavior(ctx context.Context, req RunRequest) (*RunOutcome, e
 		req.MaxRepairs = defaultMaxRepairs
 	}
 	logf := func(format string, args ...any) {
-		if req.Log != nil {
-			req.Log(fmt.Sprintf(format, args...))
+		if req.Progress != nil {
+			req.Progress(fmt.Sprintf(format, args...))
 		}
 	}
 
@@ -290,6 +298,7 @@ func (a *Agent) loadOrCompile(ctx context.Context, req RunRequest, outcome *RunO
 
 	outcome.ModelCalls++
 	source, properties, err := a.CompileBehavior(ctx, CompileRequest{
+		Progress: req.Progress,
 		SpecPath: req.SpecPath,
 		Spec:     req.Spec,
 		BaseURL:  req.BaseURL,
@@ -337,6 +346,7 @@ func (a *Agent) triage(ctx context.Context, req RunRequest, source string, failu
 		Failure:   failure,
 		Attempts:  attempts,
 		ValueKeys: keys.Keys(),
+		Progress:  req.Progress,
 	})
 }
 
