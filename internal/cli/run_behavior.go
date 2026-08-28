@@ -152,3 +152,20 @@ func reportUnusedValues(specPath string) {
 		fmt.Printf("  pruned   → %s\n", strings.Join(removed, ", "))
 	}
 }
+
+// needsLiveApp reports whether this run will drive the application through the
+// model, rather than replaying a script that already knows what to do.
+//
+// Used to decide whether a missing base URL is fatal. Compiling and
+// interpreting both need somewhere to point the browser; a replay does not,
+// because a compiled script may navigate to absolute addresses.
+func needsLiveApp(specPath, spec string) bool {
+	if interpretFlag || recompileFlag {
+		return true
+	}
+	if noCompileFlag {
+		return false
+	}
+	stored, err := testscript.Load(specPath)
+	return err != nil || stored == nil || !stored.Fresh(spec)
+}

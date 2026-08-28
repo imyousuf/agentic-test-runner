@@ -432,6 +432,18 @@ func runBehaviorTest(ctx context.Context, cfg *config.Config, cwd string) error 
 			}
 		}
 
+		// A compile has to drive the real application, so without an address
+		// there is nothing to drive. Left to itself the agent navigates
+		// nowhere, learns nothing, and spends its whole iteration budget
+		// looking — an expensive way to discover a missing setting. A replay
+		// is unaffected: a compiled script may navigate to absolute URLs.
+		if testBaseURL == "" && needsLiveApp(testFile, string(content)) {
+			fmt.Printf("✗ %s needs a base URL to drive the application: set base_url in %s, or pass --browser-url\n",
+				filepath.Base(testFile), filepath.Base(testscript.ValuesPath(testFile)))
+			failedTests = append(failedTests, testFile)
+			continue
+		}
+
 		// When reusing a server, always open a new tab to isolate the test,
 		// then close it afterward to leave the server's tabs untouched.
 		testPageTarget := ""
