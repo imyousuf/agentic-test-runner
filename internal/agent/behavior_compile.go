@@ -153,6 +153,13 @@ Other rules:
   the description.
 - Prefer stable targets: id, name, data-testid, aria-label, then visible text.
   Avoid selectors built from generated class names or deep child chains.
+- Targets are standard CSS or XPath, plus one extension: :has-text("...") picks
+  the element matching the CSS part whose visible text contains that string,
+  e.g. button:has-text("Sign in"). Nothing else from Playwright works — no
+  text=, no >>, no :has(). Passing one of those to the browser is a syntax
+  error it cannot recover from, so it will fail every time you retry it.
+- A target that is plain visible text is matched as text, so "Sign in" on its
+  own is a valid target and usually the clearest one.
 - Wait for state rather than sleeping. Use atr.sleep only as a last resort.
 - Do not wrap everything in try/catch. Letting a failure propagate is what
   makes it classifiable.`
@@ -165,6 +172,9 @@ type CompileRequest struct {
 	Spec string
 	// BaseURL is the application under test.
 	BaseURL string
+	// Progress receives a line per model iteration, so a long compile can be
+	// watched rather than waited out.
+	Progress func(string)
 }
 
 // CompileBehavior drives the browser through the spec once and returns the
@@ -224,7 +234,7 @@ Carry out this specification against the live application now, then emit the scr
 		{Role: llm.RoleUser, Content: user},
 	}
 
-	content, err := a.runToolLoop(ctx, messages, "compile")
+	content, err := a.runToolLoop(ctx, messages, "compile", req.Progress)
 	if err != nil {
 		return "", "", err
 	}
@@ -273,6 +283,8 @@ type TriageRequest struct {
 	// ValueKeys lists the inputs currently defined, so a repair can reuse
 	// them rather than inventing new ones.
 	ValueKeys []string
+	// Progress receives a line per model iteration, as for a compile.
+	Progress func(string)
 }
 
 // TriageFailure examines a failed run and either repairs the script or
@@ -362,7 +374,7 @@ Inspect the page and decide.`,
 		{Role: llm.RoleUser, Content: user},
 	}
 
-	content, err := a.runToolLoop(ctx, messages, "triage")
+	content, err := a.runToolLoop(ctx, messages, "triage", req.Progress)
 	if err != nil {
 		return nil, err
 	}
@@ -385,12 +397,16 @@ Inspect the page and decide.`,
 
 // runToolLoop drives the shared agent loop until the model answers without
 // calling a tool, returning its final message.
-func (a *Agent) runToolLoop(ctx context.Context, messages []llm.Message, label string) (string, error) {
+func (a *Agent) runToolLoop(ctx context.Context, messages []llm.Message, label string, progress func(string)) (string, error) {
 	tools := a.registry.Definitions()
 
 	for iteration := 0; iteration < a.maxIterations; iteration++ {
 		if err := ctx.Err(); err != nil {
 			return "", fmt.Errorf("%s timed out after %d iterations: %w", label, iteration, err)
+		}
+
+		if progress != nil {
+			progress(fmt.Sprintf("%s · iteration %d/%d", label, iteration+1, a.maxIterations))
 		}
 
 		resp, err := a.llmClient.Chat(ctx, messages, tools)
@@ -405,6 +421,9 @@ func (a *Agent) runToolLoop(ctx context.Context, messages []llm.Message, label s
 		messages = append(messages, llm.Message{Role: llm.RoleAssistant, ToolCalls: resp.ToolCalls})
 		for _, tc := range resp.ToolCalls {
 			a.verboseLog("%s tool: %s", label, tc.Name)
+			if progress != nil {
+				progress(fmt.Sprintf("%s · iteration %d/%d · %s", label, iteration+1, a.maxIterations, tc.Name))
+			}
 
 			out, imgData, imgMIME, _, execErr := a.registry.ExecuteWithImage(ctx, tc.Name, tc.Arguments)
 			if execErr != nil {

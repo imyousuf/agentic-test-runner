@@ -132,14 +132,21 @@ func classify(err error) FailureKind {
 	switch {
 	case err == nil:
 		return ""
+	case errors.Is(err, ErrInvalidSelector):
+		// The selector does not parse, so it can never match. That is a defect
+		// in the script, not the page — repairable, and above all not
+		// retryable: retrying a selector the browser refuses is what let one
+		// compile spend its whole iteration budget on a single bad target.
+		return KindScript
 	case errors.Is(err, ErrElementNotFound):
 		return KindNotFound
-	case errors.Is(err, errTimeout):
-		return KindTimeout
 	default:
 		return KindEnvironment
 	}
 }
 
-// errTimeout marks a deadline overrun raised by the host API itself.
-var errTimeout = errors.New("timed out")
+// A deadline reaching here is a lookup that ran out of time, and asNotFound has
+// already translated it: "the element is gone" is the more actionable reading,
+// and it is the repairable one. A wait that genuinely timed out throws
+// KindTimeout itself (see jsWaitFor and jsWaitForText), so classify never has
+// to produce it.

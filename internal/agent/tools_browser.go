@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -307,6 +308,10 @@ func (t *BrowserClickTool) Description() string {
 - Element UID from browser_snapshot (e.g., "e0", "e1")
 - Text content (e.g., "Sign In", "Submit")
 - CSS selector (e.g., "#submit-btn", ".login-button")
+- CSS plus :has-text("..."), e.g. button:has-text("Sign in"), which matches the
+  element whose visible text contains that string. This is the only non-CSS
+  extension supported: text=, >> and :has() are syntax errors and retrying them
+  cannot help.
 - aria-label value
 - data-testid value`
 }
@@ -337,7 +342,7 @@ func (t *BrowserClickTool) Execute(ctx context.Context, args map[string]any) (st
 	doubleClick, _ := args["double_click"].(bool)
 
 	if err := t.browser.Click(ctx, target, doubleClick); err != nil {
-		return fmt.Sprintf("Click failed: %v", err), true
+		return fmt.Sprintf("Click failed: %v%s", err, selectorHint(err)), true
 	}
 
 	action := "Clicked"
@@ -390,7 +395,7 @@ func (t *BrowserFillTool) Execute(ctx context.Context, args map[string]any) (str
 	value, _ := args["value"].(string)
 
 	if err := t.browser.Fill(ctx, target, value); err != nil {
-		return fmt.Sprintf("Fill failed: %v", err), true
+		return fmt.Sprintf("Fill failed: %v%s", err, selectorHint(err)), true
 	}
 
 	return fmt.Sprintf("Filled '%s' into: %s", value, target), false
@@ -431,7 +436,7 @@ func (t *BrowserHoverTool) Execute(ctx context.Context, args map[string]any) (st
 	}
 
 	if err := t.browser.Hover(ctx, target); err != nil {
-		return fmt.Sprintf("Hover failed: %v", err), true
+		return fmt.Sprintf("Hover failed: %v%s", err, selectorHint(err)), true
 	}
 
 	return fmt.Sprintf("Hovering over: %s", target), false
@@ -520,7 +525,7 @@ func (t *BrowserDragTool) Execute(ctx context.Context, args map[string]any) (str
 	}
 
 	if err := t.browser.Drag(ctx, from, to); err != nil {
-		return fmt.Sprintf("Drag failed: %v", err), true
+		return fmt.Sprintf("Drag failed: %v%s", err, selectorHint(err)), true
 	}
 
 	return fmt.Sprintf("Dragged from '%s' to '%s'", from, to), false
@@ -1035,4 +1040,23 @@ func NewBrowserTools(b *browser.Browser) []Tool {
 		NewBrowserResizeTool(b),
 		NewBrowserEmulateTool(b),
 	}
+}
+
+// selectorHint appends what a target may look like when the browser refused to
+// parse one.
+//
+// The agent loop feeds a tool's error text straight back to the model, so a
+// bare "invalid selector" teaches it nothing and it tries the same shape again.
+// One compile spent its whole iteration budget retrying :has-text() before the
+// selector layer understood it.
+func selectorHint(err error) string {
+	if err == nil || !errors.Is(err, browser.ErrInvalidSelector) {
+		return ""
+	}
+	return "\n\nThe browser could not parse that target. Targets are CSS or XPath, " +
+		"optionally with :has-text(\"...\") — for example button:has-text(\"Sign in\"). " +
+		"Playwright syntax such as text=, >> or :has() is not supported and will " +
+		"fail the same way however many times it is retried. Plain visible text, " +
+		"an element UID from browser_snapshot, an aria-label or a data-testid all " +
+		"work as targets too."
 }

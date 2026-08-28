@@ -577,13 +577,32 @@ func (b *Browser) findElementWithin(page *rod.Page, target string, budget time.D
 		return el, asNotFound(target, err)
 	}
 
+	// :has-text() is not CSS, so it has to be resolved before querySelector
+	// ever sees it.
+	if base, want, ok := splitHasText(target); ok {
+		el, err := tryFind(page, budget, func(p *rod.Page) (*rod.Element, error) {
+			return resolveHasText(p, base, want)
+		})
+		return el, asNotFound(target, err)
+	}
+
 	// CSS selectors: unambiguous prefixes or structural analysis
 	if strings.HasPrefix(target, "#") || strings.HasPrefix(target, ".") ||
 		strings.HasPrefix(target, "[") || looksLikeCSSSelector(target) {
 		el, err := tryFind(page, budget, func(p *rod.Page) (*rod.Element, error) {
 			return p.Element(target)
 		})
-		return el, asNotFound(target, err)
+		if err != nil && unambiguousCSS(target) {
+			// Only a selector the caller clearly meant as CSS is reported as
+			// malformed. A guessed one falls through to the strategies below,
+			// so prose containing a colon is still matched as text.
+			if invalid := invalidSelector(target, err); errors.Is(invalid, ErrInvalidSelector) {
+				return nil, invalid
+			}
+		}
+		if err == nil || unambiguousCSS(target) {
+			return el, asNotFound(target, err)
+		}
 	}
 
 	// Try by UID (e.g., "e0", "e1")
@@ -699,9 +718,19 @@ func (b *Browser) GetElementScreenshot(target string) ([]byte, error) {
 // until the run gave up instead of being handed to the repair path, while the
 // identical rename behind atr.click was repaired.
 func (b *Browser) findElementByCSS(page *rod.Page, selector string) (*rod.Element, error) {
+	if base, want, ok := splitHasText(selector); ok {
+		el, err := tryFind(page, searchTimeout(page.GetContext()), func(p *rod.Page) (*rod.Element, error) {
+			return resolveHasText(p, base, want)
+		})
+		return el, asNotFound(selector, err)
+	}
+
 	el, err := tryFind(page, searchTimeout(page.GetContext()), func(p *rod.Page) (*rod.Element, error) {
 		return p.Element(selector)
 	})
+	if invalid := invalidSelector(selector, err); errors.Is(invalid, ErrInvalidSelector) {
+		return nil, invalid
+	}
 	return el, asNotFound(selector, err)
 }
 
@@ -929,7 +958,7 @@ func (b *Browser) GetMultipleElementScreenshots(selector string, perElementTimeo
 		return nil, err
 	}
 
-	elements, err := page.Timeout(3 * time.Second).Elements(selector)
+	elements, err := elementsMatching(page.Timeout(3*time.Second), selector)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find elements: %w", err)
 	}
@@ -1325,7 +1354,7 @@ func (b *Browser) DownloadImages(selector string, fallbackScreenshot bool) ([]Do
 	}
 
 	// Fallback: screenshot matching elements
-	elements, err := page.Timeout(3 * time.Second).Elements(selector)
+	elements, err := elementsMatching(page.Timeout(3*time.Second), selector)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find elements for screenshot fallback: %w", err)
 	}
@@ -1370,7 +1399,7 @@ func (b *Browser) GetMultipleComputedStyles(selector string, properties []string
 		return nil, err
 	}
 
-	elements, err := page.Timeout(3 * time.Second).Elements(selector)
+	elements, err := elementsMatching(page.Timeout(3*time.Second), selector)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find elements: %w", err)
 	}

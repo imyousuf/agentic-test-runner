@@ -80,3 +80,27 @@ func TestReadingAMissingSelectorIsRepairable(t *testing.T) {
 		t.Error("the failure is not repairable, so the drift would be retried instead of fixed")
 	}
 }
+
+// A selector the browser cannot parse can never match, so retrying it is
+// pointless — and retrying is exactly what an environment classification asks
+// for. One compile spent its entire iteration budget that way.
+func TestMalformedSelectorIsAScriptFaultNotAnEnvironmentOne(t *testing.T) {
+	res := run(t, `
+		atr.step(1, "Use a selector that does not parse", () => {
+			atr.click("#a[[[bad");
+		});
+	`)
+
+	if res.Passed {
+		t.Fatal("expected the step to fail")
+	}
+	if res.Failure.Kind != KindScript {
+		t.Errorf("kind = %q, want %q", res.Failure.Kind, KindScript)
+	}
+	if res.Failure.Kind.Retryable() {
+		t.Error("a selector that cannot parse is being retried; it can never match")
+	}
+	if !res.Failure.Kind.Repairable() {
+		t.Error("the script cannot be repaired, so the bad selector would persist")
+	}
+}
