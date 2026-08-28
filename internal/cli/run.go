@@ -299,11 +299,11 @@ func runBehaviorTest(ctx context.Context, cfg *config.Config, cwd string) error 
 	// Collect test files
 	testFiles, err := collectTestFiles(behaviorFlag)
 	if err != nil {
-		return fmt.Errorf("failed to collect test files: %w", err)
+		return exitWith(ExitInfra, fmt.Errorf("failed to collect test files: %w", err))
 	}
 
 	if len(testFiles) == 0 {
-		return fmt.Errorf("no .test.txt files found in %s", behaviorFlag)
+		return exitWith(ExitInfra, fmt.Errorf("no .test.txt files found in %s", behaviorFlag))
 	}
 
 	// Apply viewport override if specified
@@ -311,7 +311,7 @@ func runBehaviorTest(ctx context.Context, cfg *config.Config, cwd string) error 
 	if viewportFlag != "" {
 		width, height, err := parseViewport(viewportFlag)
 		if err != nil {
-			return fmt.Errorf("invalid viewport: %w", err)
+			return exitWith(ExitInfra, fmt.Errorf("invalid viewport: %w", err))
 		}
 		browserCfg.Viewport.Width = width
 		browserCfg.Viewport.Height = height
@@ -323,7 +323,7 @@ func runBehaviorTest(ctx context.Context, cfg *config.Config, cwd string) error 
 		Sandbox:  sandboxFlag,
 	})
 	if err != nil {
-		return fmt.Errorf("failed to create browser: %w", err)
+		return exitWith(ExitInfra, fmt.Errorf("failed to create browser: %w", err))
 	}
 
 	// Check if a browser server is already running and reuse it.
@@ -340,7 +340,7 @@ func runBehaviorTest(ctx context.Context, cfg *config.Config, cwd string) error 
 
 	// Launch or connect to browser
 	if err := b.LaunchOrConnect(ctx, cdpTarget); err != nil {
-		return fmt.Errorf("failed to start browser: %w", err)
+		return exitWith(ExitInfra, fmt.Errorf("failed to start browser: %w", err))
 	}
 	defer b.Close()
 
@@ -376,7 +376,7 @@ func runBehaviorTest(ctx context.Context, cfg *config.Config, cwd string) error 
 
 	llmClient, err := llm.NewClient(ctx, llmCfg)
 	if err != nil {
-		return fmt.Errorf("failed to create LLM client: %w", err)
+		return exitWith(ExitInfra, fmt.Errorf("failed to create LLM client: %w", err))
 	}
 	defer llmClient.Close()
 
@@ -398,6 +398,11 @@ func runBehaviorTest(ctx context.Context, cfg *config.Config, cwd string) error 
 
 	// Run each test file
 	var failedTests []string
+	// sawTestFailure is true only when the application misbehaved. Everything
+	// else — a missing input, a browser that would not start, an unreachable
+	// model — is infrastructure, so a CI job can retry it rather than treat it
+	// as a regression. See exitCodeFor.
+	sawTestFailure := false
 	for i, testFile := range testFiles {
 		if len(testFiles) > 1 {
 			fmt.Printf("\n[%d/%d] %s\n", i+1, len(testFiles), filepath.Base(testFile))
@@ -517,6 +522,10 @@ func runBehaviorTest(ctx context.Context, cfg *config.Config, cwd string) error 
 		printBehaviorOutcome(testFile, outcome)
 		if !outcome.Passed() {
 			failedTests = append(failedTests, testFile)
+			if outcome.Result != nil && outcome.Result.Failure != nil &&
+				outcome.Result.Failure.Kind.IsTestFailure() {
+				sawTestFailure = true
+			}
 		}
 	}
 
@@ -532,7 +541,13 @@ func runBehaviorTest(ctx context.Context, cfg *config.Config, cwd string) error 
 	}
 
 	if len(failedTests) > 0 {
-		return exitWith(ExitTestFailure, nil)
+		// A real regression outranks an infrastructure problem: if any spec
+		// says the application is broken, that is what the run means, even
+		// when another spec could not be run at all.
+		if sawTestFailure {
+			return exitWith(ExitTestFailure, nil)
+		}
+		return exitWith(ExitInfra, nil)
 	}
 
 	return nil

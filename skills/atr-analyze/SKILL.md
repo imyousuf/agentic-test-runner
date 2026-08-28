@@ -172,8 +172,8 @@ Files Examined:
 | Code | Meaning |
 |------|---------|
 | 0 | Command passed |
-| 1 | Command failed (analysis provided) |
-| 2 | Configuration error |
+| 1 | The thing under test is broken (analysis provided) |
+| 2 | The run could not decide — missing input, stale compiled script, browser or model unavailable |
 
 ## Configuration
 
