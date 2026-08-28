@@ -3,7 +3,9 @@ package cli
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/imyousuf/agentic-test-runner/internal/agent"
 	"github.com/imyousuf/agentic-test-runner/internal/browser"
@@ -117,5 +119,36 @@ func behaviorSecretFiller(b *browser.Browser, cfg *config.Config) testscript.Sec
 			return err
 		}
 		return b.Fill(ctx, target, value)
+	}
+}
+
+// reportUnusedValues names inputs the compiled script no longer reads, and
+// removes them when asked.
+//
+// Reported rather than removed by default. Repeated compiles accumulate
+// aliases — one real spec ended up with seven keys for two inputs — but the
+// values file is the part of a compiled test a person is expected to edit, and
+// "referenced" is not decidable: a key built at run time defeats any scan, and
+// deleting one a test actually reads fails on somebody else's machine as a
+// missing input. So the scan reports nothing at all unless it is certain.
+func reportUnusedValues(specPath string) {
+	unused, err := testscript.UnreferencedKeys(specPath)
+	if err != nil || len(unused) == 0 {
+		return
+	}
+
+	if !pruneValuesFlag {
+		fmt.Printf("  unused   → %d input(s) the script does not read: %s (remove with --prune-values)\n",
+			len(unused), strings.Join(unused, ", "))
+		return
+	}
+
+	removed, err := testscript.PruneValues(specPath, unused)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not prune inputs: %v\n", err)
+		return
+	}
+	if len(removed) > 0 {
+		fmt.Printf("  pruned   → %s\n", strings.Join(removed, ", "))
 	}
 }
