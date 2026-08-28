@@ -38,6 +38,7 @@ var (
 	recompileFlag   bool
 	noCompileFlag   bool
 	noRepairFlag    bool
+	pruneValuesFlag bool
 	interpretFlag   bool
 	sandboxFlag     bool // opt-in to enable sandbox (default: disabled for compatibility)
 	viewportFlag    string
@@ -98,6 +99,8 @@ will read the test specification and execute it using browser automation tools.`
 		"Replay only; never call the model. Fails if a script is missing or stale (use in CI)")
 	runCmd.Flags().BoolVar(&noRepairFlag, "no-repair", false,
 		"Diagnose a drifted script but do not rewrite it")
+	runCmd.Flags().BoolVar(&pruneValuesFlag, "prune-values", false,
+		"Remove inputs the compiled script no longer reads (reported, not removed, without this)")
 	runCmd.Flags().BoolVar(&interpretFlag, "interpret", false,
 		"Skip compilation and let the agent drive every step (slower, costs tokens per run)")
 	runCmd.Flags().BoolVar(&sandboxFlag, "sandbox", false, "Enable Chrome sandbox (disabled by default for Ubuntu 23.10+ compatibility)")
@@ -529,6 +532,7 @@ func runBehaviorTest(ctx context.Context, cfg *config.Config, cwd string) error 
 			continue
 		}
 
+		reportUnusedValues(testFile)
 		printBehaviorOutcome(testFile, outcome)
 		if !outcome.Passed() {
 			failedTests = append(failedTests, testFile)
