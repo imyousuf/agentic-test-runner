@@ -206,6 +206,14 @@ func runBrowserStart(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	if !browserPersistFlag {
+		// Losing the session sends the next run to a login page, where every
+		// step times out — which reads as a hung test rather than a browser
+		// that forgot who you are.
+		fmt.Fprintln(os.Stderr,
+			"Warning: --persist-session not set; cookies and logins are lost when this browser stops")
+	}
+
 	state, err := api.StartDaemon(browserPort)
 	if err != nil {
 		return err

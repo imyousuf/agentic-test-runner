@@ -47,6 +47,26 @@ The header records a hash of the spec. Edit the spec and the next run
 recompiles; reflow the whitespace and it does not, because a reformat should
 not cost tokens.
 
+The hash is over **normalized** spec text — every line right-trimmed, blank
+lines dropped, the rest joined with newlines — which is what makes a reflow
+free. `sha256sum` on the spec will therefore never match the stamped value. To
+predict a recompile from outside ATR, normalize the same way:
+
+```bash
+python3 -c "import hashlib,sys; raw=open(sys.argv[1]).read(); \
+print(hashlib.sha256('\n'.join(l.rstrip(' \t\r') for l in raw.split('\n') \
+if l.rstrip(' \t\r')).encode()).hexdigest())" login.test.txt
+```
+
+Usually you do not need to. `--no-compile` answers the same question better: it
+replays, or fails loudly, and never quietly calls the model.
+
+A freshly compiled script also carries `// atr-unverified` until it has
+completed a run. A compile that produced something which cannot run is not
+trusted, and the next run compiles again rather than replaying it. That marker
+is separate from the hash because removing the hash line means something else —
+see *Editing* below.
+
 Scripts run in an embedded JavaScript interpreter (goja) inside ATR — there is
 no Node, no `npm install`, and ATR remains a single binary. There is also no
 DOM and no network: a script can only reach the browser through the `atr`
@@ -272,6 +292,21 @@ spec, so the following run will regenerate and overwrite your changes. To keep
 a hand-written script, remove the `atr-spec-sha256` line; ATR will then treat
 it as stale and refuse to run it under `--no-compile` rather than silently
 replacing it.
+
+## A compile runs the spec more than once
+
+Compiling is not a dry run. The agent drives the whole spec against the live
+application to learn what is really there, then the emitted script is replayed
+to check it works, and a retry or a repair replays it again. A first compile
+therefore exercises the application several times.
+
+That matters for a destructive spec. A test that archives a conversation and
+then asserts the archive is read-only will, on its second pass, find the
+conversation already archived — and report a timeout waiting for text that is
+no longer there, which reads as a broken page rather than a spent fixture.
+
+Give such a spec a fixture it can rebuild: create the record in step one rather
+than relying on one that already exists, or point the test at a fresh account.
 
 ## Limitations
 
