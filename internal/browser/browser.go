@@ -19,6 +19,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/dop251/goja/ast"
+	"github.com/dop251/goja/parser"
 	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/cdp"
 	"github.com/go-rod/rod/lib/launcher"
@@ -1444,31 +1446,182 @@ func (b *Browser) Evaluate(script string) (interface{}, error) {
 	js := wrapJSExpression(script)
 	result, err := page.Eval(js)
 	if err != nil {
+		// A SyntaxError means the wrapping was wrong, not the script: nothing
+		// ran, so trying the other shape is free of side effects. Anything
+		// else is the script's own failure and must not be run twice.
+		if isSyntaxError(err) {
+			if alt := alternateWrapping(script, js); alt != "" {
+				if retry, altErr := page.Eval(alt); altErr == nil {
+					return retry.Value.Val(), nil
+				}
+			}
+		}
 		return nil, fmt.Errorf("script evaluation failed: %w", err)
 	}
 
 	return result.Value.Val(), nil
 }
 
-// wrapJSExpression wraps a script so that bare expressions return their value,
-// mimicking browser dev-console behaviour. If the script is already a function
-// expression or contains a return statement it is left as-is.
+// wrapJSExpression turns a caller's script into something rod can evaluate.
+//
+// rod wraps whatever it is handed as `function() { return (%s).apply(this,
+// arguments) }`, so the string given to it must be an *expression that
+// evaluates to a function*. Three shapes have to be told apart, and a prefix
+// test cannot do it:
+//
+//   - a function expression is already what rod wants, and is passed through;
+//   - any other expression is wrapped as `() => (expr)`;
+//   - a statement body is wrapped as `() => { body }`.
+//
+// The old heuristic passed an IIFE straight through, so rod called .apply on
+// whatever the IIFE returned — "(intermediate value)...apply is not a
+// function". It also passed through anything containing the substring
+// "return ", so a statement body reached rod as a statement, and a bare
+// expression that merely mentioned the word did too.
+//
+// goja parses the script instead. Note the two different probes: a top-level
+// `return` is a syntax error in a program, so a statement body has to be
+// parsed inside a function or the very case this fixes would look unparseable.
 func wrapJSExpression(script string) string {
 	s := strings.TrimSpace(script)
+	if s == "" {
+		return script
+	}
 
-	// Already a function expression — pass through
+	if expr, ok := parseAsExpression(s); ok {
+		switch expr.(type) {
+		case *ast.FunctionLiteral, *ast.ArrowFunctionLiteral:
+			// Already what rod wants; wrapping it would return the function
+			// rather than call it.
+			return script
+		}
+		return "() => (" + s + ")"
+	}
+
+	if body, ok := parseAsBody(s); ok {
+		return "() => {" + withImplicitReturn(s, body) + "\n}"
+	}
+
+	// Something goja will not parse but Chrome might. Fall back to the old
+	// behaviour so no input is worse off than before.
+	return legacyWrapJSExpression(script)
+}
+
+// isSyntaxError reports whether the page rejected the script as unparseable,
+// which means nothing was executed.
+func isSyntaxError(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "SyntaxError")
+}
+
+// alternateWrapping returns the other shape to try after a SyntaxError, or ""
+// when there is nothing else to try. Chrome accepts syntax goja does not, so
+// this covers the case where the classifier guessed from a failed parse.
+func alternateWrapping(script, tried string) string {
+	s := strings.TrimSpace(script)
+	if s == "" {
+		return ""
+	}
+	body := "() => {" + s + "\n}"
+	if tried != body {
+		return body
+	}
+	expr := "() => (" + s + ")"
+	if tried != expr {
+		return expr
+	}
+	return ""
+}
+
+// evalBodyPrefix is the wrapper parseAsBody parses inside. Its length converts
+// a node's index in the wrapped source back to an offset in the caller's
+// script, so it must stay in step with the string built below.
+const evalBodyPrefix = "(function(){"
+
+// parseAsExpression reports whether s is a single expression, and returns it.
+//
+// The parentheses are what make the test meaningful: an anonymous
+// `function(){}` is a syntax error at statement position, so parsing s bare
+// would reject the commonest pass-through case.
+func parseAsExpression(s string) (ast.Expression, bool) {
+	prog, err := parser.ParseFile(nil, "", "("+strings.TrimSuffix(s, ";")+")", 0)
+	if err != nil || len(prog.Body) != 1 {
+		return nil, false
+	}
+	stmt, ok := prog.Body[0].(*ast.ExpressionStatement)
+	if !ok {
+		return nil, false
+	}
+	return stmt.Expression, true
+}
+
+// parseAsBody reports whether s parses as the body of a function, returning
+// its top-level statements.
+func parseAsBody(s string) ([]ast.Statement, bool) {
+	prog, err := parser.ParseFile(nil, "", evalBodyPrefix+s+"\n})", 0)
+	if err != nil || len(prog.Body) != 1 {
+		return nil, false
+	}
+	stmt, ok := prog.Body[0].(*ast.ExpressionStatement)
+	if !ok {
+		return nil, false
+	}
+	fn, ok := stmt.Expression.(*ast.FunctionLiteral)
+	if !ok || fn.Body == nil {
+		return nil, false
+	}
+	return fn.Body.List, true
+}
+
+// withImplicitReturn gives a body the dev-console behaviour the tool schema
+// already promises: a trailing expression is its value.
+//
+// Without this, `const n = rows.length; n` would evaluate to undefined, and a
+// later assertion would fail as KindAssertion — reported as the application
+// misbehaving, with no repair offered. A script defect would be laundered into
+// a false accusation against the app, which is worse than today's syntax
+// error.
+func withImplicitReturn(s string, body []ast.Statement) string {
+	if len(body) == 0 || containsReturn(body) {
+		return s
+	}
+	last, ok := body[len(body)-1].(*ast.ExpressionStatement)
+	if !ok {
+		return s
+	}
+
+	// Indices are 1-based into the wrapped source; convert back to offsets in s.
+	start := int(last.Expression.Idx0()) - 1 - len(evalBodyPrefix)
+	end := int(last.Expression.Idx1()) - 1 - len(evalBodyPrefix)
+	if start < 0 || end > len(s) || start >= end {
+		return s
+	}
+	return s[:start] + "return (" + s[start:end] + ")" + s[end:]
+}
+
+// containsReturn reports whether any top-level statement is a return. Nested
+// returns belong to inner functions and say nothing about this body's value.
+func containsReturn(body []ast.Statement) bool {
+	for _, stmt := range body {
+		if _, ok := stmt.(*ast.ReturnStatement); ok {
+			return true
+		}
+	}
+	return false
+}
+
+// legacyWrapJSExpression is the prefix heuristic wrapJSExpression used before
+// it could parse. Kept as the fallback for input goja rejects and Chrome may
+// not, so such a script is no worse off than it was.
+func legacyWrapJSExpression(script string) string {
+	s := strings.TrimSpace(script)
+
 	if strings.HasPrefix(s, "function") || strings.HasPrefix(s, "()") ||
 		strings.HasPrefix(s, "(function") || strings.HasPrefix(s, "async") {
 		return script
 	}
-
-	// Contains flow-control / multiple statements — wrap with implicit return
-	// of the last expression is not reliable, so leave as-is if it has return.
 	if strings.Contains(s, "return ") || strings.Contains(s, "return\n") {
 		return script
 	}
-
-	// Bare expression: wrap as arrow function so rod evaluates and returns it
 	return "() => (" + script + ")"
 }
 
