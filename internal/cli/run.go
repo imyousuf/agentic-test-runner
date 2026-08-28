@@ -285,9 +285,10 @@ func runCommand(cmd *cobra.Command, args []string) error {
 
 	fmt.Println(formatted)
 
-	// Return error if command failed (for scripting)
+	// Signal failure for scripting. Returned rather than exited, so the
+	// deferred cleanup above actually runs.
 	if analysisResult.IsFailure() {
-		os.Exit(1)
+		return exitWith(ExitTestFailure, nil)
 	}
 
 	return nil
@@ -531,7 +532,7 @@ func runBehaviorTest(ctx context.Context, cfg *config.Config, cwd string) error 
 	}
 
 	if len(failedTests) > 0 {
-		os.Exit(1)
+		return exitWith(ExitTestFailure, nil)
 	}
 
 	return nil
