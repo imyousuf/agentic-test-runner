@@ -229,6 +229,7 @@ Everything a script can do. There is no DOM, no `require`, no `fetch`.
 
 ```javascript
 atr.step(n, "description", () => { ... })   // one per spec step
+atr.setup("description", () => { ... })     // runs before the steps, every run
 atr.log(msg)  atr.fail(msg)  atr.sleep(ms)  atr.retry(times, fn)
 atr.base                                    // the base URL
 ```
@@ -254,6 +255,10 @@ expanded at read time.
 
 **Assertions** — `expect(v).toBe/.toEqual/.toContain/.toMatch/.toBeTruthy/`
 `.toBeFalsy/.toBeGreaterThan/.toBeLessThan/.toHaveLength`
+
+`toMatch` takes a JavaScript regular expression or a string pattern. A regular
+expression is matched by JavaScript, so its flags apply and JavaScript-only
+syntax such as lookahead works — Go's own regexp engine has neither.
 
 Three calls look similar and are not:
 
@@ -333,8 +338,27 @@ then asserts the archive is read-only will, on its second pass, find the
 conversation already archived — and report a timeout waiting for text that is
 no longer there, which reads as a broken page rather than a spent fixture.
 
-Give such a spec a fixture it can rebuild: create the record in step one rather
-than relying on one that already exists, or point the test at a fresh account.
+Give such a spec a fixture it can rebuild, in `atr.setup`:
+
+```javascript
+atr.setup("start from an unarchived conversation", () => {
+  atr.navigate("/conversations/new");
+  atr.fill("#title", values.get("conversation_title"));
+  atr.click("[data-testid=create]");
+});
+
+atr.step(1, "Archive the conversation", () => { ... });
+```
+
+Setup runs before the steps on **every** execution — the compile's own
+verification replay, each retry, each repair attempt, and every ordinary run
+afterwards — so a test that spends its precondition rebuilds it first and stays
+replayable. It is not a numbered step: building a fixture is not part of what
+the specification claims about the application, and a failure there is reported
+as the setup failing rather than as the application misbehaving.
+
+The compiler is told to reach for it when a spec consumes what it needs in
+order to run.
 
 ## Limitations
 

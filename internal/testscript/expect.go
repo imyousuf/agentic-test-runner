@@ -9,6 +9,60 @@ import (
 	"github.com/dop251/goja"
 )
 
+// matches implements toMatch for both shapes a caller can pass.
+//
+// A JavaScript regular expression is matched by JavaScript, not by Go. The
+// two are not the same language: goja renders a literal /^a-z$/ as the string
+// "/^a-z$/", delimiters and all, so compiling that as a Go pattern demanded
+// the value contain literal slashes and no real value ever could. The reported
+// symptom was an id failing "text matching //^[A-Za-z0-9_-]+$//" — the second
+// pair of slashes being the tell.
+//
+// Handing it back to the engine also keeps the dialect honest. Go's regexp is
+// RE2, which has no lookahead and no backreferences, so a perfectly ordinary
+// JavaScript pattern using (?=...) would not merely mismatch — it would fail
+// to compile at all. And flags come for free: /i and /m mean what they say.
+//
+// A plain string is still compiled as a Go pattern, which is what
+// expect(x).toMatch("^abc") has always meant.
+func (r *runtime) matches(want, actual goja.Value) (bool, string) {
+	if re, ok := asRegExp(r.vm, want); ok {
+		test, ok := goja.AssertFunction(re.Get("test"))
+		if !ok {
+			r.throw(KindScript, "", "expect(...).toMatch: %s has no test method", want.String())
+		}
+		res, err := test(re, r.vm.ToValue(actual.String()))
+		if err != nil {
+			r.throw(KindScript, "", "expect(...).toMatch: %v", err)
+		}
+		return res.ToBoolean(),
+			fmt.Sprintf("text matching %s, got %s", want.String(), render(actual))
+	}
+
+	pattern := want.String()
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		// A bad pattern is a defect in the generated script, not a
+		// statement about the application.
+		r.throw(KindScript, "", "expect(...).toMatch: invalid pattern %q: %v", pattern, err)
+	}
+	return re.MatchString(actual.String()),
+		fmt.Sprintf("text matching /%s/, got %s", pattern, render(actual))
+}
+
+// asRegExp reports whether v is a JavaScript RegExp.
+func asRegExp(vm *goja.Runtime, v goja.Value) (*goja.Object, bool) {
+	if v == nil || goja.IsUndefined(v) || goja.IsNull(v) {
+		return nil, false
+	}
+	obj, ok := v.(*goja.Object)
+	if !ok || obj.ClassName() != "RegExp" {
+		return nil, false
+	}
+	_ = vm
+	return obj, true
+}
+
 // installExpect adds the global expect() used for assertions.
 //
 // Everything thrown from here is KindAssertion, and that is the point: an
@@ -50,15 +104,7 @@ func (r *runtime) installExpect() error {
 		})
 
 		must("toMatch", func(args []goja.Value) (bool, string) {
-			pattern := args[0].String()
-			re, err := regexp.Compile(pattern)
-			if err != nil {
-				// A bad pattern is a defect in the generated script, not a
-				// statement about the application.
-				r.throw(KindScript, "", "expect(...).toMatch: invalid pattern %q: %v", pattern, err)
-			}
-			return re.MatchString(actual.String()),
-				fmt.Sprintf("text matching /%s/, got %s", pattern, render(actual))
+			return r.matches(args[0], actual)
 		})
 
 		must("toBeTruthy", func([]goja.Value) (bool, string) {
