@@ -284,6 +284,19 @@ failure that someone fixes deliberately, on a branch, in a diff.
 - run: atr run --behavior tests/*.test.txt --no-compile --headless
 ```
 
+The exit code tells a CI job which kind of red it is:
+
+| Code | Meaning |
+|------|---------|
+| `0` | Everything passed |
+| `1` | The application is broken — an assertion did not hold |
+| `2` | The run could not decide — a missing input, a stale or absent script under `--no-compile`, a browser that would not start, an unreachable model |
+
+`1` means the application misbehaved and nothing else, so a red build has one
+meaning; `2` is worth retrying rather than escalating. If one spec fails an
+assertion while another cannot run at all, the run exits `1`, because a real
+regression must not be hidden by a flaky neighbour.
+
 ## Editing
 
 Edit the **spec**, not the script — the next run recompiles from it. If you
@@ -292,6 +305,21 @@ spec, so the following run will regenerate and overwrite your changes. To keep
 a hand-written script, remove the `atr-spec-sha256` line; ATR will then treat
 it as stale and refuse to run it under `--no-compile` rather than silently
 replacing it.
+
+A script therefore has three states, and they mean different things:
+
+| Header | State | What the next run does |
+|--------|-------|------------------------|
+| hash matches the spec | verified | replays it, no model calls |
+| hash plus `// atr-unverified` | compiled, never completed a run | compiles again |
+| no hash line | hand-written | leaves it alone; refuses under `--no-compile` |
+
+The middle state exists because a compile used to be trusted the moment the
+model stopped talking. A script that could not run was stamped anyway and
+replayed for ever, and the compile that would have replaced it never happened.
+It is cleared as soon as the script runs — including a run whose assertion
+fails, because a failing assertion means the script works and the application
+does not.
 
 ## A compile runs the spec more than once
 

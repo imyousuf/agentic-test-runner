@@ -111,16 +111,18 @@ When a request is aborted via Ctrl+C / SIGINT, the response is HTTP `499` with `
 |--------|------|------|---------|
 | `POST` | `/ask` | `{ instruction, max_steps?, timeout_seconds? }` | `{ answer, duration_ms, backend, model }` |
 
-Runs an in-process LLM loop using the daemon's configured backend (gemini-api / vertex-ai / claude-cli). The agent screenshots the desktop, calls `computer_*` tools, and iterates until the goal is achieved or `max_steps` (default 20) is hit.
+Runs an in-process LLM loop using the daemon's configured backend (gemini-api / vertex-ai / vertex-claude / claude-cli). The agent screenshots the desktop, calls `computer_*` tools, and iterates until the goal is achieved or `max_steps` (default 20) is hit.
 
 The agent **cannot type passwords**. If a sudo / polkit / authentication prompt appears it stops and reports the blocker.
 
 Default model aliases used by `/ask`:
 
-| Tier  | Model                          |
-|-------|--------------------------------|
-| flash | `gemini-3.7-flash`            |
-| pro   | `gemini-3.1-pro-preview`      |
+| Backend                     | Tier   | Model                     |
+|-----------------------------|--------|---------------------------|
+| `gemini-api` / `vertex-ai`  | flash  | `gemini-3.7-flash`        |
+| `gemini-api` / `vertex-ai`  | pro    | `gemini-3.1-pro-preview`  |
+| `vertex-claude`             | sonnet | `claude-sonnet-5`         |
+| `vertex-claude`             | opus   | `claude-opus-5`           |
 
 Backend `claude-cli` ignores the model alias and uses the Claude CLI subprocess via MCP.
 

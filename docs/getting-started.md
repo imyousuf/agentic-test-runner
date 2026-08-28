@@ -81,6 +81,25 @@ atr config init
 # Edit ~/.atr/config.yaml and set backend: vertex-ai
 ```
 
+### Using Claude on Vertex AI
+
+The same credentials as Vertex AI above, running Claude instead of Gemini, with
+prompt caching so an agent loop pays for its fixed prefix once rather than on
+every iteration.
+
+```bash
+gcloud auth application-default login
+export GOOGLE_CLOUD_PROJECT="your-project-id"
+atr config init
+# Edit ~/.atr/config.yaml:
+#   backend: vertex-claude
+#   model: sonnet        # or opus
+atr test
+```
+
+No API key is stored anywhere. `ATR_DEBUG_LLM=1` logs per-request token counts
+including cache reads and writes.
+
 See [Configuration Guide](configuration.md) for detailed setup options.
 
 ## Your First Command Analysis

@@ -10,11 +10,11 @@ These flags are available for all commands:
 |------|-------------|
 | `--config <path>` | Config file path (default: `~/.atr/config.yaml`) |
 | `-v, --verbose` | Enable verbose output |
-| `--backend <name>` | LLM backend: `claude-cli`, `gemini-cli`, `gemini-api`, or `vertex-ai` |
+| `--backend <name>` | LLM backend: `claude-cli`, `gemini-cli`, `gemini-api`, `vertex-ai`, or `vertex-claude` |
 | `--api-key <key>` | Gemini API key (for `gemini-api` backend) |
 | `--project <id>` | GCP project for Vertex AI |
 | `--location <region>` | GCP region for Vertex AI |
-| `--model <tier>` | Model: `flash`/`pro` (API backends) or `opus`/`sonnet`/`haiku` (claude-cli) |
+| `--model <tier>` | Model: `flash`/`pro` (Gemini API backends), `sonnet`/`opus` (`vertex-claude`), or `opus`/`sonnet`/`haiku` (claude-cli) |
 
 ---
 
