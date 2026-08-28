@@ -192,6 +192,13 @@ step against the live application. Call browser_snapshot before interacting so
 you use selectors that exist rather than ones you assume. This phase is how
 you learn the real structure of the pages; do not skip it and do not guess.
 
+If a step cannot be performed — the specification asks you to search but the
+page has no search, or names a control that is not there — stop and say so.
+Name the step, say what you found instead, and emit no code. Do not keep
+looking: a spec the application cannot satisfy is a finding worth reporting,
+and hunting for a control that does not exist spends the whole budget and
+tells the reader nothing.
+
 PHASE 2 — write the script and its inputs. Once you have completed the whole
 spec, output two fenced blocks.
 
@@ -397,8 +404,22 @@ Inspect the page and decide.`,
 
 // runToolLoop drives the shared agent loop until the model answers without
 // calling a tool, returning its final message.
+//
+// The loop ends one of three ways: the model answers, the budget runs out, or
+// the context is cancelled. The budget running out silently used to be the
+// worst of them — every selector the agent had learned was thrown away and the
+// caller was told only "reached the iteration limit", which says nothing about
+// what went wrong.
+//
+// So before the last few iterations the model is told what is about to happen
+// and asked to stop exploring: either write the script, or say plainly which
+// step it could not perform. A spec that asks for something the application
+// cannot do — a search box that is not on the page — is otherwise
+// indistinguishable from a slow compile, and costs the whole budget to find
+// out.
 func (a *Agent) runToolLoop(ctx context.Context, messages []llm.Message, label string, progress func(string)) (string, error) {
 	tools := a.registry.Definitions()
+	nudged := false
 
 	for iteration := 0; iteration < a.maxIterations; iteration++ {
 		if err := ctx.Err(); err != nil {
@@ -407,6 +428,14 @@ func (a *Agent) runToolLoop(ctx context.Context, messages []llm.Message, label s
 
 		if progress != nil {
 			progress(fmt.Sprintf("%s · iteration %d/%d", label, iteration+1, a.maxIterations))
+		}
+
+		if !nudged && iteration >= wrapUpAt(a.maxIterations) {
+			messages = append(messages, llm.Message{Role: llm.RoleUser, Content: wrapUpPrompt(a.maxIterations - iteration)})
+			nudged = true
+			if progress != nil {
+				progress(fmt.Sprintf("%s · running out of iterations; asking for the script or an explanation", label))
+			}
 		}
 
 		resp, err := a.llmClient.Chat(ctx, messages, tools)
@@ -440,7 +469,36 @@ func (a *Agent) runToolLoop(ctx context.Context, messages []llm.Message, label s
 		pruneImages(messages, 2)
 	}
 
-	return "", fmt.Errorf("%s reached the iteration limit (%d)", label, a.maxIterations)
+	return "", fmt.Errorf("%s reached the iteration limit (%d) and never stopped calling tools; "+
+		"the usual cause is a step the application cannot perform, so check that the spec matches what the page actually does",
+		label, a.maxIterations)
+}
+
+// wrapUpAt is the iteration at which the model is told to finish.
+//
+// Late enough that an ordinary compile never sees it — most finish in a
+// fraction of the budget — and early enough to leave room for a reply plus a
+// retry if the first one still calls a tool.
+func wrapUpAt(maxIterations int) int {
+	const reserved = 3
+	if maxIterations <= reserved {
+		return maxIterations - 1
+	}
+	return maxIterations - reserved
+}
+
+// wrapUpPrompt asks for the script, or for the reason there is not one.
+//
+// Both halves matter. Without the first, an agent that has already learned
+// what it needs keeps exploring and the work is discarded. Without the second,
+// a spec the application cannot satisfy produces no diagnosis at all, and the
+// user is left with an iteration count and no idea which step was impossible.
+func wrapUpPrompt(remaining int) string {
+	return fmt.Sprintf(`You have %d iteration(s) left before this run is abandoned. Stop exploring now.
+
+If you have carried out enough of the specification to write the script, output the two fenced blocks immediately.
+
+If some step cannot be performed against this application — an element that does not exist, a flow the page does not support — do not keep searching for it. Say plainly which step it is and what you found instead, and output no code. That answer is far more useful than running out of iterations.`, remaining)
 }
 
 // pruneImages clears screenshot bytes from all but the most recent keep tool
