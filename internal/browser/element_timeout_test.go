@@ -152,3 +152,20 @@ func TestExplicitWaitIsNotCappedAtThreeSeconds(t *testing.T) {
 		t.Fatalf("waiting 20s gave up after %v: %v", time.Since(start), err)
 	}
 }
+
+// A selector that no longer matches must be reported the same way whichever
+// call went looking for it. atr.text and friends go through findElementByCSS,
+// which used to return a raw deadline error — classified as environmental, so
+// retried rather than repaired, while the identical rename behind a click was
+// repaired.
+func TestMissingCSSTargetIsNotFoundNotEnvironmental(t *testing.T) {
+	resetFixture(t)
+
+	_, err := testBrowser.GetTextContent("#no-such-element-anywhere", "flat")
+	if err == nil {
+		t.Fatal("expected an error for a selector that matches nothing")
+	}
+	if !errors.Is(err, ErrElementNotFound) {
+		t.Errorf("err = %v, want ErrElementNotFound so the script can be repaired", err)
+	}
+}
