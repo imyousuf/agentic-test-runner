@@ -59,8 +59,22 @@ func newRunCmd() *cobra.Command {
 The agent can run additional commands, read files, and search code to understand
 what went wrong, then provides actionable recommendations.
 
-Alternatively, run browser-based behavior tests using the --behavior flag. The AI agent
-will read the test specification and execute it using browser automation tools.`,
+Alternatively, run browser-based behavior tests using the --behavior flag. A spec
+compiles once to a sibling .js file and afterwards replays with no model in the
+loop; the agent returns only to diagnose a failure. Use --no-compile to
+guarantee a run costs nothing.
+
+Exit codes:
+  0  everything passed
+  1  the thing under test is broken — a failed command, or a behaviour test
+     whose assertion did not hold
+  2  the run could not decide — a missing input, a stale or absent compiled
+     script under --no-compile, a browser that would not start, an unreachable
+     model
+
+1 means the application misbehaved and nothing else, so a red build has a
+single meaning. Everything that says nothing about the application is 2, which
+a CI job can retry rather than escalate.`,
 		Example: `  # Run tests and analyze failures
   atr run --cmd "go test ./..." --cwd "/path/to/project"
 

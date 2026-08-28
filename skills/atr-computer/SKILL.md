@@ -139,12 +139,14 @@ atr computer ask "list the open windows that contain 'chrome' in the title"
 atr computer ask --max-steps 30 --timeout 10m "open the GNOME calculator and compute 17 * 23"
 ```
 
-The agent uses the LLM backend configured for ATR (`backend: gemini-api | vertex-ai | claude-cli` in `~/.atr/config.yaml`). Default model aliases:
+The agent uses the LLM backend configured for ATR (`backend: gemini-api | vertex-ai | vertex-claude | claude-cli` in `~/.atr/config.yaml`). Default model aliases:
 
-| Tier  | Model                          |
-|-------|--------------------------------|
-| flash | `gemini-3.7-flash`            |
-| pro   | `gemini-3.1-pro-preview`      |
+| Backend                     | Tier   | Model                     |
+|-----------------------------|--------|---------------------------|
+| `gemini-api` / `vertex-ai`  | flash  | `gemini-3.7-flash`        |
+| `gemini-api` / `vertex-ai`  | pro    | `gemini-3.1-pro-preview`  |
+| `vertex-claude`             | sonnet | `claude-sonnet-5`         |
+| `vertex-claude`             | opus   | `claude-opus-5`           |
 
 Override per-run with the global `--model` flag (e.g. `atr --model pro computer ask "..."`). With `backend: claude-cli`, the model flag is ignored and Claude CLI is invoked as a subprocess.
 

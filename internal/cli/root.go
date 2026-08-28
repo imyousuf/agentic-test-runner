@@ -28,6 +28,9 @@ When a command fails, ATR engages an AI agent that can:
 The agent iteratively investigates until it understands the failure,
 then provides a clear explanation and actionable recommendations.
 
+Exit codes: 0 passed, 1 the thing under test is broken, 2 the run could not
+decide (missing input, browser or model unavailable). See 'atr run --help'.
+
 Examples:
   # Run tests and analyze failures
   atr run --cmd "go test ./..." --cwd "/path/to/project"
