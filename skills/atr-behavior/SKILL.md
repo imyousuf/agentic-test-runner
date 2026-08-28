@@ -79,7 +79,9 @@ you may edit; `login.test.override.properties` (gitignored) wins over it, and
 
 A compile drives the spec **more than once** — once to learn the application,
 then again to verify what it wrote. A destructive spec needs a fixture it can
-rebuild.
+rebuild, which is what `atr.setup("description", () => { ... })` is for: it runs
+before the steps on every execution, is not counted as a step, and a failure in
+it is reported as the fixture failing rather than the application misbehaving.
 
 See `docs/behavior-compilation.md` for the full picture.
 

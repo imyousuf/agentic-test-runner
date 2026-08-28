@@ -37,6 +37,7 @@ func (r *runtime) install() error {
 	_ = atr.Set("base", r.opts.BaseURL)
 
 	set("step", r.jsStep)
+	set("setup", r.jsSetup)
 	set("log", r.jsLog)
 	set("fail", r.jsFail)
 	set("sleep", r.jsSleep)
@@ -129,6 +130,45 @@ func (r *runtime) jsStep(number int, description string, fn goja.Callable) {
 	}
 
 	r.steps[idx].Status = behavior.StepStatusPassed
+	r.curStep, r.curDesc = prevStep, prevDesc
+}
+
+// jsSetup runs work that has to happen before the steps, every time the
+// script runs.
+//
+// It exists for tests that consume their own precondition. A spec that
+// archives a conversation and then asserts the archive is read-only spends
+// that fixture the first time it runs — and a compile runs the spec more than
+// once, so the verification replay immediately afterwards finds it already
+// archived and fails at step 1 with a timeout that reads as a broken page
+// rather than a spent fixture.
+//
+// Putting the rebuild here makes the test idempotent: it runs before the steps
+// on the compile's own replay, on every retry, on every repair attempt, and on
+// every ordinary run afterwards.
+//
+// Not a numbered step. Setting a fixture up is not part of what the
+// specification claims about the application, so it does not belong in the
+// step list — and a failure here says the fixture could not be built, which is
+// a different thing from the application misbehaving.
+func (r *runtime) jsSetup(description string, fn goja.Callable) {
+	r.checkCtx()
+
+	prevStep, prevDesc := r.curStep, r.curDesc
+	r.curStep, r.curDesc = 0, "setup: "+description
+	r.curTarget = ""
+
+	// As in jsStep, a throw must propagate: the run cannot continue without
+	// the fixture it was about to build.
+	_, err := fn(goja.Undefined())
+	if err != nil {
+		var ex *goja.Exception
+		if errors.As(err, &ex) {
+			panic(ex.Value())
+		}
+		panic(err)
+	}
+
 	r.curStep, r.curDesc = prevStep, prevDesc
 }
 

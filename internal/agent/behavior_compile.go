@@ -65,6 +65,7 @@ DOM, no require, no fetch, no console. Use only what is listed.
 
 Structure:
   atr.step(n, "description", () => { ... })   one numbered step per spec step
+  atr.setup("description", () => { ... })     runs before the steps, every run
   atr.log(message)
   atr.fail(message)        the app is wrong -> TEST FAILURE
   atr.sleep(ms)
@@ -160,6 +161,14 @@ Other rules:
   error it cannot recover from, so it will fail every time you retry it.
 - A target that is plain visible text is matched as text, so "Sign in" on its
   own is a valid target and usually the clearest one.
+- If the test consumes what it needs in order to run — archiving something and
+  then asserting it is archived, deleting a record it also has to find, using
+  up a one-time code — put the work that rebuilds that precondition in
+  atr.setup at the top of the script. Your script is replayed as soon as you
+  have written it, and again on every retry and every later run, so a test that
+  only passes against a fixture it has already spent will fail the second time
+  and read as a broken page rather than a spent fixture.
+- Prefer making a test build its own precondition over assuming one exists.
 - Wait for state rather than sleeping. Use atr.sleep only as a last resort.
 - Do not wrap everything in try/catch. Letting a failure propagate is what
   makes it classifiable.`
