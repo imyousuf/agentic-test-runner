@@ -42,9 +42,46 @@ The base URL is used for relative navigation paths.
 |------|-------------|---------|
 | `--behavior <path>` | Test file or directory | (required) |
 | `--browser-url <url>` | Base URL for tests | from config |
-| `--headless` | Run browser headless | true |
+| `--headless` | Run browser headless | false |
 | `--viewport <WxH>` | Viewport size | 1920x1080 |
 | `--cdp-endpoint <url>` | Connect to existing browser | - |
+| `--no-compile` | Replay only; never call the model. Fails loudly if the script is missing or stale | false |
+| `--recompile` | Regenerate the script even if it matches the spec | false |
+| `--no-repair` | Diagnose a drifted script but do not rewrite it | false |
+| `--prune-values` | Remove inputs the script no longer reads | false |
+| `--interpret` | Skip compilation and let the agent drive every step | false |
+
+## Specs compile, and then replay without a model
+
+A spec compiles once to a sibling `.js` file and afterwards replays with no
+model in the loop — seconds, and no tokens. The agent returns only to diagnose
+a failure.
+
+```bash
+atr run --behavior tests/login.test.txt              # compiles if needed, then replays
+atr run --behavior tests/login.test.txt --no-compile # replay only; for CI
+atr run --behavior tests/login.test.txt --recompile  # force a fresh compile
+```
+
+**Use `--no-compile` whenever you want certainty about cost.** It never calls
+the model: it replays, or it fails and says why. Without it, a spec edit or an
+unverified script triggers a compile, which drives the whole application and
+takes minutes.
+
+The compiled script is committed and carries a hash of the spec. Edit the spec
+and the next run recompiles; reflow whitespace and it does not. A script that
+has never completed a run is marked `// atr-unverified` and is recompiled
+rather than trusted.
+
+Test inputs live beside the spec in `login.test.properties` (committed), which
+you may edit; `login.test.override.properties` (gitignored) wins over it, and
+`ATR_VALUE_*` environment variables win over both.
+
+A compile drives the spec **more than once** — once to learn the application,
+then again to verify what it wrote. A destructive spec needs a fixture it can
+rebuild.
+
+See `docs/behavior-compilation.md` for the full picture.
 
 ## Test File Format
 

@@ -80,7 +80,12 @@ Run browser-based behavior tests using AI-driven automation.
 |------|-------------|
 | `--behavior <path>` | Path to `.test.txt` file or directory |
 | `--browser-url <url>` | Base URL for tests (overrides config) |
-| `--headless` | Run browser headless (default: `true`) |
+| `--headless` | Run browser headless (default: `false`) |
+| `--no-compile` | Replay only; never call the model. Fails if a script is missing or stale (use in CI) |
+| `--recompile` | Regenerate the compiled script even if it matches the spec |
+| `--no-repair` | Diagnose a drifted script but do not rewrite it |
+| `--prune-values` | Remove inputs the compiled script no longer reads |
+| `--interpret` | Skip compilation and let the agent drive every step (slower, costs tokens per run) |
 | `--viewport <WxH>` | Viewport size, e.g., `1920x1080` |
 | `--cdp-endpoint <url>` | Connect to existing browser via CDP |
 
