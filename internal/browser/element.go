@@ -691,10 +691,18 @@ func (b *Browser) GetElementScreenshot(target string) ([]byte, error) {
 // findElementByCSS finds an element using a CSS selector directly, without
 // the multi-strategy fallback chain. Use this when the caller knows the
 // target is explicitly a CSS selector.
+//
+// Budget and failure reporting match findElement deliberately. This used to
+// spend a fixed three seconds whatever the caller allowed, and to return rod's
+// raw deadline error — which classify() reads as KindEnvironment, meaning
+// retryable but not repairable. So a renamed id behind atr.text was retried
+// until the run gave up instead of being handed to the repair path, while the
+// identical rename behind atr.click was repaired.
 func (b *Browser) findElementByCSS(page *rod.Page, selector string) (*rod.Element, error) {
-	return tryFind(page, 3*time.Second, func(p *rod.Page) (*rod.Element, error) {
+	el, err := tryFind(page, searchTimeout(page.GetContext()), func(p *rod.Page) (*rod.Element, error) {
 		return p.Element(selector)
 	})
+	return el, asNotFound(selector, err)
 }
 
 // GetElementScreenshotByCSS captures a screenshot of a specific element

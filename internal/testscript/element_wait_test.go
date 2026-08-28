@@ -55,3 +55,28 @@ func TestFillStillFailsOnASelectorThatNeverMatches(t *testing.T) {
 		t.Errorf("failure message does not name the selector: %s", res.Failure.Message)
 	}
 }
+
+// Reading a selector that no longer matches is drift, not an environment
+// problem. It used to classify as environment — retryable but not repairable —
+// so a renamed id behind atr.text was retried until the run gave up, while the
+// identical rename behind atr.click was handed to the repair path.
+func TestReadingAMissingSelectorIsRepairable(t *testing.T) {
+	res := run(t, `
+		atr.step(1, "Read something that is not there", () => {
+			atr.text("#no-such-element-anywhere");
+		});
+	`)
+
+	if res.Passed {
+		t.Fatal("expected the step to fail")
+	}
+	if res.Failure == nil {
+		t.Fatal("no failure recorded")
+	}
+	if res.Failure.Kind != KindNotFound {
+		t.Errorf("kind = %q, want %q so the script can be repaired", res.Failure.Kind, KindNotFound)
+	}
+	if !res.Failure.Kind.Repairable() {
+		t.Error("the failure is not repairable, so the drift would be retried instead of fixed")
+	}
+}
