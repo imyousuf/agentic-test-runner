@@ -736,9 +736,15 @@ update:
 
 | Code | Meaning |
 |------|---------|
-| `0` | Success - command passed or no failures found |
-| `1` | Failure - command failed or test failed |
-| `2` | Configuration error |
+| `0` | Everything passed |
+| `1` | The thing under test is broken — a failed command, or a behaviour test whose assertion did not hold |
+| `2` | The run could not decide — a missing input, a stale or absent compiled script under `--no-compile`, a browser that would not start, an unreachable model |
+
+`1` means the application misbehaved and nothing else, so a red build has a
+single meaning. Everything that says nothing about the application is `2`,
+which a CI job can retry rather than escalate. When one spec fails an assertion
+and another hits an infrastructure problem, the run exits `1`: a real
+regression is never masked by a flaky neighbour.
 
 ---
 
