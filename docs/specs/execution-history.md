@@ -27,19 +27,82 @@ run time has retry and model variance baked in.
 
 ## Design
 
-### One record, many sinks
+### What a record is
 
-A single run record is produced at the end of a run and handed to each sink
-independently. Sinks are attached or not; disabling one is not attaching it.
+The first draft said "a single run record produced at the end of a run", which
+does not survive contact with the code. `RunOutcome` (`behavior_run.go:72`)
+carries one `Result`, and the retry loop overwrites it on every attempt
+(`:168`) — so a run that failed `KindTimeout`, retried, and passed records only
+the pass. The flake evidence, which is a headline reason for the feature, is
+the thing that gets discarded.
 
-This is the constraint that keeps the sinks honest. Two independent emitters
-drift — a field is added to the database, nobody adds it to the traces, and six
-months later the two disagree about what happened.
+**The record is a run with attempts beneath it.** One row per attempt, carrying
+its own result, kind, duration and whether it was preceded by a repair; a run
+row carrying the aggregate. That shape is also what the trace hierarchy needs,
+so the two sinks stay consistent by construction rather than by discipline.
+
+`RunOutcome` therefore grows an `Attempts []Attempt` alongside the existing
+`Result` (kept as "the last one", which is what the printer uses).
+
+### Where it is produced
+
+**At the CLI loop, not inside `RunBehavior`.** The second justification —
+excluding infrastructure from failure rate — requires recording the runs that
+never reached a script:
+
+- an unreadable spec file (`run.go:429`),
+- a missing base URL for a spec that needs one (`run.go:454`),
+- a stale script under `--no-compile` (`behavior_run.go:309`).
+
+Each of those is a `continue` in the loop over spec files, and none produces a
+`RunOutcome` at all. If recording lives inside `RunBehavior`, the database
+learns nothing about them and "true failure rate" quietly excludes exactly the
+category it was built to count. So the emitter wraps the per-spec iteration in
+`runBehaviorTests`, and a pre-run failure is a recorded run with zero attempts
+and a `config`/`infra` outcome.
+
+`runCommandAnalysis` is out of scope for the first version; the schema should
+not make it impossible to add later.
+
+### Fields worth naming now
+
+- **Timestamps.** `started_at` and `finished_at`, UTC. Without them "duration
+  trend over a month" has no axis.
+- **Spec identity.** Not the absolute path: a spec run from a laptop checkout
+  and from CI is the same spec, and path identity silently splits its history
+  in two. Store the path relative to the repository root when one can be
+  found, with the absolute path as a separate column.
+- **Compile duration.** Nothing times the compile today; `loadOrCompile`
+  returns a source string. It needs a clock around it, or the most expensive
+  phase is the one with no number.
+- **Model calls.** `outcome.ModelCalls` counts *agent invocations*, not LLM
+  requests — one compile is one increment and forty LLM round-trips. Record it
+  under a name that says so (`agent_invocations`), and add a real LLM call
+  count and token usage only if the provider layer already surfaces them;
+  do not rename the existing field's meaning silently.
+- **Failure kind and message**, from `testscript.Failure`.
+- **Repairs**, count and per-attempt flag.
 
 ### Sink 1: SQLite, on by default
 
 `~/.atr/history.db`. Cheap, private, same trust boundary as the browser the
 user just drove.
+
+Three decisions the design cannot defer:
+
+- **Driver.** ATR cross-compiles to four targets with no CGO
+  (`.github/workflows`), so `mattn/go-sqlite3` is out. `modernc.org/sqlite` is
+  pure Go and works, at the cost of several MB on a binary that is currently
+  dependency-light. That cost is the actual price of this sink and should be
+  measured before the feature is accepted, not discovered at release.
+- **Concurrency.** A directory run is sequential today, but nothing stops two
+  `atr run` processes sharing `~/.atr/history.db`. WAL mode, a busy timeout,
+  and one short transaction at the end of each run. **A recording failure must
+  never fail the test run** — log it once and carry on; the exit code belongs
+  to the application under test, not to the historian.
+- **Retention.** A row per attempt per spec per run grows without bound on a
+  machine that runs a suite in a loop. A default cap (age or row count),
+  pruned on write, stated in the docs.
 
 **The schema is public, via views.** An earlier draft of this design proposed
 hiding it behind `atr history` to keep the schema free to change. That was
@@ -62,6 +125,15 @@ evaporates entirely.
 
 Covers **all runs**, not only compiles. Replays are the volume and therefore
 the aggregate signal; compiles are rare and expensive.
+
+**Shutdown is the part that gets forgotten.** A batch span processor flushes on
+a 5s schedule and a periodic metric reader on 60s; a replay takes 9s and exits.
+Without an explicit `Shutdown` with a bounded timeout on the exit path, a CI
+run reliably exports nothing and the feature appears not to work. ATR's exit
+path now returns errors rather than calling `os.Exit` (`cli/exit.go`), so there
+is a place to put it — and it must sit outside the error branch, since a failed
+run is the one whose telemetry matters most. Bound the flush (a few seconds)
+so an unreachable collector delays exit rather than hanging it.
 
 #### The three signals divide by what the data is
 
@@ -106,15 +178,25 @@ OTel users already have.
 
 ## Privacy rules
 
-- **Never record resolved values. Anywhere.** Not in the database, not in
-  traces, not in logs. A value read through `values.get` can be a customer
-  name, an account id or an internal URL. A resolution failure names the *key*
-  and the layers searched — never a value that did resolve.
-- **The failure message is content.** It quotes the application back at you, so
-  it can contain whatever was on the page. The local database stores it in
-  full; whether it leaves the machine is governed by whether the logs signal is
-  exported, which is the user's decision to make with knowledge of their own
-  collector's retention and audience.
+- **ATR never extracts a resolved value into a field of its own.** Not a column,
+  not a span attribute, not a log attribute. A value read through `values.get`
+  can be a customer name, an account id or an internal URL.
+- **Resolution diagnostics are value-free.** A resolution failure names the
+  *key* and the layers searched, never a value that did resolve.
+
+  The first draft said "never record resolved values, anywhere", which reads
+  well and cannot be implemented. `expect(...).toBe(values.get("name"))`
+  produces the message `expected "Acme Ltd", got "Acme Inc"`
+  (`expect.go:88-92`) — the resolved value is *inside* the failure message
+  before any of this code sees it. Promising it never appears would be a
+  guarantee we break on the first failing assertion. The honest rule is the two
+  above, plus:
+- **The failure message is content, and may contain a resolved value.** It
+  quotes the application — and the spec's own expectations — back at you. The
+  local database stores it in full; whether it leaves the machine is governed
+  by whether the logs signal is exported, which is the user's decision to make
+  with knowledge of their own collector's retention and audience. Document
+  that, rather than pretending the message is safe.
 
 ## Controls
 
@@ -129,8 +211,9 @@ OTel users already have.
 
 ## Non-goals
 
-- Not a distributed store. Local-first; a run emits a `--json` summary that a
-  CI job can ship wherever it likes.
+- Not a distributed store. Local-first. (`atr run` has no `--json` today — a
+  machine-readable summary is a plausible companion feature, not something this
+  spec may assume exists.)
 - No screenshots, no page content, no artefacts. Metadata only.
 - Not a replacement for CI's own reporting. This answers questions about
   *tests over time* that CI does not keep.
@@ -143,6 +226,15 @@ OTel users already have.
 - With no `OTEL_EXPORTER_OTLP_ENDPOINT`, a run emits nothing and logs no error.
 - With a collector configured, a failing run produces a trace whose failing
   step span carries a correlated log record naming the failure.
-- No resolved value appears in the database, in any span attribute, or in any
-  log record — checked by seeding a distinctive value and grepping all three.
+- No resolved value appears in a column, span attribute or log attribute of its
+  own — checked by seeding a distinctive value and grepping all three. A value
+  quoted inside a failure message is expected and does not fail this check.
+- A run that fails, retries and then passes records both attempts, and the
+  first attempt's failure kind survives.
+- A spec with no base URL, and a stale script under `--no-compile`, each record
+  a run — the pre-run failures the "true failure rate" number depends on.
+- A run against an unreachable OTLP endpoint exits within a bounded delay and
+  still exits with the test's own code.
+- A corrupt or unwritable `history.db` does not change a run's exit code.
 - With both sinks disabled, nothing is written and `atr history` explains why.
+- Binary size before and after the SQLite driver, on all four release targets.

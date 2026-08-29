@@ -37,11 +37,27 @@ second `RunProgram` before the first.
 Discovery is by convention: the file sits in the spec's directory. A spec with
 no `_shared.js` beside it behaves exactly as today.
 
+"A second RunProgram" is right about the VM and glosses three things. The
+library evaluation needs the same panic containment as `execute`
+(`runtime.go:173`), or a host throw during it crashes the process instead of
+being reported. `Options` needs a `Library`/`LibraryName` field rather than
+concatenating sources, which would destroy line numbers and stack attribution.
+And the library must be **declarations-only**: a top-level `atr.navigate(...)`
+produces a step-0 failure the triage model cannot diagnose. That is
+enforceable cheaply — goja's parser is already in the module — by rejecting
+non-declaration top-level statements at load time. Library code must not call
+`atr.step` or `atr.setup` either; both would corrupt the one-step-per-spec-step
+invariant differently for each calling spec.
+
 ### Compile
 
-**The library is always injected** into the compile prompt — its available
-operations and their signatures, with the instruction to use them rather than
-writing equivalents. Not opt-in: opt-in would mean the common case (a repo that
+**The library is always injected — verbatim.** Not extracted signatures: a
+signature loses what the model most needs, which is what the operation does and
+what state it leaves the page in. `login()` has an empty signature; its body
+says it ends on the dashboard. The library is one bounded operations-only file,
+so its token cost is noise beside the snapshots a compile already carries, and
+injecting the file needs no parsing machinery and covers the triage prompt for
+free. Not opt-in: opt-in would mean the common case (a repo that
 has a library and wants it used) requires per-spec ceremony, and the failure
 mode of forgetting is silent re-derivation, which is exactly what this exists
 to stop.
@@ -61,37 +77,109 @@ twenty tests can be weakened in one edit. That is the same objection ATR
 already makes to repairing an assertion automatically: it is indistinguishable
 from deleting the test.
 
-This should be stated in the compile prompt, in the authoring skill, and in the
-docs, because the pull towards putting a shared `expectSignedIn()` in there is
-strong and the damage is invisible.
+Stating it in the prompt aims at the wrong actor: the prompt constrains the
+model, and the model does not write `_shared.js` — a person does, six months
+later, and never sees the prompt.
 
-## Freshness — the part that needs deciding
+It is enforceable, cheaply. goja exposes `CaptureCallStack` with per-frame
+`SrcName()`; with the library compiled under its own name, `expect` and
+`atr.fail` can refuse to run from a library frame. That catches the exact rule
+on the first run of any offending library, whoever wrote it.
 
-A compiled script is stamped with a hash of its spec. **The library is not in
-that hash.** So editing `_shared.js` changes the behaviour of every compiled
-script beside it while every spec hash stays valid: nothing recompiles, nothing
-reports stale, and `--no-compile` in CI happily replays scripts whose meaning
-just changed.
+What it cannot catch is assertion semantics smuggled as a bare `throw` (which
+is self-punishing — `KindScript` is a repair magnet) or as a `waitFor` timeout.
+So: **`expect` and `atr.fail` may not execute from a library frame, enforced;
+the rest is convention.** The first draft's "never shared assertions, ever"
+read as a guarantee the design does not deliver.
 
-That is a correctness hole, not a nicety. Two candidate mechanisms:
+## Freshness
 
-1. **Fold the library's hash into the stamp.** A library edit invalidates every
-   script in the directory, which is honest and simple, and costs a recompile
-   of the whole directory for a one-line helper change.
-2. **Version the library explicitly** — the library declares a version, scripts
-   record the version they were compiled against, and a mismatch is reported as
-   stale. Cheaper in recompiles, but adds a number a human has to remember to
-   bump, and forgetting is silent.
+A compiled script is stamped with a hash of its spec. The library is not in
+that hash, so editing `_shared.js` changes the behaviour of every script beside
+it while every hash stays valid: nothing recompiles, nothing reports stale, and
+`--no-compile` in CI replays scripts whose meaning just changed.
 
-Option 1 is the safe default and matches the existing content-hash design; the
-cost is real but recompiles are already the expensive-and-rare path while
-replays are the common one. Recommend 1 unless directory-wide recompiles prove
-intolerable in practice.
+**Replay, do not recompile.** An earlier draft proposed folding the library
+hash into the spec stamp and accepting directory-wide recompiles. That is
+backwards. Scripts *call* the library by name and load it from disk at run
+time — so editing `login()` to track a UI change is the feature's primary use,
+and recompiling would make a one-line fix cost N model compiles, rewrite N
+committed scripts as whole-file diffs, and turn CI red across the directory
+until someone re-ran every spec locally with a model.
 
-Either way, the failure must be *visible*: a script compiled against a
-different library reports as stale with a message naming the library, not the
-spec — the same lesson as `atr-unverified`, where overloading "no hash" would
-have made the runner claim the spec had changed when it had not.
+A library change does not mean the script is wrong. It means the script is
+*unproven against this library* — which is exactly `atr-unverified`. So:
+
+- A second header line, `// atr-lib-sha256:`, recorded alongside the spec hash.
+  Separate, not folded: a single combined hash cannot tell the runner whether
+  the spec or the library moved, and the error message has to name which.
+- On mismatch, **replay**. It costs nothing, involves no model, and is legal
+  under `--no-compile`.
+- On any completion that is not `KindScript`, restamp the library hash — the
+  same rule already used for `atr-unverified` at `behavior_run.go:179`.
+- Only a genuine signature break reaches the model, and only for the scripts
+  that actually broke. The message names the library and quotes the breakage:
+  *"compiled against a different `_shared.js` and no longer runs against the
+  current one (TypeError: login is not a function)"*.
+
+Two details this depends on. `Stamp` currently only strips a marker line
+(`store.go:133`) and must learn to rewrite the library hash with the hash of
+the library that actually ran. And `needsLiveApp` (`run_behavior.go:162`) calls
+`Fresh` independently of `loadOrCompile` — if freshness grows a library
+dimension in one place and not the other, a directory run decides "replay, no
+base URL needed" and then recompiles without one.
+
+The library hash must normalise like `SpecHash` does (`store.go:60`), or a
+comment-only edit invalidates a directory.
+
+Under `--no-compile` in CI, a restamp would write into the checkout. Print the
+change rather than writing it.
+
+## Failure classification
+
+The spec's first draft designed the compile half and the loading half and left
+this out; it is where a library actually touches ATR's load-bearing machinery.
+
+**A defect in the library is `KindConfig`.** Not repairable, not retryable, and
+never sent to the model — a person has to fix `_shared.js`. Classifying a
+library parse error as `KindScript` instead would be actively dangerous: see
+below.
+
+**The library must reach the triage prompt, not just the compile prompt.**
+`scriptAPIReference` is appended to both (`behavior_compile.go:236` and `:364`)
+and opens with *"Nothing else is available… Use only what is listed"* — so a
+repairing model looking at a script that calls `login()` is being told that
+call is invalid. Its rational repair is to inline it. Then `SaveDraft`
+overwrites the committed script, the replay passes because the library is now
+unused, `Stamp` fires, and the suite has silently lost its library with every
+hash valid. Injection scope is both prompts, and the "nothing else is
+available" sentence must be amended wherever a library exists.
+
+**Repair must never rewrite the library.** A model editing shared code can
+weaken twenty tests in one edit.
+
+## Values
+
+`LoadValues` is strictly per-spec (`values.go:66`). A library operation reading
+`values.get("username")` therefore requires every spec in the directory to
+define it — the duplication moved one layer down rather than removed. Worse,
+`--prune-values` scans only the compiled script (`references.go:67`), so a key
+read solely inside the library is reported unused on every run and deleted from
+the committed file, after which every test in the directory fails `KindConfig`.
+The exactness safety valve does not save it: the non-literal call sits in the
+library, the script's scan stays exact, and the wrong answer is delivered
+confidently.
+
+Decide one of:
+
+- **Library operations take inputs as parameters.** Only specs read values.
+  Simplest, keeps `values` a spec-level concept, and makes the prune scan
+  correct by construction. Recommended.
+- **A `_shared.properties` layer**, with a stated position in the existing
+  precedence order. More flexible, more machinery, and the prune scan must then
+  read the library too.
+
+Either way the prune scan must account for the library, or it is destructive.
 
 ## The trade-off, stated plainly
 
