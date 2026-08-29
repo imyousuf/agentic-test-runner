@@ -63,6 +63,43 @@ type Config struct {
 
 	// Update contains update configuration.
 	Update UpdateConfig `mapstructure:"update"`
+
+	// History contains execution-history configuration.
+	History HistoryConfig `mapstructure:"history"`
+
+	// Telemetry contains OpenTelemetry configuration.
+	Telemetry TelemetryConfig `mapstructure:"telemetry"`
+}
+
+// HistoryConfig holds the local execution history settings.
+type HistoryConfig struct {
+	// Enabled records every behaviour run in a local database. On by
+	// default: it is cheap, private, and inside the same trust boundary as
+	// the browser the user just drove.
+	Enabled bool `mapstructure:"enabled"`
+	// Path is the database file. Empty means ~/.atr/history.db.
+	Path string `mapstructure:"path"`
+	// KeepDays bounds how long a run is kept. A machine running a suite in a
+	// loop would otherwise grow a row per attempt for ever.
+	KeepDays int `mapstructure:"keep_days"`
+}
+
+// TelemetryConfig holds the OpenTelemetry settings.
+//
+// There is no endpoint here on purpose: OTEL_EXPORTER_OTLP_ENDPOINT is the
+// standard variable, so a laptop with no collector emits nothing and produces
+// no connection errors, and a CI job opts in with one line and no ATR-specific
+// knowledge.
+type TelemetryConfig struct {
+	// Enabled allows export when an endpoint is configured. On by default,
+	// and inert without one.
+	Enabled bool `mapstructure:"enabled"`
+	// ServiceName names ATR in the collector.
+	ServiceName string `mapstructure:"service_name"`
+	// ShutdownTimeout bounds the flush on exit. A replay takes nine seconds
+	// and exits; without an explicit flush a batch processor's schedule never
+	// fires and CI exports nothing.
+	ShutdownTimeout time.Duration `mapstructure:"shutdown_timeout"`
 }
 
 // GeminiConfig holds Gemini API configuration.
@@ -341,6 +378,16 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("models.opus", "claude-opus-5")
 
 	// Agent defaults
+	// Both sinks may be disabled, including at the same time. Requiring at
+	// least one would mean writing to disk after a user said not to, which is
+	// a small betrayal a developer tool does not recover from — and it buys
+	// nothing, since a local tool cannot phone home regardless.
+	v.SetDefault("history.enabled", true)
+	v.SetDefault("history.keep_days", 90)
+	v.SetDefault("telemetry.enabled", true)
+	v.SetDefault("telemetry.service_name", "atr")
+	v.SetDefault("telemetry.shutdown_timeout", "5s")
+
 	v.SetDefault("agent.max_iterations", 100)
 	v.SetDefault("agent.timeout", "5m")
 	v.SetDefault("agent.temperature", 0.3)
@@ -545,6 +592,26 @@ func (c *Config) GetCLITimeout() time.Duration {
 		return c.CLI.Timeout
 	}
 	return 5 * time.Minute
+}
+
+// HistoryPath is where the execution history lives.
+func (c *Config) HistoryPath() string {
+	if c.History.Path != "" {
+		return c.History.Path
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "history.db"
+	}
+	return filepath.Join(home, DefaultConfigDir, "history.db")
+}
+
+// HistoryKeep is how long a run is kept, zero meaning for ever.
+func (c *Config) HistoryKeep() time.Duration {
+	if c.History.KeepDays <= 0 {
+		return 0
+	}
+	return time.Duration(c.History.KeepDays) * 24 * time.Hour
 }
 
 // GetModelName returns the full model name based on the model tier.

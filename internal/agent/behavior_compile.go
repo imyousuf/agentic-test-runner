@@ -121,6 +121,12 @@ failure it raised, and the wrong call produces the wrong diagnosis:
   that removes the thing — the confirmation, the empty list, the new view —
   and then assert it is gone. An expectMissing on a page that has not
   finished rendering passes for the wrong reason.
+- EVERY STEP MUST BE ABLE TO FAIL. A step built only from atr.log, atr.exists
+  and other reads reports success whatever the application does, and a script
+  with no assertion anywhere is worse than no test because it is believed.
+  Both are refused before the script is accepted, so a compile that produces
+  one is wasted. If the spec does not say what must be true, assert the state
+  you actually observed the application reach.
 - Never assert on whole-page text when a selector will do.
   atr.text() with no selector returns everything on the page, so a short
   needle matches unrelated content and the test passes without testing

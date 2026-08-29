@@ -18,6 +18,7 @@ import (
 	"github.com/imyousuf/agentic-test-runner/internal/browser"
 	"github.com/imyousuf/agentic-test-runner/internal/config"
 	"github.com/imyousuf/agentic-test-runner/internal/executor"
+	"github.com/imyousuf/agentic-test-runner/internal/history"
 	"github.com/imyousuf/agentic-test-runner/internal/output"
 	"github.com/imyousuf/agentic-test-runner/internal/testscript"
 	"github.com/imyousuf/agentic-test-runner/pkg/llm"
@@ -39,6 +40,7 @@ var (
 	noCompileFlag   bool
 	noRepairFlag    bool
 	pruneValuesFlag bool
+	lintFlag        string
 	interpretFlag   bool
 	sandboxFlag     bool // opt-in to enable sandbox (default: disabled for compatibility)
 	viewportFlag    string
@@ -113,6 +115,8 @@ a CI job can retry rather than escalate.`,
 		"Replay only; never call the model. Fails if a script is missing or stale (use in CI)")
 	runCmd.Flags().BoolVar(&noRepairFlag, "no-repair", false,
 		"Diagnose a drifted script but do not rewrite it")
+	runCmd.Flags().StringVar(&lintFlag, "lint", string(agent.LintModeError),
+		"What to do about a compiled script that cannot fail: error, warn, off")
 	runCmd.Flags().BoolVar(&pruneValuesFlag, "prune-values", false,
 		"Remove inputs the compiled script no longer reads (reported, not removed, without this)")
 	runCmd.Flags().BoolVar(&interpretFlag, "interpret", false,
@@ -313,6 +317,15 @@ func runCommand(cmd *cobra.Command, args []string) error {
 
 // runBehaviorTest runs browser-based behavior tests.
 func runBehaviorTest(ctx context.Context, cfg *config.Config, cwd string) error {
+	// Checked here rather than left to default: an unrecognised value would
+	// otherwise behave as "error", so a typo in --lint=of would look like it
+	// disabled the check and quietly do the opposite.
+	switch agent.LintMode(lintFlag) {
+	case agent.LintModeError, agent.LintModeWarn, agent.LintModeOff:
+	default:
+		return exitWith(ExitInfra, fmt.Errorf("--lint must be error, warn or off, not %q", lintFlag))
+	}
+
 	// Collect test files
 	testFiles, err := collectTestFiles(behaviorFlag)
 	if err != nil {
@@ -413,24 +426,23 @@ func runBehaviorTest(ctx context.Context, cfg *config.Config, cwd string) error 
 		Verbose:       verbose,
 	})
 
-	// Run each test file
-	var failedTests []string
-	// sawTestFailure is true only when the application misbehaved. Everything
-	// else — a missing input, a browser that would not start, an unreachable
-	// model — is infrastructure, so a CI job can retry it rather than treat it
-	// as a regression. See exitCodeFor.
-	sawTestFailure := false
-	for i, testFile := range testFiles {
-		if len(testFiles) > 1 {
-			fmt.Printf("\n[%d/%d] %s\n", i+1, len(testFiles), filepath.Base(testFile))
-		}
+	recorder := openHistory(ctx, cfg)
+	defer closeHistory(ctx, recorder)
 
+	// runSpec executes one spec and fills in its run record. It reports
+	// whether the spec failed; *why* it failed lives in rec.Outcome, so the
+	// exit code and the recorded history are derived from the same decision
+	// and cannot drift apart.
+	//
+	// A closure rather than the loop body it used to be, because every early
+	// exit here — an unreadable file, a missing base URL, a tab that would
+	// not open — is a run that happened and used to leave no trace.
+	runSpec := func(testFile string, rec *history.Run) bool {
 		// Read test file content
 		content, err := os.ReadFile(testFile)
 		if err != nil {
 			fmt.Printf("✗ Failed to read test file: %v\n", err)
-			failedTests = append(failedTests, testFile)
-			continue
+			return infra(rec, "reading the spec: %v", err)
 		}
 
 		// A test's own properties file can supply its base URL, which is what
@@ -454,8 +466,8 @@ func runBehaviorTest(ctx context.Context, cfg *config.Config, cwd string) error 
 		if testBaseURL == "" && needsLiveApp(testFile, string(content)) {
 			fmt.Printf("✗ %s needs a base URL to drive the application: set base_url in %s, or pass --browser-url\n",
 				filepath.Base(testFile), filepath.Base(testscript.ValuesPath(testFile)))
-			failedTests = append(failedTests, testFile)
-			continue
+			return infra(rec, "no base URL: set base_url in %s, or pass --browser-url",
+				filepath.Base(testscript.ValuesPath(testFile)))
 		}
 
 		// When reusing a server, always open a new tab to isolate the test,
@@ -468,8 +480,7 @@ func runBehaviorTest(ctx context.Context, cfg *config.Config, cwd string) error 
 			}
 			if err := b.NewPage(ctx, tabURL); err != nil {
 				fmt.Printf("✗ Failed to open test tab: %v\n", err)
-				failedTests = append(failedTests, testFile)
-				continue
+				return infra(rec, "opening a test tab: %v", err)
 			}
 			// The tab's target id, not its index: closing a tab renumbers the
 			// ones after it, so an index captured now can name one of the
@@ -481,8 +492,7 @@ func runBehaviorTest(ctx context.Context, cfg *config.Config, cwd string) error 
 			// Not reusing server: navigate to base URL in a new tab
 			if err := b.NewPage(ctx, testBaseURL); err != nil {
 				fmt.Printf("✗ Failed to open page: %v\n", err)
-				failedTests = append(failedTests, testFile)
-				continue
+				return infra(rec, "opening a page: %v", err)
 			}
 		}
 
@@ -498,23 +508,23 @@ func runBehaviorTest(ctx context.Context, cfg *config.Config, cwd string) error 
 
 			if err != nil {
 				fmt.Printf("✗ Test execution failed: %v\n", err)
-				failedTests = append(failedTests, testFile)
-				continue
+				return infra(rec, "interpreting the spec: %v", err)
 			}
 
 			formatter := output.NewTextFormatter()
 			formatted, err := formatter.Format(result)
 			if err != nil {
 				fmt.Printf("✗ Failed to format output: %v\n", err)
-				failedTests = append(failedTests, testFile)
-				continue
+				return infra(rec, "formatting the result: %v", err)
 			}
 			fmt.Println(formatted)
 
 			if result.IsFailure() {
-				failedTests = append(failedTests, testFile)
+				rec.Outcome = history.OutcomeTestFailure
+				return true
 			}
-			continue
+			rec.Outcome = history.OutcomePassed
+			return false
 		}
 
 		// Compiled path: generate the script once, replay it for free after.
@@ -525,6 +535,7 @@ func runBehaviorTest(ctx context.Context, cfg *config.Config, cwd string) error 
 			SecretFiller:  behaviorSecretFiller(b, cfg),
 			Recompile:     recompileFlag,
 			NoCompile:     noCompileFlag,
+			Lint:          agent.LintMode(lintFlag),
 			NoRepair:      noRepairFlag,
 			ScriptTimeout: cfg.Agent.Timeout,
 			Reset: func(ctx context.Context) error {
@@ -552,20 +563,49 @@ func runBehaviorTest(ctx context.Context, cfg *config.Config, cwd string) error 
 
 		closeTestTab(b, reusingServer, testPageTarget)
 
+		recordOutcome(rec, outcome)
+
 		if err != nil {
 			fmt.Printf("✗ %v\n", err)
-			failedTests = append(failedTests, testFile)
-			continue
+			// The outcome carries what happened up to the point it stopped —
+			// a refused lint, a compile that never finished — and the error
+			// says why, so keep both.
+			rec.Outcome = history.OutcomeInfra
+			rec.Message = err.Error()
+			return true
 		}
 
 		reportUnusedValues(testFile)
 		printBehaviorOutcome(testFile, outcome)
-		if !outcome.Passed() {
+		return !outcome.Passed()
+	}
+
+	// Run each test file
+	var failedTests []string
+	// sawTestFailure is true only when the application misbehaved. Everything
+	// else — a missing input, a browser that would not start, an unreachable
+	// model — is infrastructure, so a CI job can retry it rather than treat it
+	// as a regression.
+	sawTestFailure := false
+
+	for i, testFile := range testFiles {
+		if len(testFiles) > 1 {
+			fmt.Printf("\n[%d/%d] %s\n", i+1, len(testFiles), filepath.Base(testFile))
+		}
+
+		rec := history.Run{ID: history.NewID(), StartedAt: time.Now()}
+		rec.Spec, rec.SpecPath = history.SpecIdentity(testFile)
+
+		failed := runSpec(testFile, &rec)
+
+		rec.FinishedAt = time.Now()
+		_ = recorder.Record(ctx, rec)
+
+		if failed {
 			failedTests = append(failedTests, testFile)
-			if outcome.Result != nil && outcome.Result.Failure != nil &&
-				outcome.Result.Failure.Kind.IsTestFailure() {
-				sawTestFailure = true
-			}
+		}
+		if rec.Outcome == history.OutcomeTestFailure {
+			sawTestFailure = true
 		}
 	}
 

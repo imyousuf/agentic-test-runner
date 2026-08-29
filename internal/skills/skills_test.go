@@ -76,6 +76,9 @@ func TestSkillsDocumentCurrentCapabilities(t *testing.T) {
 		{"the unverified marker", "atr-unverified"},
 		{"the config failure kind", "`config`"},
 		{"secrets that never enter the transcript", "fillSecret"},
+		{"the false-pass lint", "--lint"},
+		{"execution history", "atr history"},
+		{"telemetry export", "OTEL_EXPORTER_OTLP_ENDPOINT"},
 	}
 
 	files := skillFiles(t)
