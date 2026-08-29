@@ -1,6 +1,7 @@
 # Tech spec: execution history and telemetry
 
-Status: proposed
+Status: implemented on `feat/plugin-authoring-and-history`
+Where: internal/history/, internal/cli/history.go, internal/cli/run_history.go, internal/agent/behavior_run.go (attempts)
 Branch: `feat/plugin-authoring-and-history`
 
 ## Why

@@ -199,7 +199,7 @@ func TestAssertionFailureNeverReachesTheModel(t *testing.T) {
 	failing := `atr.step(1, "Check the heading", () => {
 		expect(atr.text("#heading")).toBe("Something the app does not say");
 	});`
-	if _, err := testscript.Save(specPath, sampleSpec, failing); err != nil {
+	if _, err := testscript.Save(specPath, sampleSpec, failing, ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -240,7 +240,7 @@ func TestDriftIsRepairedAndRerun(t *testing.T) {
 
 	stale := `atr.step(1, "Click sign in", () => { atr.click("#button-that-moved"); });
 atr.step(2, "Verify status", () => { expect(atr.text("#status")).toBe("signed in"); });`
-	if _, err := testscript.Save(specPath, sampleSpec, stale); err != nil {
+	if _, err := testscript.Save(specPath, sampleSpec, stale, ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -295,7 +295,7 @@ func TestAgentCanOverrideDriftIntoTestFailure(t *testing.T) {
 
 	stale := `atr.step(1, "Click sign in", () => { atr.click("#checkout-button"); });
 atr.step(2, "Verify status", () => { expect(atr.text("#status")).toBe("signed in"); });`
-	if _, err := testscript.Save(specPath, sampleSpec, stale); err != nil {
+	if _, err := testscript.Save(specPath, sampleSpec, stale, ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -327,6 +327,66 @@ atr.step(2, "Verify status", () => { expect(atr.text("#status")).toBe("signed in
 	if !strings.Contains(out.Result.Failure.Message, "checkout is missing") {
 		t.Errorf("the triage reason should be carried into the failure, got %q", out.Result.Failure.Message)
 	}
+
+	// The verdict has to reach the kind, not only the message. Everything
+	// downstream switches on Kind — the printed advice, the exit code, the
+	// recorded outcome — so an agent that has just concluded "the application
+	// is broken" must not leave behind a run that exits 2 and is excluded
+	// from the failure rate.
+	if out.Result.Failure.Kind != testscript.KindAssertion {
+		t.Errorf("kind = %q after a test_failure verdict, want %q",
+			out.Result.Failure.Kind, testscript.KindAssertion)
+	}
+	if !out.Result.Failure.Kind.IsTestFailure() {
+		t.Error("the run would exit 2 despite the agent finding the application at fault")
+	}
+	if len(out.Attempts) == 0 || out.Attempts[len(out.Attempts)-1].Kind != testscript.KindAssertion {
+		t.Error("the recorded attempt still carries the pre-triage classification")
+	}
+}
+
+// A regression genuinely presents as a timeout: the prompt teaches
+// wait-then-assert, so when a page stops reaching the state the spec names,
+// the wait fails first and the assertion is never reached. Observed
+// end-to-end — a checkout that stopped saying "Order placed" was reported as
+// "looks environmental rather than a real failure" and exited 2.
+func TestATimeoutTheAgentCallsRealBecomesATestFailure(t *testing.T) {
+	b, url := sharedRunBrowser(t)
+	specPath := writeSpec(t, sampleSpec)
+
+	// Waits for text the page never shows: a timeout, not an assertion.
+	waiting := `atr.step(1, "Wait for the confirmation", () => {
+	atr.waitForText("Order placed", {timeout: 300});
+	expect(atr.text("#status")).toBe("Order placed");
+});`
+	if _, err := testscript.Save(specPath, sampleSpec, waiting, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	client := &scriptedClient{replies: []string{
+		verdictBlock("test_failure", "the page never reaches the confirmed state"),
+	}}
+	a := newRunAgent(t, client)
+
+	out, err := a.RunBehavior(context.Background(), RunRequest{
+		SpecPath:      specPath,
+		Spec:          sampleSpec,
+		BaseURL:       url,
+		MaxRetries:    1,
+		ScriptTimeout: 30 * time.Second,
+		Reset:         func(ctx context.Context) error { return b.Navigate(ctx, url) },
+	})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	if out.Passed() {
+		t.Fatal("expected a failure")
+	}
+	if out.Result.Failure.Kind != testscript.KindAssertion {
+		t.Errorf("kind = %q, want %q — a regression that presents as a timeout must still turn a suite red",
+			out.Result.Failure.Kind, testscript.KindAssertion)
+	}
 }
 
 // A repair verdict with no code is not a repair, and must not be treated as
@@ -337,7 +397,7 @@ func TestRepairWithoutCodeIsUnresolved(t *testing.T) {
 
 	stale := `atr.step(1, "Click", () => { atr.click("#gone"); });
 atr.step(2, "Verify status", () => { expect(atr.text("#status")).toBe("signed in"); });`
-	if _, err := testscript.Save(specPath, sampleSpec, stale); err != nil {
+	if _, err := testscript.Save(specPath, sampleSpec, stale, ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -402,7 +462,7 @@ func TestChangedSpecForcesRecompile(t *testing.T) {
 	specPath := writeSpec(t, sampleSpec)
 
 	original := `atr.step(1, "Click sign in", () => { atr.click("#submit"); });`
-	if _, err := testscript.Save(specPath, sampleSpec, original); err != nil {
+	if _, err := testscript.Save(specPath, sampleSpec, original, ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -437,7 +497,7 @@ func TestReflowingSpecDoesNotRecompile(t *testing.T) {
 
 	src := `atr.step(1, "Click sign in", () => { atr.click("#submit"); });
 atr.step(2, "Verify status", () => { expect(atr.text("#status")).toBe("signed in"); });`
-	if _, err := testscript.Save(specPath, sampleSpec, src); err != nil {
+	if _, err := testscript.Save(specPath, sampleSpec, src, ""); err != nil {
 		t.Fatal(err)
 	}
 

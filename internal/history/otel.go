@@ -56,6 +56,10 @@ type TelemetryOptions struct {
 	// ShutdownTimeout bounds the flush on exit. An unreachable collector must
 	// delay a run's exit, never hang it.
 	ShutdownTimeout time.Duration
+	// OnError receives the SDK's own complaints — a refused connection, a
+	// rejected batch — so they read as one warning from ATR rather than as
+	// raw log lines in the middle of a test report.
+	OnError func(error)
 }
 
 // Configured reports whether an OTLP endpoint is set.
@@ -84,6 +88,8 @@ func NewTelemetry(ctx context.Context, opts TelemetryOptions) (*Telemetry, error
 	if err != nil {
 		return nil, err
 	}
+
+	routeSDKErrors(opts.OnError)
 
 	t := &Telemetry{shutdown: opts.ShutdownTimeout}
 

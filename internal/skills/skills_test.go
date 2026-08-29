@@ -79,6 +79,8 @@ func TestSkillsDocumentCurrentCapabilities(t *testing.T) {
 		{"the false-pass lint", "--lint"},
 		{"execution history", "atr history"},
 		{"telemetry export", "OTEL_EXPORTER_OTLP_ENDPOINT"},
+		{"the shared operations library", "_shared.js"},
+		{"the library freshness header", "atr-lib-sha256"},
 	}
 
 	files := skillFiles(t)

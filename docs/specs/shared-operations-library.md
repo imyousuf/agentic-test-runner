@@ -1,6 +1,7 @@
 # Tech spec: a shared operations library for compiled specs
 
-Status: proposed
+Status: implemented on `feat/plugin-authoring-and-history`
+Where: internal/testscript/library.go, store.go (atr-lib-sha256), references.go, internal/agent/behavior_compile.go
 Branch: `feat/plugin-authoring-and-history`
 
 ## Why

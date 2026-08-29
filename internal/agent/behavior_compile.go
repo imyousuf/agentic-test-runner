@@ -204,6 +204,29 @@ type CompileRequest struct {
 	// Progress receives a line per model iteration, so a long compile can be
 	// watched rather than waited out.
 	Progress func(string)
+	// Library is the shared operations file beside the spec, injected
+	// verbatim. A library the model cannot see is a shelf nobody reaches for:
+	// the agent re-derives login anyway and we have added a file.
+	Library string
+}
+
+// libraryNote renders the shared library for a prompt.
+//
+// Verbatim, not extracted signatures. A signature loses what the model most
+// needs, which is what the operation does and what state it leaves the page
+// in: login() has an empty signature, and its body is what says it ends on the
+// dashboard. The file is one bounded operations-only library, so its cost is
+// noise beside the snapshots a compile already carries.
+func libraryNote(library string) string {
+	if strings.TrimSpace(library) == "" {
+		return ""
+	}
+	return "\n\nA shared operations library is loaded into the same scope before your\n" +
+		"script runs, so every function it declares is already available to you.\n" +
+		"Call these rather than re-deriving what they do, and do not copy their\n" +
+		"bodies into the script. They amend the \"nothing else is available\" rule\n" +
+		"above: these are available too.\n\nDo NOT rewrite this file. Other tests in the same directory depend on it.\n\n" +
+		"```javascript\n" + strings.TrimSpace(library) + "\n```\n"
 }
 
 // CompileBehavior drives the browser through the spec once and returns the
@@ -253,7 +276,7 @@ selectors that actually worked. It has to run unattended with no model
 involved, so anything you worked out by looking at the page must be baked in —
 except the inputs, which go in the properties block.
 
-` + scriptAPIReference
+` + scriptAPIReference + libraryNote(req.Library)
 
 	user := fmt.Sprintf(`Application base URL: %s
 
@@ -321,6 +344,14 @@ type TriageRequest struct {
 	ValueKeys []string
 	// Progress receives a line per model iteration, as for a compile.
 	Progress func(string)
+	// Library is the shared operations file, injected for the same reason it
+	// is injected into a compile — and more urgently. The API reference tells
+	// the model that nothing outside it is available, so a repairing model
+	// reading a script that calls login() is being told that call is invalid.
+	// Its rational repair is to inline it, after which the replay passes, the
+	// script is stamped, and the suite has silently lost its library with
+	// every hash still valid.
+	Library string
 }
 
 // TriageFailure examines a failed run and either repairs the script or
@@ -381,7 +412,7 @@ value is missing, the answer is "test_failure" only if the application is
 broken; otherwise say so in the reason and answer "unresolved" so a person
 can decide what the value should be.
 
-` + scriptAPIReference
+` + scriptAPIReference + libraryNote(req.Library)
 
 	failureJSON, _ := json.MarshalIndent(req.Failure, "", "  ")
 	user := fmt.Sprintf(`Application base URL: %s

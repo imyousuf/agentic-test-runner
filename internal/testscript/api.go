@@ -188,6 +188,9 @@ func (r *runtime) jsLog(msg string) {
 // jsFail is how a script reports that the application is wrong. It is an
 // assertion failure, which means it will never be "repaired" away.
 func (r *runtime) jsFail(msg string) {
+	if r.callerIsLibrary() {
+		r.refuseFromLibrary("atr.fail")
+	}
 	r.throw(KindAssertion, "", "%s", msg)
 }
 

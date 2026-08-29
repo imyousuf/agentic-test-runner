@@ -44,6 +44,14 @@ type Options struct {
 	// Values supplies test inputs to the values global. Nil means the script
 	// can only use defaults it supplies inline.
 	Values *Values
+	// Library is a shared operations file evaluated into the same VM before
+	// the script, so its top-level functions are in scope.
+	Library string
+	// LibraryName identifies the library in stack traces, and is what the
+	// assertion boundary matches on. Kept separate from Source rather than
+	// concatenated, because concatenating would destroy line numbers and
+	// make every stack frame point at the wrong file.
+	LibraryName string
 	// Log receives atr.log output.
 	Log func(string)
 }
@@ -74,12 +82,13 @@ type runtime struct {
 	browser *browser.Browser
 	opts    Options
 
-	values    *Values
-	steps     []behavior.StepResult
-	logs      []string
-	curStep   int
-	curDesc   string
-	curTarget string
+	values      *Values
+	libraryName string
+	steps       []behavior.StepResult
+	logs        []string
+	curStep     int
+	curDesc     string
+	curTarget   string
 }
 
 // Run executes a compiled behavior script.
@@ -112,6 +121,12 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 		opts:    opts,
 		values:  opts.Values,
 	}
+	if opts.Library != "" {
+		r.libraryName = opts.LibraryName
+		if r.libraryName == "" {
+			r.libraryName = LibraryName
+		}
+	}
 
 	// goja does not preempt: a script that loops forever, or a host call that
 	// blocks, would otherwise ignore the deadline entirely. Interrupt is the
@@ -128,6 +143,22 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 
 	if err := r.install(); err != nil {
 		return nil, fmt.Errorf("installing script API: %w", err)
+	}
+
+	// A defect in the library is KindConfig: not repairable, not retryable,
+	// never sent to the model. A person has to fix the shared file, and
+	// classifying it as a script fault instead would point the repair loop at
+	// code that twenty tests depend on.
+	if opts.Library != "" {
+		if err := ValidateLibrary(opts.Library, r.libraryName); err != nil {
+			return &Result{Failure: &Failure{Kind: KindConfig, Message: err.Error()}}, nil
+		}
+		if err := r.evaluateLibrary(opts.Library, r.libraryName); err != nil {
+			return &Result{Failure: &Failure{
+				Kind:    KindConfig,
+				Message: fmt.Sprintf("%s failed to load: %v", r.libraryName, err),
+			}}, nil
+		}
 	}
 
 	program, err := goja.Compile(opts.Name, opts.Source, false)

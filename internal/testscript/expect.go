@@ -72,6 +72,13 @@ func asRegExp(vm *goja.Runtime, v goja.Value) (*goja.Object, bool) {
 // game to fix automatically.
 func (r *runtime) installExpect() error {
 	expect := func(call goja.FunctionCall) goja.Value {
+		// Operations may be shared; assertions may not. Enforced at the call
+		// rather than asked for in a prompt, because the person who writes
+		// _shared.js never reads the prompt.
+		if r.callerIsLibrary() {
+			r.refuseFromLibrary("expect")
+		}
+
 		actual := call.Argument(0)
 		obj := r.vm.NewObject()
 

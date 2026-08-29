@@ -151,6 +151,51 @@ value — the compiler emits `atr.fillSecret`, which fetches and types inside on
 call so the value never enters the script, the transcript, or a later repair
 prompt.
 
+## Rule 10: share operations, never assertions
+
+A `_shared.js` beside your specs is loaded into the same scope before every
+script in that directory, so its top-level functions are simply in scope:
+
+```js
+// tests/e2e/_shared.js
+function signIn(username) {
+  atr.navigate("/login");
+  atr.fill("#username", username);
+  atr.fillSecret("#password", {ref: "app_password"});
+  atr.click("#submit");
+  atr.waitFor("#dashboard");     // ends on the dashboard
+}
+```
+
+The compiler is shown this file verbatim, so it calls `signIn()` instead of
+rediscovering eight steps — which is the real saving. Duplication is the
+obvious cost of not having it; **compile time is the larger one**, and every
+rediscovery is a fresh chance to get it subtly different.
+
+Three rules, and the first is enforced rather than requested:
+
+- **Operations only.** `expect` and `atr.fail` refuse to run from the library.
+  Once a test's assertions live in shared code you can no longer read the test
+  and know what it checks, and one edit can weaken every test in the directory.
+- **Declarations only.** No code at the top level: everything there runs before
+  step 1 of every spec beside it. No `atr.step` or `atr.setup` either — steps
+  belong to a spec, and a library that declares them renumbers all of them.
+- **Take inputs as parameters.** `values` is per-spec, so a library that reads
+  `values.get("username")` needs every spec in the directory to define it.
+
+A defect in the library is `config`: never repaired, never retried, never sent
+to the model. A person fixes shared code.
+
+Editing the library does **not** force a recompile. Scripts carry a second
+header, `// atr-lib-sha256:`, and a change to it means the script is *unproven*
+against the new library, not wrong — so it replays and the header catches up.
+Only a genuine signature break reaches the model, and only for the specs that
+actually broke.
+
+The honest trade-off: this is Page Object Model, and it carries POM's bargain.
+You keep "read the script, see exactly what it asserts". You lose "read the
+script, see exactly how it got there".
+
 ---
 
 ## Notes for the compiler

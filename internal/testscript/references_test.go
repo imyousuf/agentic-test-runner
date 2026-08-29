@@ -49,7 +49,7 @@ func specWithValues(t *testing.T, script, properties string) string {
 	if err := os.WriteFile(specPath, []byte(spec), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Save(specPath, spec, script); err != nil {
+	if _, err := Save(specPath, spec, script, ""); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(ValuesPath(specPath), []byte(properties), 0o644); err != nil {
