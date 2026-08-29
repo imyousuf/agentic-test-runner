@@ -1,0 +1,41 @@
+Test: <one sentence naming the behaviour, not the mechanics>
+
+Why this matters:
+<One or two lines. What breaks for a user if this stops working? A reviewer
+reads this to decide whether the assertions below are the right ones. Delete
+this section only if the answer is genuinely obvious from the title.>
+
+Prerequisites:
+- <state the application must already be in, e.g. "a signed-in account">
+- <data that must exist, e.g. "at least one saved draft">
+
+Setup:
+- <Anything this test must create or reset before it runs. A compile drives
+  this spec more than once, so a destructive test needs a fixture it can
+  rebuild. Delete this section if the test changes nothing.>
+
+Steps:
+1. <One action. Name the control the way the page names it.>
+2. <Say what state ends a step that submits or navigates — "click Save and
+   wait for the confirmation toast", not "click Save and wait 2 seconds".>
+3. <...>
+
+Expected Results:
+- <What would be DIFFERENT if the feature were broken. Name the element, not
+  the page: "the status badge on the row reads Archived", not "the page
+  contains Archived".>
+- <Assert absence too where something should go away: "the Send button is no
+  longer on the page".>
+- <Count relative to before, never absolutely: "one more row than before",
+  not "there are 4 rows".>
+
+Notes for the compiler:
+- <Everything the model cannot learn by looking at one page. App-specific
+  recipes, which of several similar controls is the right one, state carried
+  between pages, and anything you discovered by watching a compile fail.>
+- <Every note should be a trap that produced a wrong result. If you cannot say
+  what goes wrong without it, leave it out — notes are prompt, and padding
+  costs compile iterations.>
+- <Do not restate what the compiler already knows: fixtures go in setup, wait
+  for state instead of sleeping, assert presence with expectExists, prefer
+  selectors to page text. Those are already in its instructions.>
