@@ -88,7 +88,7 @@ Waiting:
   atr.waitForText(text, {timeout: ms})
 
 Reading:
-  atr.exists(target) -> boolean, NEVER throws
+  atr.exists(target) -> boolean, for BRANCHING only (short wait, never a test failure)
   atr.text(selector) atr.html() atr.url() atr.title()
   atr.snapshot() atr.eval(js)
   atr.consoleErrors() atr.failedRequests()
@@ -100,6 +100,8 @@ Assertions — these are how you state what the application must do:
   expect(v).toBe(x) .toEqual(x) .toContain(x) .toMatch(re)
   expect(v).toBeTruthy() .toBeFalsy()
   expect(v).toBeGreaterThan(n) .toBeLessThan(n) .toHaveLength(n)
+  atr.expectExists(target, {timeout: ms})    the target must be on the page
+  atr.expectMissing(target, {timeout: ms})   the target must not be on the page
 
 CHOOSING THE RIGHT CALL MATTERS. A failing run is triaged by which kind of
 failure it raised, and the wrong call produces the wrong diagnosis:
@@ -109,8 +111,20 @@ failure it raised, and the wrong call produces the wrong diagnosis:
   automatically. Use them for everything the spec actually asserts.
 - A missing target from click/fill/etc. means "the page changed shape" and
   invites an automatic repair. Never use a bare click to assert that
-  something exists — write expect(atr.exists("...")).toBeTruthy() instead, or
-  a real page change will be quietly repaired away instead of reported.
+  something exists — write atr.expectExists("...") instead, or a real page
+  change will be quietly repaired away instead of reported.
+- Assert presence with atr.expectExists and absence with atr.expectMissing,
+  never with expect(atr.exists(...)). exists() waits only long enough to
+  branch on optional furniture; asserting through it reports a page that was
+  still rendering as a broken application.
+- Absence is only meaningful once the page has settled. Wait for the state
+  that removes the thing — the confirmation, the empty list, the new view —
+  and then assert it is gone. An expectMissing on a page that has not
+  finished rendering passes for the wrong reason.
+- Never assert on whole-page text when a selector will do.
+  atr.text() with no selector returns everything on the page, so a short
+  needle matches unrelated content and the test passes without testing
+  anything. Read the element you mean.
 - atr.waitFor is a timeout, treated as possibly transient and retried. Use it
   to wait for things, never to assert them.
 - atr.exists() returns a boolean. Use it to branch on optional page furniture

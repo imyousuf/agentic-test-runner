@@ -283,10 +283,24 @@ func (b *Browser) handleRecorderEvent(payload gson.JSON) (any, error) {
 	return nil, nil
 }
 
+// expectedResultsPrompt is what a recording leaves in place of assertions.
+//
+// It used to emit "Steps completed successfully / No console errors", which is
+// an assertion that cannot fail: the recorded clicks all succeed by
+// construction, so the compiled test goes green whatever the application does.
+// A recording knows what was clicked and cannot know what it proved, so the
+// honest output is a question rather than an answer somebody will trust.
+const expectedResultsPrompt = `
+Expected Results:
+- TODO: say what must be true at the end for this test to have passed.
+  A recorded click sequence cannot tell you that. Name the element, text or
+  count that proves the feature worked, and delete this line.
+`
+
 // FormatTestFile converts recorded events into a .test.txt behavior test file.
 func FormatTestFile(events []RecordedEvent, testName string) string {
 	if len(events) == 0 {
-		return fmt.Sprintf("Test: %s\n\nSteps:\n1. (no interactions recorded)\n\nExpected Results:\n- Steps completed successfully\n", testName)
+		return fmt.Sprintf("Test: %s\n\nSteps:\n1. (no interactions recorded)\n%s", testName, expectedResultsPrompt)
 	}
 
 	// Pre-process: merge sequential fills on same selector, merge click+navigate
@@ -300,7 +314,7 @@ func FormatTestFile(events []RecordedEvent, testName string) string {
 		fmt.Fprintf(&sb, "%d. %s\n", i+1, step)
 	}
 
-	sb.WriteString("\nExpected Results:\n- Steps completed successfully\n- No console errors\n")
+	sb.WriteString(expectedResultsPrompt)
 	return sb.String()
 }
 

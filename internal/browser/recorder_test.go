@@ -408,3 +408,39 @@ func TestRecordWithURL(t *testing.T) {
 	}
 	testBrowser.ClearRecording()
 }
+
+// A recording is the recommended way to bootstrap a spec, so whatever it emits
+// is what most specs will say. It used to end every file with "Steps completed
+// successfully / No console errors" — an assertion that cannot fail, since the
+// recorded clicks all succeed by construction. The compiled test then goes
+// green whatever the application does, which is the worst outcome ATR can
+// produce: nobody investigates a passing test.
+func TestGeneratedSpecAsksForRealExpectations(t *testing.T) {
+	forbidden := []string{"Steps completed successfully", "No console errors"}
+
+	cases := map[string][]RecordedEvent{
+		"with events": {
+			{Sequence: 1, Type: "navigate", Value: "https://example.com", Timestamp: time.Now()},
+			{Sequence: 2, Type: "click", Selector: "#go", TagName: "button", InnerText: "Go", Timestamp: time.Now()},
+		},
+		"with no events": nil,
+	}
+
+	for name, events := range cases {
+		t.Run(name, func(t *testing.T) {
+			out := FormatTestFile(events, "Some Test")
+
+			for _, phrase := range forbidden {
+				if strings.Contains(out, phrase) {
+					t.Errorf("a recording still emits the assertion that cannot fail: %q\n%s", phrase, out)
+				}
+			}
+			if !strings.Contains(out, "Expected Results:") {
+				t.Errorf("the section is gone entirely, so nobody is asked:\n%s", out)
+			}
+			if !strings.Contains(out, "TODO") {
+				t.Errorf("nothing marks the expectations as unwritten:\n%s", out)
+			}
+		})
+	}
+}
