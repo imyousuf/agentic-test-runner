@@ -243,9 +243,9 @@ atr.base                                    // the base URL
 **Waiting** — `atr.waitFor(target, {timeout, visible})`,
 `atr.waitForText(text, {timeout})`
 
-**Reading** — `atr.exists(target)` (returns a boolean, never throws),
-`atr.text`, `atr.html`, `atr.url`, `atr.title`, `atr.snapshot`, `atr.eval`,
-`atr.consoleErrors`, `atr.failedRequests`
+**Reading** — `atr.exists(target)` (a boolean, for **branching only** — see
+below), `atr.text`, `atr.html`, `atr.url`, `atr.title`, `atr.snapshot`,
+`atr.eval`, `atr.consoleErrors`, `atr.failedRequests`
 
 **Pages** — `atr.newPage`, `atr.listPages`, `atr.selectPage`, `atr.closePage`
 
@@ -254,11 +254,36 @@ atr.base                                    // the base URL
 expanded at read time.
 
 **Assertions** — `expect(v).toBe/.toEqual/.toContain/.toMatch/.toBeTruthy/`
-`.toBeFalsy/.toBeGreaterThan/.toBeLessThan/.toHaveLength`
+`.toBeFalsy/.toBeGreaterThan/.toBeLessThan/.toHaveLength`, plus
+`atr.expectExists(target, {timeout})` and `atr.expectMissing(target, {timeout})`
+
+Use `expectExists`/`expectMissing` rather than asserting through `atr.exists`.
+`exists()` waits 500ms, because its job is branching on optional furniture
+(a cookie banner, an A/B variant); `expect` reports a miss as an assertion
+failure, which is terminal — never retried, never triaged, exit 1. Composing
+the two gives a presence assertion a 500ms budget and calls a page that renders
+in 800ms a broken application. In the absence direction it is worse: an element
+that has not appeared yet reads as gone, and the test passes for the wrong
+reason.
+
+`exists()` also throws rather than answering when the browser could not tell —
+a dead renderer, a closed page, a selector that does not parse. A fault is not
+an answer.
+
+Absence is only meaningful once the page has settled, so wait for the state
+that removes the thing and then assert it is gone.
 
 `toMatch` takes a JavaScript regular expression or a string pattern. A regular
 expression is matched by JavaScript, so its flags apply and JavaScript-only
 syntax such as lookahead works — Go's own regexp engine has neither.
+
+A regression often presents as a `timeout` rather than an assertion, because a
+script waits for the state the spec names before asserting it: when the
+application stops reaching that state, the wait fails first. Those are retried
+and then triaged, and an agent verdict of "the application is at fault"
+reclassifies the failure as an assertion, so the run exits `1`. Under
+`--no-compile` there is no triage and the same break exits `2` — correct, since
+CI was told not to spend a model call deciding.
 
 Three calls look similar and are not:
 
@@ -271,6 +296,156 @@ Three calls look similar and are not:
 `atr.retry` only re-runs *transient* failures, so wrapping an `expect()` in it
 achieves nothing — wait for the state first, then assert once.
 
+## A script that cannot fail is refused
+
+A false pass — a green test that tested nothing — is the worst outcome this
+design can produce, because nobody investigates one. Before a script is
+accepted, ATR checks statically that it *can* fail:
+
+| finding | meaning | severity |
+| --- | --- | --- |
+| `no-assertions` | the script asserts nothing at all | blocking |
+| `step-cannot-fail` | a step built only from reads — `atr.log`, `atr.exists` | blocking |
+| `weak-text-match` | a short substring matched against `atr.text()` with no selector | warning |
+| `fixed-sleep` | `atr.sleep` outside `atr.retry` | warning |
+
+A blocking finding stops the run and exits `2`: nothing was learned about the
+application, so it is not a test failure. The compiled draft is still written,
+because throwing away the expensive part of the work helps nobody.
+
+**The findings never reach the model.** Handing them to the repair loop would
+ask it to invent what the application must do, and a model asked that invents
+something that passes — the false pass arriving through another door. Only a
+person knows what the test was for, so the fix is to say it in the spec's
+Expected Results and recompile.
+
+`--lint=warn` reports without refusing, for a suite adopting the check with
+scripts already committed. `--lint=off` skips it.
+
+## Shared operations: `_shared.js`
+
+A `_shared.js` beside the specs is evaluated into the same VM before the
+script, so its top-level functions are in scope. The compile and triage prompts
+are shown the file **verbatim**, which is the point: a library the model cannot
+see is a shelf nobody reaches for, and the agent re-derives login anyway.
+
+```javascript
+// tests/e2e/_shared.js
+function signIn(username) {
+  atr.navigate("/login");
+  atr.fill("#username", username);
+  atr.fillSecret("#password", {ref: "app_password"});
+  atr.click("#submit");
+  atr.waitFor("#dashboard");
+}
+```
+
+Duplication is the obvious cost of not having this. **Compile time is the
+larger one**: if signing in is eight steps the agent has to discover from
+scratch, every compile pays for them again, in iterations, tokens and
+wall-clock — and every rediscovery is a chance to get it subtly different.
+
+Three rules:
+
+- **Operations, never assertions.** `expect` and `atr.fail` refuse to run from
+  the library, enforced rather than requested — the person who writes
+  `_shared.js` never reads the compile prompt. What this cannot catch is
+  assertion semantics smuggled in as a bare `throw` or a `waitFor` timeout, so
+  the guarantee is exactly this and no more.
+- **Declarations only.** Everything at the top level runs before step 1 of
+  every spec in the directory. `atr.step` and `atr.setup` are refused outright:
+  steps belong to a spec, and a library that declares them renumbers all of
+  them, differently.
+- **Inputs as parameters.** `values` is per-spec, so a library that reads
+  `values.get("username")` requires every spec beside it to define the key.
+
+A defect in the library is a `config` failure: not repairable, not retryable,
+never sent to the model. Classifying it as a script fault would point the
+repair loop at code that every test in the directory depends on. For the same
+reason the triage prompt says not to rewrite the file.
+
+### Editing the library does not force a recompile
+
+A compiled script carries a second header:
+
+```javascript
+// atr-spec-sha256: 9f2c…
+// atr-lib-sha256:  4ab1…
+```
+
+Separate, not folded together: one hash could not say which of the two moved,
+and the two call for different actions and different amounts of money.
+
+A library change does not mean the script is wrong. It means the script is
+*unproven* against the current library — so it **replays**, and on any
+completion that is not a script fault the header is updated to the library that
+actually ran. Recompiling instead would make a one-line fix to `signIn()` cost
+a model compile per spec in the directory, rewrite every committed script as a
+whole-file diff, and turn CI red until somebody re-ran them all locally — for a
+change whose whole purpose was to fix them.
+
+Only a genuine signature break reaches the model, and only for the specs that
+actually broke.
+
+Under `--no-compile` the update is reported rather than written, so CI does not
+leave a dirty working tree.
+
+`--prune-values` scans the library as well as the script. A key read only
+inside `_shared.js` would otherwise be reported unused on every run and then
+deleted, after which every test in the directory fails with a missing input.
+
+**The trade-off, stated plainly:** this is Page Object Model, and it carries
+POM's bargain. You keep "read the compiled script and see exactly what it
+asserts". You lose "read it and see exactly how it got there".
+
+## What was run, over time
+
+Every run is recorded in `~/.atr/history.db`, including the ones that never
+reached the application — an unreadable spec, no base URL, a stale script under
+`--no-compile`. Those are exactly the runs a pass rate has to exclude to mean
+anything, and each of them used to leave no trace at all.
+
+```bash
+atr history                                    # per spec, over 30 days
+atr history --spec tests/login.test.txt --runs
+atr history --since 7d --json
+```
+
+A run is recorded as **attempts**, because a run that failed, retried and
+passed is green everywhere else — and the failed attempt is the only evidence
+that anything was wrong.
+
+The views (`runs`, `attempts`, `compiles`) are a stable contract and the tables
+are not, so anything the command will not tell you is one query away:
+
+```bash
+sqlite3 ~/.atr/history.db "SELECT spec, outcome, count(*) FROM runs GROUP BY 1,2"
+```
+
+Set `OTEL_EXPORTER_OTLP_ENDPOINT` and the same runs export as traces, metrics
+and logs — which is how a CI run's history survives its container. With no
+endpoint set, nothing is emitted and no error is logged. Metrics carry only
+bounded dimensions; a failure message would be one time series per distinct
+message. Duration is dimensioned by compiled-versus-replayed, because a
+four-minute compile and a nine-second replay in one bucket destroy the
+percentile for both.
+
+```yaml
+history:
+  enabled: true      # local database, on by default
+  keep_days: 90
+telemetry:
+  enabled: true      # inert unless an endpoint is configured
+```
+
+Both may be disabled, including at once.
+
+**What is never recorded:** ATR does not lift a resolved value into a field of
+its own — not a column, not a span attribute, not a log attribute. A value can
+appear inside a failure message, because the message quotes the application and
+the spec's own expectations back at you before ATR sees it; whether messages
+leave the machine is governed by whether you export the logs signal.
+
 ## Flags
 
 | Flag | Effect |
@@ -280,6 +455,8 @@ achieves nothing — wait for the state first, then assert once.
 | `--no-compile` | Replay only, never call the model. Fails if a script is missing or stale |
 | `--no-repair` | Diagnose drift but leave the script alone |
 | `--interpret` | Skip compilation; the agent drives every step, as before |
+| `--prune-values` | Remove inputs neither the script nor the library reads |
+| `--lint <mode>` | `error` (default), `warn`, or `off` for the cannot-fail check |
 
 **Use `--no-compile` in CI.** It guarantees no model calls, no cost surprises,
 and no repair that nobody reviewed — a drifted script becomes a visible
@@ -295,7 +472,7 @@ The exit code tells a CI job which kind of red it is:
 |------|---------|
 | `0` | Everything passed |
 | `1` | The application is broken — an assertion did not hold |
-| `2` | The run could not decide — a missing input, a stale or absent script under `--no-compile`, a browser that would not start, an unreachable model |
+| `2` | The run could not decide — a missing input, a stale or absent script under `--no-compile`, a script that cannot fail, a browser that would not start, an unreachable model |
 
 `1` means the application misbehaved and nothing else, so a red build has one
 meaning; `2` is worth retrying rather than escalating. If one spec fails an

@@ -39,6 +39,7 @@ func openHistory(ctx context.Context, cfg *config.Config) *history.Multi {
 		tel, err := history.NewTelemetry(ctx, history.TelemetryOptions{
 			ServiceName:     cfg.Telemetry.ServiceName,
 			ShutdownTimeout: cfg.Telemetry.ShutdownTimeout,
+			OnError:         m.OnError,
 		})
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: not exporting telemetry: %v\n", err)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetrichttp"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
@@ -26,6 +27,19 @@ func telemetryResource(ctx context.Context, service string) (*resource.Resource,
 		return nil, fmt.Errorf("describing this process to the collector: %w", err)
 	}
 	return res, nil
+}
+
+// routeSDKErrors sends the SDK's own complaints through the caller's handler.
+//
+// Without this, a collector that is down produces raw log lines on stderr in
+// the middle of a test report — the SDK's global handler writes there
+// directly. A misconfigured endpoint should read as one warning from ATR, not
+// as output from a library the user never chose to talk to.
+func routeSDKErrors(report func(error)) {
+	if report == nil {
+		return
+	}
+	otel.SetErrorHandler(otel.ErrorHandlerFunc(report))
 }
 
 func (t *Telemetry) startTraces(ctx context.Context, res *resource.Resource) error {

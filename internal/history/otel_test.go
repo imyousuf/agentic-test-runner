@@ -199,7 +199,7 @@ func TestNoMetricDimensionCarriesAMessage(t *testing.T) {
 		for _, m := range scope.Metrics {
 			for _, attrs := range attributeSets(m) {
 				for _, kv := range attrs {
-					if strings.Contains(kv.Value.Emit(), sentinel) {
+					if strings.Contains(kv.Value.String(), sentinel) {
 						t.Errorf("%s carries a message in dimension %s", m.Name, kv.Key)
 					}
 				}
@@ -211,7 +211,7 @@ func TestNoMetricDimensionCarriesAMessage(t *testing.T) {
 	// correlated by span id.
 	for _, s := range h.spans.GetSpans() {
 		for _, kv := range s.Attributes {
-			if strings.Contains(kv.Value.Emit(), sentinel) {
+			if strings.Contains(kv.Value.String(), sentinel) {
 				t.Errorf("span %s carries a message in attribute %s", s.Name, kv.Key)
 			}
 		}

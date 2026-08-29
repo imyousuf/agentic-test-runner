@@ -1,6 +1,7 @@
 # Tech spec: an authoring skill for behaviour specs
 
-Status: proposed
+Status: implemented on `feat/plugin-authoring-and-history`
+Where: skills/atr-author/, internal/skills/skills_test.go, internal/browser/recorder.go, internal/testscript/api.go (expectExists/expectMissing)
 Branch: `feat/plugin-authoring-and-history`
 
 ## Why

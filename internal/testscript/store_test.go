@@ -31,7 +31,7 @@ func TestSaveAndLoadRoundTrip(t *testing.T) {
 	specPath := filepath.Join(t.TempDir(), "login.test.txt")
 	src := `atr.step(1, "Click", () => { atr.click("#go"); });`
 
-	path, err := Save(specPath, spec, src)
+	path, err := Save(specPath, spec, src, "")
 	if err != nil {
 		t.Fatalf("Save: %v", err)
 	}
@@ -58,7 +58,7 @@ func TestSaveAndLoadRoundTrip(t *testing.T) {
 // requirements that no longer exist.
 func TestEditedSpecIsNotFresh(t *testing.T) {
 	specPath := filepath.Join(t.TempDir(), "login.test.txt")
-	if _, err := Save(specPath, spec, "atr.step(1, \"x\", () => {});"); err != nil {
+	if _, err := Save(specPath, spec, "atr.step(1, \"x\", () => {});", ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -75,7 +75,7 @@ func TestEditedSpecIsNotFresh(t *testing.T) {
 // cost money.
 func TestWhitespaceOnlyEditsStayFresh(t *testing.T) {
 	specPath := filepath.Join(t.TempDir(), "login.test.txt")
-	if _, err := Save(specPath, spec, "atr.step(1, \"x\", () => {});"); err != nil {
+	if _, err := Save(specPath, spec, "atr.step(1, \"x\", () => {});", ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -113,7 +113,7 @@ func TestResavingDoesNotAccumulateHeaders(t *testing.T) {
 	specPath := filepath.Join(t.TempDir(), "login.test.txt")
 	src := `atr.step(1, "Click", () => { atr.click("#go"); });`
 
-	if _, err := Save(specPath, spec, src); err != nil {
+	if _, err := Save(specPath, spec, src, ""); err != nil {
 		t.Fatal(err)
 	}
 	first, err := Load(specPath)
@@ -123,7 +123,7 @@ func TestResavingDoesNotAccumulateHeaders(t *testing.T) {
 
 	// Feed the stored form — header and all — straight back in, which is what
 	// happens when a model echoes the file it was shown.
-	if _, err := Save(specPath, spec, first.Source); err != nil {
+	if _, err := Save(specPath, spec, first.Source, ""); err != nil {
 		t.Fatal(err)
 	}
 	second, err := Load(specPath)

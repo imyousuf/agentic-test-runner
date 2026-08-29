@@ -197,7 +197,20 @@ func (a *Agent) RunBehavior(ctx context.Context, req RunRequest) (*RunOutcome, e
 
 	outcome := &RunOutcome{}
 
-	source, err := a.loadOrCompile(ctx, req, outcome, logf)
+	// A shared library beside the specs, if there is one. Loaded once: it is
+	// the same file for every attempt, and re-reading it mid-run would mean a
+	// retry could execute different code from the attempt it is retrying.
+	library, err := testscript.LoadLibrary(req.SpecPath)
+	if err != nil {
+		return outcome, err
+	}
+	libHash := library.Hash()
+
+	// What the committed script says it was compiled against, read before the
+	// compile that may rewrite it.
+	stored, _ := testscript.Load(req.SpecPath)
+
+	source, err := a.loadOrCompile(ctx, req, outcome, library, logf)
 	if err != nil {
 		return outcome, err
 	}
@@ -230,6 +243,8 @@ func (a *Agent) RunBehavior(ctx context.Context, req RunRequest) (*RunOutcome, e
 			SecretFiller: req.SecretFiller,
 			Values:       values,
 			Log:          req.Log,
+			Library:      librarySource(library),
+			LibraryName:  testscript.LibraryName,
 		})
 		if err != nil {
 			return outcome, fmt.Errorf("running compiled script: %w", err)
@@ -248,7 +263,13 @@ func (a *Agent) RunBehavior(ctx context.Context, req RunRequest) (*RunOutcome, e
 		// is broken, so every run while the app stayed broken would pay for a
 		// full model compile.
 		if result.Failure == nil || result.Failure.Kind != testscript.KindScript {
-			if err := testscript.Stamp(req.SpecPath); err != nil {
+			// Under --no-compile the checkout is CI's, not ours: a restamp
+			// there would leave the working tree dirty on a machine nobody is
+			// watching. Say what would have been written instead.
+			if req.NoCompile && stored != nil && stored.LibraryChanged(libHash) {
+				logf("%s ran against a changed %s; re-run without --no-compile to restamp it",
+					testscript.ScriptPath(req.SpecPath), testscript.LibraryName)
+			} else if err := testscript.Stamp(req.SpecPath, libHash); err != nil {
 				return outcome, err
 			}
 		}
@@ -301,8 +322,24 @@ func (a *Agent) RunBehavior(ctx context.Context, req RunRequest) (*RunOutcome, e
 		switch triage.Verdict {
 		case VerdictTestFailure:
 			logf("agent verdict: the application is at fault — %s", triage.Reason)
-			// Preserve the runtime's failure but record why it is real.
+
+			// The verdict has to reach the kind, not only the message.
+			// Everything downstream switches on Kind: the printed advice, the
+			// exit code, and the recorded outcome. Leaving a timeout labelled
+			// as a timeout meant an agent that had just concluded "the
+			// application is broken" produced a run that said "looks
+			// environmental", exited 2, and was excluded from the failure
+			// rate — which is the number this classification exists to
+			// produce.
+			//
+			// A regression genuinely does present this way. The prompt teaches
+			// wait-then-assert, so when a page stops reaching the state the
+			// spec names, the *wait* fails first and the assertion is never
+			// reached.
+			result.Failure.Kind = testscript.KindAssertion
 			result.Failure.Message = fmt.Sprintf("%s (triage: %s)", result.Failure.Message, triage.Reason)
+			outcome.Attempts[len(outcome.Attempts)-1].Kind = testscript.KindAssertion
+			outcome.Attempts[len(outcome.Attempts)-1].Message = result.Failure.Message
 			return outcome, nil
 
 		case VerdictRepaired:
@@ -314,7 +351,7 @@ func (a *Agent) RunBehavior(ctx context.Context, req RunRequest) (*RunOutcome, e
 			afterRepair = true
 			outcome.Repaired = true
 			source = triage.Script
-			path, err := testscript.SaveDraft(req.SpecPath, req.Spec, source)
+			path, err := testscript.SaveDraft(req.SpecPath, req.Spec, source, libHash)
 			if err != nil {
 				return outcome, err
 			}
@@ -357,6 +394,14 @@ func (a *Agent) RunBehavior(ctx context.Context, req RunRequest) (*RunOutcome, e
 			return outcome, nil
 		}
 	}
+}
+
+// librarySource is the library's text, or "" when there is none.
+func librarySource(l *testscript.Library) string {
+	if l == nil {
+		return ""
+	}
+	return l.Source
 }
 
 // attemptOf summarises one execution for the run record.
@@ -417,7 +462,7 @@ func lintScript(req RunRequest, source string, outcome *RunOutcome, logf func(st
 
 // loadOrCompile returns the script to run, compiling it when the stored one
 // is missing or no longer matches the spec.
-func (a *Agent) loadOrCompile(ctx context.Context, req RunRequest, outcome *RunOutcome, logf func(string, ...any)) (string, error) {
+func (a *Agent) loadOrCompile(ctx context.Context, req RunRequest, outcome *RunOutcome, library *testscript.Library, logf func(string, ...any)) (string, error) {
 	stored, err := testscript.Load(req.SpecPath)
 	if err != nil {
 		return "", err
@@ -433,6 +478,15 @@ func (a *Agent) loadOrCompile(ctx context.Context, req RunRequest, outcome *RunO
 	case !stored.Fresh(req.Spec):
 		logf("the spec changed since the script was compiled; recompiling")
 	default:
+		// A changed library is a replay, not a recompile. The script calls
+		// the library by name and loads it at run time, so editing login()
+		// to follow a UI change is this feature's primary use — and paying a
+		// model compile per spec for it would make the cheap fix the
+		// expensive one.
+		if stored.LibraryChanged(library.Hash()) {
+			logf("%s changed since this script was compiled; replaying against it",
+				testscript.LibraryName)
+		}
 		outcome.ScriptPath = stored.Path
 		return stored.Source, nil
 	}
@@ -454,13 +508,14 @@ func (a *Agent) loadOrCompile(ctx context.Context, req RunRequest, outcome *RunO
 		SpecPath: req.SpecPath,
 		Spec:     req.Spec,
 		BaseURL:  req.BaseURL,
+		Library:  librarySource(library),
 	})
 	outcome.CompileDuration = time.Since(compileStart)
 	if err != nil {
 		return "", fmt.Errorf("compiling %s: %w", req.SpecPath, err)
 	}
 
-	path, err := testscript.SaveDraft(req.SpecPath, req.Spec, source)
+	path, err := testscript.SaveDraft(req.SpecPath, req.Spec, source, library.Hash())
 	if err != nil {
 		return "", err
 	}
@@ -491,7 +546,9 @@ func (a *Agent) triage(ctx context.Context, req RunRequest, source string, failu
 	outcome.ModelCalls++
 
 	keys, _ := testscript.LoadValues(req.SpecPath)
+	library, _ := testscript.LoadLibrary(req.SpecPath)
 	return a.TriageFailure(ctx, TriageRequest{
+		Library:   librarySource(library),
 		SpecPath:  req.SpecPath,
 		Spec:      req.Spec,
 		Script:    source,

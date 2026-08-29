@@ -107,8 +107,24 @@ flags. Values support `$(command)` and `${VAR}`, expanded when read — so a
 committed properties file **executes**, on every machine including CI.
 
 `--prune-values` removes keys the script no longer reads. It reports without
-removing unless you pass it, and says nothing at all when the script builds a
-key at run time, because then no scan can be sure.
+removing unless you pass it, scans the shared library as well as the script,
+and says nothing at all when either builds a key at run time, because then no
+scan can be sure.
+
+## Shared operations
+
+A `_shared.js` beside the specs is loaded into every script in that directory.
+It holds **operations** — sign in, create the thing — never assertions:
+`expect` and `atr.fail` are refused from it.
+
+Editing it does not force a recompile. Scripts carry a second header,
+`// atr-lib-sha256:`, and a mismatch means the script is unproven against the
+current library rather than stale — so it replays and the header is updated
+when it passes. Under `--no-compile` the update is reported instead of written,
+so CI does not leave a dirty tree.
+
+A defect in the library is a `config` failure: never repaired, never retried,
+never sent to the model.
 
 ## Exit codes
 
@@ -138,6 +154,14 @@ Printed with every failure, and each asks for a different response:
 An assertion failure never reaches the model. That is deliberate: asking a
 model to confirm a regression spends the tokens compilation exists to save, and
 risks it "fixing" the assertion that caught the regression.
+
+**A regression often presents as a `timeout`.** A compiled script waits for the
+state the spec names before asserting it, so when the application stops
+reaching that state the *wait* fails first. Those are retried, then triaged —
+and if the agent finds the application at fault, the failure is reclassified as
+`assertion` and the run exits 1. Under `--no-compile` there is no triage, so
+the same break exits 2: correct, because CI was told not to spend a model call
+deciding, and 2 means "a person should look".
 
 ## Debugging a failure
 

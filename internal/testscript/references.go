@@ -58,12 +58,20 @@ func ReferencedKeys(script string) (keys []string, exact bool) {
 }
 
 // UnreferencedKeys returns the keys defined in a spec's committed properties
-// file that its compiled script does not read.
+// file that neither its compiled script nor the shared library beside it
+// reads.
 //
 // Deliberately reads that one file rather than the merged view: Values.Keys()
 // folds in the gitignored override and every ATR_VALUE_* variable, so a
 // committed default would look unused merely because CI set the same key in
 // the environment.
+//
+// The library has to be scanned too, and this is not a nicety. A key read only
+// inside _shared.js would otherwise be reported unused on every run and then
+// deleted from the committed file, after which every test in the directory
+// fails with a missing input. The exactness valve does not save it either: the
+// non-literal call sits in the library, the script's own scan stays exact, and
+// the wrong answer is delivered confidently.
 func UnreferencedKeys(specPath string) ([]string, error) {
 	stored, err := Load(specPath)
 	if err != nil || stored == nil {
@@ -74,6 +82,18 @@ func UnreferencedKeys(specPath string) ([]string, error) {
 	if !exact {
 		// The script builds a key at run time; nothing can be said safely.
 		return nil, nil
+	}
+
+	library, err := LoadLibrary(specPath)
+	if err != nil {
+		return nil, err
+	}
+	if library != nil {
+		fromLibrary, libExact := ReferencedKeys(library.Source)
+		if !libExact {
+			return nil, nil
+		}
+		referenced = append(referenced, fromLibrary...)
 	}
 
 	defined, err := committedValues(specPath)

@@ -24,7 +24,7 @@ func TestADraftIsNotFreshUntilItHasRun(t *testing.T) {
 	const spec = "Test: sample\n\nSteps:\n1. Do the thing\n"
 	specPath := writeSpec(t, spec)
 
-	if _, err := SaveDraft(specPath, spec, "atr.step(1, 'x', () => {});"); err != nil {
+	if _, err := SaveDraft(specPath, spec, "atr.step(1, 'x', () => {});", ""); err != nil {
 		t.Fatalf("SaveDraft: %v", err)
 	}
 
@@ -42,7 +42,7 @@ func TestADraftIsNotFreshUntilItHasRun(t *testing.T) {
 		t.Error("a draft has no spec hash, so it cannot be told apart from a hand-written script")
 	}
 
-	if err := Stamp(specPath); err != nil {
+	if err := Stamp(specPath, ""); err != nil {
 		t.Fatalf("Stamp: %v", err)
 	}
 	stored, err = Load(specPath)
@@ -63,7 +63,7 @@ func TestHandWrittenAndUnverifiedAreDifferentStates(t *testing.T) {
 	const spec = "Test: sample\n\nSteps:\n1. Do the thing\n"
 	specPath := writeSpec(t, spec)
 
-	if _, err := SaveDraft(specPath, spec, "atr.step(1, 'x', () => {});"); err != nil {
+	if _, err := SaveDraft(specPath, spec, "atr.step(1, 'x', () => {});", ""); err != nil {
 		t.Fatal(err)
 	}
 	body, err := os.ReadFile(ScriptPath(specPath))
@@ -80,11 +80,11 @@ func TestStampIsIdempotent(t *testing.T) {
 	const spec = "Test: sample\n\nSteps:\n1. Do the thing\n"
 	specPath := writeSpec(t, spec)
 
-	if _, err := Save(specPath, spec, "atr.step(1, 'x', () => {});"); err != nil {
+	if _, err := Save(specPath, spec, "atr.step(1, 'x', () => {});", ""); err != nil {
 		t.Fatal(err)
 	}
 	for i := 0; i < 2; i++ {
-		if err := Stamp(specPath); err != nil {
+		if err := Stamp(specPath, ""); err != nil {
 			t.Fatalf("Stamp %d: %v", i, err)
 		}
 	}
@@ -103,7 +103,7 @@ func TestWritesAreAtomic(t *testing.T) {
 	const spec = "Test: sample\n\nSteps:\n1. Do the thing\n"
 	specPath := writeSpec(t, spec)
 
-	if _, err := Save(specPath, spec, "atr.step(1, 'x', () => {});"); err != nil {
+	if _, err := Save(specPath, spec, "atr.step(1, 'x', () => {});", ""); err != nil {
 		t.Fatal(err)
 	}
 

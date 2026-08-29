@@ -84,7 +84,8 @@ Run browser-based behavior tests using AI-driven automation.
 | `--no-compile` | Replay only; never call the model. Fails if a script is missing or stale (use in CI) |
 | `--recompile` | Regenerate the compiled script even if it matches the spec |
 | `--no-repair` | Diagnose a drifted script but do not rewrite it |
-| `--prune-values` | Remove inputs the compiled script no longer reads |
+| `--prune-values` | Remove inputs neither the compiled script nor `_shared.js` reads |
+| `--lint <mode>` | What to do about a script that cannot fail: `error` (default), `warn`, `off` |
 | `--interpret` | Skip compilation and let the agent drive every step (slower, costs tokens per run) |
 | `--viewport <WxH>` | Viewport size, e.g., `1920x1080` |
 | `--cdp-endpoint <url>` | Connect to existing browser via CDP |
@@ -743,13 +744,77 @@ update:
 |------|---------|
 | `0` | Everything passed |
 | `1` | The thing under test is broken — a failed command, or a behaviour test whose assertion did not hold |
-| `2` | The run could not decide — a missing input, a stale or absent compiled script under `--no-compile`, a browser that would not start, an unreachable model |
+| `2` | The run could not decide — a missing input, a stale or absent compiled script under `--no-compile`, a compiled script that cannot fail, a browser that would not start, an unreachable model |
 
 `1` means the application misbehaved and nothing else, so a red build has a
 single meaning. Everything that says nothing about the application is `2`,
 which a CI job can retry rather than escalate. When one spec fails an assertion
 and another hits an infrastructure problem, the run exits `1`: a real
 regression is never masked by a flaky neighbour.
+
+---
+
+## atr history
+
+Report on behaviour test runs recorded locally in `~/.atr/history.db`.
+
+```bash
+atr history                                     # per spec, over the last 30 days
+atr history --spec tests/login.test.txt --runs  # individual runs for one spec
+atr history --since 7d --json
+```
+
+#### Flags
+
+| Flag | Description |
+|------|-------------|
+| `--spec <path>` | Only this spec, named the way `atr history` lists it (repository-relative) |
+| `--since <window>` | `90m`, `24h`, `30d` (default `30d`) |
+| `--runs` | List individual runs rather than a per-spec summary |
+| `--limit <n>` | How many runs `--runs` lists (default 20) |
+| `--json` | Emit JSON |
+
+The summary separates three things a general-purpose reporter folds together:
+
+| column | meaning |
+|--------|---------|
+| `FAIL` | the application misbehaved — the only thing that exits `1` |
+| `INFRA` | the run never reached the application, so it is excluded from the true failure rate |
+| `FLAKE` | the run passed, but only after a retry — green in every other report |
+| `REPAIRS` | how often the script was rewritten. A spec repaired repeatedly means the application's DOM is churning, not that the test is flaky |
+| `REPLAY` | median duration of runs with no model in the loop. Those are deterministic, so a rising number means the *application* got slower |
+
+The database is plain SQLite and the views (`runs`, `attempts`, `compiles`) are
+a stable contract, so anything this command will not tell you is one query
+away:
+
+```bash
+sqlite3 ~/.atr/history.db "SELECT spec, outcome, count(*) FROM runs GROUP BY 1,2"
+```
+
+Set `OTEL_EXPORTER_OTLP_ENDPOINT` and the same runs export as OpenTelemetry
+traces, metrics and logs — which is how a CI run's history survives the
+container being torn down. With no endpoint set, nothing is emitted and no
+error is logged.
+
+Configure in `~/.atr/config.yaml`; both sinks may be disabled, including at
+once:
+
+```yaml
+history:
+  enabled: true
+  path: ""            # default ~/.atr/history.db
+  keep_days: 90
+telemetry:
+  enabled: true       # inert unless an endpoint is configured
+  service_name: atr
+  shutdown_timeout: 5s
+```
+
+ATR never records a resolved value in a field of its own. A value can appear
+inside a failure message, because the message quotes the application and the
+spec's own expectations back at you; whether messages leave the machine is
+governed by whether you export the logs signal.
 
 ---
 
@@ -867,4 +932,6 @@ after, so a passing run costs no model calls. See
 | `--recompile` | Regenerate the script even if it matches the spec |
 | `--no-compile` | Replay only, never call the model. Fails if a script is missing or stale — use in CI |
 | `--no-repair` | Diagnose drift but leave the script alone |
+| `--prune-values` | Remove inputs neither the script nor `_shared.js` reads |
+| `--lint <mode>` | `error` (default), `warn`, `off` for the cannot-fail check |
 | `--interpret` | Skip compilation; the agent drives every step |
