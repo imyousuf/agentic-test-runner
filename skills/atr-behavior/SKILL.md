@@ -1,226 +1,166 @@
 ---
 name: atr-behavior
-description: Run behavior tests, run browser tests, execute .test.txt files, run e2e tests with ATR, natural language browser testing, AI browser tests, behavior-driven browser testing, or run browser-based behavior tests using ATR with natural language test specifications.
+description: Run behavior tests, run browser tests, execute .test.txt files, run e2e tests with ATR, replay compiled browser tests, natural language browser testing, or triage a failing ATR behaviour test. For writing or recording a new spec, use atr-author instead.
 ---
 
-# ATR Behavior Testing Skill
+# Running ATR behaviour tests
 
-This skill enables running browser-based behavior tests using ATR's AI-driven automation. Write tests in natural language in `.test.txt` files and let the AI execute them.
+Runs browser tests written as natural-language `.test.txt` specs. A spec is
+compiled **once** into a sibling `.test.js` and afterwards replays with no
+model in the loop — seconds, and no tokens. The agent comes back only to
+diagnose a failure.
 
-## Overview
+> **Writing a spec is a different job.** Load **`atr-author`** for that: which
+> assertions are worth writing, what belongs in the notes section, and how to
+> avoid a test that passes without testing anything.
 
-Unlike traditional browser testing that requires precise selectors and step-by-step code, ATR uses an AI agent to:
-1. Read natural language test specifications
-2. Interpret what actions to perform
-3. Execute using browser automation
-4. Analyze failures and provide recommendations
+## Basic usage
 
-## Basic Usage
-
-### Run Single Test
 ```bash
-atr run --behavior tests/login.test.txt
-```
-
-### Run Directory of Tests
-```bash
-atr run --behavior tests/e2e/
-```
-
-All `.test.txt` files in the directory are executed.
-
-### With Base URL
-```bash
+atr run --behavior tests/login.test.txt              # compile if needed, then replay
+atr run --behavior tests/e2e/                        # every .test.txt in the directory
 atr run --behavior tests/e2e/ --browser-url http://localhost:3000
 ```
 
-The base URL is used for relative navigation paths.
-
-## Command Options
+## Flags
 
 | Flag | Description | Default |
 |------|-------------|---------|
 | `--behavior <path>` | Test file or directory | (required) |
-| `--browser-url <url>` | Base URL for tests | from config |
-| `--headless` | Run browser headless | false |
+| `--browser-url <url>` | Base URL for the application | from config or `base_url` |
+| `--headless` | Run the browser headless | false |
 | `--viewport <WxH>` | Viewport size | 1920x1080 |
-| `--cdp-endpoint <url>` | Connect to existing browser | - |
+| `--cdp-endpoint <url>` | Connect to an existing browser | - |
 | `--no-compile` | Replay only; never call the model. Fails loudly if the script is missing or stale | false |
 | `--recompile` | Regenerate the script even if it matches the spec | false |
 | `--no-repair` | Diagnose a drifted script but do not rewrite it | false |
 | `--prune-values` | Remove inputs the script no longer reads | false |
-| `--interpret` | Skip compilation and let the agent drive every step | false |
+| `--interpret` | Skip compilation; let the agent drive every step | false |
+| `-v, --verbose` | Show the script's own `atr.log()` output | false |
 
-## Specs compile, and then replay without a model
+## Cost: know which mode you are in
 
-A spec compiles once to a sibling `.js` file and afterwards replays with no
-model in the loop — seconds, and no tokens. The agent returns only to diagnose
-a failure.
+**Use `--no-compile` whenever cost must be predictable — always in CI.** It
+replays, or it fails and says why. It never calls the model.
+
+Without it, any of these silently turns a 9-second step into a multi-minute
+model run: the spec was edited, the script is missing, the script has never
+completed a run, or a failure invites a repair.
 
 ```bash
-atr run --behavior tests/login.test.txt              # compiles if needed, then replays
-atr run --behavior tests/login.test.txt --no-compile # replay only; for CI
-atr run --behavior tests/login.test.txt --recompile  # force a fresh compile
+atr run --behavior tests/ --no-compile   # CI: replay or fail
+atr run --behavior tests/login.test.txt  # local: compile if needed
 ```
 
-**Use `--no-compile` whenever you want certainty about cost.** It never calls
-the model: it replays, or it fails and says why. Without it, a spec edit or an
-unverified script triggers a compile, which drives the whole application and
-takes minutes.
+Each run prints how it was serviced (`compiled →`, `repaired →`) and how many
+model calls it cost. A replay costing more than zero is worth investigating.
 
-The compiled script is committed and carries a hash of the spec. Edit the spec
-and the next run recompiles; reflow whitespace and it does not. A script that
-has never completed a run is marked `// atr-unverified` and is recompiled
-rather than trusted.
+## Freshness
 
-Test inputs live beside the spec in `login.test.properties` (committed), which
-you may edit; `login.test.override.properties` (gitignored) wins over it, and
-`ATR_VALUE_*` environment variables win over both.
+The compiled script is **committed** and carries a hash of the spec:
+
+```js
+// atr-spec-sha256: 9f2c…
+```
+
+Edit the spec and the next run recompiles. Reflow whitespace and it does not —
+the hash is over normalised text, so `sha256sum` on the raw file will never
+match it. A script that has never completed a run carries
+`// atr-unverified` and is recompiled rather than trusted. Deleting the hash
+line marks a script hand-written and off-limits to the compiler.
 
 A compile drives the spec **more than once** — once to learn the application,
-then again to verify what it wrote. A destructive spec needs a fixture it can
-rebuild, which is what `atr.setup("description", () => { ... })` is for: it runs
-before the steps on every execution, is not counted as a step, and a failure in
-it is reported as the fixture failing rather than the application misbehaving.
+then again to verify what it wrote — so a destructive spec needs a rebuildable
+fixture. That is what `atr.setup(...)` in the compiled script is for, and what
+a `Setup:` section in the spec compiles to.
 
-See `docs/behavior-compilation.md` for the full picture.
+## Test inputs
 
-## Test File Format
+Beside the spec:
 
-Test files use `.test.txt` extension with natural language:
+- `login.test.properties` — committed, written by the compiler, editable.
+- `login.test.override.properties` — gitignored, wins over it.
+- `ATR_VALUE_*` environment variables — win over both.
 
-```
-Test: <test name>
+`base_url` here is what lets one spec run against localhost and staging with no
+flags. Values support `$(command)` and `${VAR}`, expanded when read — so a
+committed properties file **executes**, on every machine including CI.
 
-Prerequisites:
-- <prerequisite 1>
-- <prerequisite 2>
+`--prune-values` removes keys the script no longer reads. It reports without
+removing unless you pass it, and says nothing at all when the script builds a
+key at run time, because then no scan can be sure.
 
-Steps:
-1. <step 1>
-2. <step 2>
-3. <step 3>
+## Exit codes
 
-Expected Results:
-- <expected result 1>
-- <expected result 2>
-```
+| code | meaning | what CI should do |
+|---|---|---|
+| 0 | every test passed | — |
+| 1 | **the application is broken** — an assertion failed | escalate |
+| 2 | nothing was learned about the application — missing input, browser or model failure, stale script under `--no-compile` | retry, or fix the environment |
 
-### Example: Login Test
+1 means the app is wrong and nothing else. That separation is the point: a red
+build that can also mean "the CI box was slow" is a red build people learn to
+ignore.
 
-```
-Test: User can log in with valid credentials
+## Failure kinds
 
-Prerequisites:
-- Application running at http://localhost:3000
-- Test user exists: test@example.com / password123
+Printed with every failure, and each asks for a different response:
 
-Steps:
-1. Navigate to /login
-2. Enter "test@example.com" in the email field
-3. Enter "password123" in the password field
-4. Click the "Sign In" button
-5. Wait for the dashboard to load
+| kind | means | ATR's response |
+|---|---|---|
+| `assertion` | the application did not do what the spec requires | stops immediately, **no model call** — never auto-repaired |
+| `not_found` | a target is gone; the UI moved | agent repairs the script, budget of 1 |
+| `timeout` | slow, flaky, or hanging | retried, then triaged |
+| `environment` | browser, daemon or network | retried, then reported as infrastructure |
+| `config` | an input this checkout does not define | reported; **never** repaired or retried — a person must supply it |
+| `script` | the generated JavaScript is wrong | repaired |
 
-Expected Results:
-- URL contains /dashboard
-- Welcome message is visible
-- No console errors
-```
+An assertion failure never reaches the model. That is deliberate: asking a
+model to confirm a regression spends the tokens compilation exists to save, and
+risks it "fixing" the assertion that caught the regression.
 
-## Running Tests
+## Debugging a failure
 
-### Non-Headless Mode (for debugging)
 ```bash
-atr run --behavior tests/login.test.txt --headless=false
+atr run --behavior tests/x.test.txt --headless=false   # watch it
+atr run --behavior tests/x.test.txt -v                 # show atr.log output
+atr run --behavior tests/x.test.txt --no-repair        # diagnose without rewriting
 ```
 
-### Mobile Viewport
+Then read the compiled `.test.js` — it is ordinary, readable JavaScript, and
+the failure names the step and the target.
+
+## Signing in by hand
+
+When authentication cannot be scripted (SSO, a hardware token, a one-time
+code):
+
 ```bash
-atr run --behavior tests/mobile.test.txt --viewport 375x667
+atr browser start          # start the daemon; a window opens
+# sign in by hand
+atr run --behavior tests/  # reuses the running daemon's browser automatically
 ```
 
-### Connect to Existing Browser
-
-1. Launch Chrome with remote debugging:
-   ```bash
-   google-chrome --remote-debugging-port=9222
-   ```
-
-2. Connect ATR:
-   ```bash
-   atr run --behavior tests/debug.test.txt --cdp-endpoint ws://localhost:9222
-   ```
-
-## How It Works
-
-The AI agent has access to these browser tools:
-
-**Navigation:** navigate, back, forward, reload, new-page, select-page, close-page, wait-for
-
-**Input:** click, fill, hover, press-key, drag, upload-file, handle-dialog
-
-**Inspection:** snapshot, screenshot, evaluate JavaScript, console logs, network requests
-
-## Element Resolution
-
-The AI finds elements using multiple strategies:
-1. Accessible name: `[aria-label="Sign In"]`
-2. Test ID: `[data-testid="submit-btn"]`
-3. Name attribute: `[name="email"]`
-4. Placeholder: `[placeholder="Enter email"]`
-5. Text content: Element containing "Sign In"
-6. CSS selector: `#submit`
-
-**Best Practice:** Use `aria-label` or `data-testid` for reliable element targeting.
-
-## Failure Analysis
-
-When tests fail, ATR captures:
-- Screenshot of current state
-- Console logs
-- Network requests
-- DOM snapshot
-
-The AI provides root cause analysis and recommendations.
-
-## Integration with atr-browser
-
-For manual browser exploration before writing tests:
-
-1. Start browser server: `atr browser start`
-2. Navigate and explore: `atr browser navigate <url>`
-3. Inspect elements: `atr browser snapshot`
-4. Write test file based on exploration
-5. Run test: `atr run --behavior test.test.txt`
-6. Stop browser: `atr browser stop`
-
-## Best Practices
-
-1. **Clear descriptions:** "Click the 'Add to Cart' button in the product details section"
-2. **Add waits:** "Wait for 'Loading...' to disappear"
-3. **Use test IDs:** Reference `data-testid` attributes when available
-4. **One flow per test:** Keep tests focused on single user journeys
-5. **Document prerequisites:** Clearly state required application state
+No flag is needed — `atr run` picks up a running daemon's CDP endpoint on its
+own and opens an isolated tab for the test, leaving your tabs alone.
 
 ## Configuration
 
-Configure in `~/.atr/config.yaml`:
+`~/.atr/config.yaml`:
 
 ```yaml
 behavior:
   base_url: "http://localhost:3000"
-
   browser:
     executable: "auto"
     headless: true
-    viewport:
-      width: 1920
-      height: 1080
+    viewport: { width: 1920, height: 1080 }
     page_timeout: "30s"
     action_timeout: "10s"
 ```
 
-## Additional Resources
+## Related
 
-For detailed test file format and examples, see `references/test-file-format.md`.
+- **`atr-author`** — writing, recording and reviewing specs.
+- **`atr-browser`** — driving the browser by hand.
+- `docs/behavior-compilation.md` — the full picture.

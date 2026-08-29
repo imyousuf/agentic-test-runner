@@ -1,11 +1,20 @@
 {
   "name": "atr-skills",
-  "description": "Claude Code skills and MCP server for ATR. Skills: atr-browser (browser control + recording), atr-computer (cross-platform desktop control with multi-monitor support and an in-process LLM agent for natural-language tasks: 'atr computer ask'), atr-analyze (run tests with AI analysis - keeps context clean), atr-behavior (natural language browser tests). MCP Server: 50+ tools (30 browser + 22 desktop including computer_ask) via 'atr mcp serve'.",
-  "version": "1.9.0",
+  "description": "Claude Code skills and MCP server for ATR. Skills: atr-author (writing behaviour specs that compile and do not produce false passes), atr-behavior (running and triaging compiled behaviour tests), atr-browser (browser control + recording), atr-computer (cross-platform desktop control with multi-monitor support and an in-process LLM agent for natural-language tasks: 'atr computer ask'), atr-analyze (run tests with AI analysis - keeps context clean). MCP Server: 50+ tools (30 browser + 22 desktop including computer_ask) via 'atr mcp serve'.",
+  "version": "1.10.0",
   "author": {
     "name": "imyousuf"
   },
   "repository": "https://github.com/imyousuf/agentic-test-runner",
-  "keywords": ["browser", "testing", "automation", "atr", "mcp", "mcp-server", "browser-automation", "screenshots"],
+  "keywords": [
+    "browser",
+    "testing",
+    "automation",
+    "atr",
+    "mcp",
+    "mcp-server",
+    "browser-automation",
+    "screenshots"
+  ],
   "skills": "./skills/"
 }
