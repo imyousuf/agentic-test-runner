@@ -218,8 +218,11 @@ contains things that make a compiled test *lie*:
 - [ ] The spec still describes what the script does.
 - [ ] The properties file has no key the script does not read, and no secret.
 
-`atr run` runs the mechanical half of this list for you and refuses to accept a
-script that cannot fail. The judgement half is yours.
+`atr run` runs the mechanical half of this list for you — a step that can only
+succeed, a script with no assertion at all, a short substring matched against
+the whole page, a fixed sleep — and refuses to accept a script that cannot
+fail. `--lint=warn` reports without refusing while a suite adopts the check.
+The judgement half is yours.
 
 ---
 

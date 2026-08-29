@@ -90,6 +90,7 @@ func init() {
 	rootCmd.AddCommand(newBrowserCmd())
 	rootCmd.AddCommand(newComputerCmd())
 	rootCmd.AddCommand(newTestCmd())
+	rootCmd.AddCommand(newHistoryCmd())
 	rootCmd.AddCommand(newUpdateCmd())
 	rootCmd.AddCommand(newTestCmdEnvCmd())
 	rootCmd.AddCommand(newMCPCmd())

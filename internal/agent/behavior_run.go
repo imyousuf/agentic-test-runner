@@ -2,12 +2,32 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/imyousuf/agentic-test-runner/internal/testscript"
 )
+
+// LintMode says what to do about a compiled script that cannot fail.
+type LintMode string
+
+const (
+	// LintModeError refuses to run a script with a blocking finding. The
+	// default: a test that reports success unconditionally is worse than no
+	// test, because it is believed.
+	LintModeError LintMode = "error"
+	// LintModeWarn reports and runs anyway, for a suite adopting the check
+	// with scripts already committed.
+	LintModeWarn LintMode = "warn"
+	// LintModeOff skips the check.
+	LintModeOff LintMode = "off"
+)
+
+// ErrScriptCannotFail reports a compiled script that would pass whatever the
+// application did.
+var ErrScriptCannotFail = errors.New("the compiled script cannot fail")
 
 // Default bounds on the recovery loop. Both are small on purpose: a test that
 // needs three repairs to pass is telling you something that more repairs will
@@ -56,6 +76,10 @@ type RunRequest struct {
 	// ScriptTimeout bounds a single script run.
 	ScriptTimeout time.Duration
 
+	// Lint says what to do about a script that cannot fail. Empty means
+	// LintModeError.
+	Lint LintMode
+
 	// Log receives the script's own atr.log() output. Separate from Progress
 	// because the two have different audiences: this is the test author's
 	// tracing, shown on request.
@@ -68,10 +92,40 @@ type RunRequest struct {
 	Progress func(string)
 }
 
+// Attempt is one execution of the script within a run.
+//
+// A run is not one execution. It retries a transient failure, repairs a
+// drifted script and runs it again, and only the last of those survived into
+// RunOutcome.Result — which meant a run that failed, retried and passed
+// recorded a pass and nothing else. The evidence that a spec is flaky is
+// exactly the attempts that were being overwritten.
+type Attempt struct {
+	// Number is 1 for the first execution.
+	Number int `json:"number"`
+	// Started is when this execution began.
+	Started time.Time `json:"started"`
+	// Duration is how long the script ran.
+	Duration time.Duration `json:"duration"`
+	// Passed is whether this execution passed.
+	Passed bool `json:"passed"`
+	// Kind classifies the failure, empty when the attempt passed.
+	Kind testscript.FailureKind `json:"kind,omitempty"`
+	// Message is the failure's message, empty when the attempt passed.
+	Message string `json:"message,omitempty"`
+	// AfterRepair is true when the script was rewritten before this attempt,
+	// which is what separates "the same test flaked" from "a different script
+	// ran".
+	AfterRepair bool `json:"after_repair,omitempty"`
+}
+
 // RunOutcome is the result of the whole compile/run/repair cycle.
 type RunOutcome struct {
 	// Result is the last script run. Nil if the script never ran.
 	Result *testscript.Result
+	// Attempts records every execution, in order. Result is the last of
+	// these; the earlier ones are the only record that a passing run had to
+	// try more than once.
+	Attempts []Attempt
 	// ScriptPath is where the compiled script lives.
 	ScriptPath string
 	// ValuesPath is where the test's inputs live, if any were written.
@@ -80,11 +134,20 @@ type RunOutcome struct {
 	Compiled bool
 	// Repaired is true if the script was rewritten during this run.
 	Repaired bool
+	// CompileDuration is how long the compile took, zero when the script was
+	// replayed. Timed because it is the most expensive thing ATR does and
+	// nothing measured it.
+	CompileDuration time.Duration
 	// Triage is the agent's verdict, when it was consulted.
 	Triage *Triage
 	// ModelCalls counts how many times the agent was invoked, so the saving
 	// the whole design exists for is visible rather than assumed.
+	//
+	// Agent invocations, not LLM requests: one compile is one increment and
+	// dozens of round-trips.
 	ModelCalls int
+	// Lint is what the false-pass check found in the script that ran.
+	Lint []testscript.Finding
 }
 
 // Passed reports whether the test passed.
@@ -139,6 +202,10 @@ func (a *Agent) RunBehavior(ctx context.Context, req RunRequest) (*RunOutcome, e
 		return outcome, err
 	}
 
+	if err := lintScript(req, source, outcome, logf); err != nil {
+		return outcome, err
+	}
+
 	// Values are re-read on every attempt so a repair that added an input
 	// takes effect without a second run.
 	values, err := testscript.LoadValues(req.SpecPath)
@@ -148,9 +215,11 @@ func (a *Agent) RunBehavior(ctx context.Context, req RunRequest) (*RunOutcome, e
 
 	repairs := 0
 	attempts := 0
+	afterRepair := false
 
 	for {
 		attempts++
+		started := time.Now()
 
 		result, err := testscript.Run(ctx, testscript.Options{
 			Browser:      a.browser,
@@ -166,6 +235,8 @@ func (a *Agent) RunBehavior(ctx context.Context, req RunRequest) (*RunOutcome, e
 			return outcome, fmt.Errorf("running compiled script: %w", err)
 		}
 		outcome.Result = result
+		outcome.Attempts = append(outcome.Attempts, attemptOf(attempts, started, result, afterRepair))
+		afterRepair = false
 
 		// The script ran, so it is a script. Anything but a script fault means
 		// the program executed — an assertion that did not hold, a missing
@@ -240,6 +311,7 @@ func (a *Agent) RunBehavior(ctx context.Context, req RunRequest) (*RunOutcome, e
 				return outcome, nil
 			}
 			repairs++
+			afterRepair = true
 			outcome.Repaired = true
 			source = triage.Script
 			path, err := testscript.SaveDraft(req.SpecPath, req.Spec, source)
@@ -261,6 +333,9 @@ func (a *Agent) RunBehavior(ctx context.Context, req RunRequest) (*RunOutcome, e
 				return outcome, err
 			}
 			logf("agent repaired the script — %s", triage.Reason)
+			if err := lintScript(req, source, outcome, logf); err != nil {
+				return outcome, err
+			}
 			if err := a.reset(ctx, req); err != nil {
 				return outcome, err
 			}
@@ -282,6 +357,62 @@ func (a *Agent) RunBehavior(ctx context.Context, req RunRequest) (*RunOutcome, e
 			return outcome, nil
 		}
 	}
+}
+
+// attemptOf summarises one execution for the run record.
+func attemptOf(number int, started time.Time, result *testscript.Result, afterRepair bool) Attempt {
+	a := Attempt{
+		Number:      number,
+		Started:     started,
+		Duration:    result.Duration,
+		Passed:      result.Passed,
+		AfterRepair: afterRepair,
+	}
+	if result.Failure != nil {
+		a.Kind = result.Failure.Kind
+		a.Message = result.Failure.Message
+	}
+	return a
+}
+
+// lintScript refuses a script that would pass whatever the application did.
+//
+// Checked on every run rather than only on a fresh compile: a test that cannot
+// fail is worthless whichever day it was generated, and replaying one silently
+// is the harm. That does mean the check can turn a suite red the first time it
+// ships, which is what --lint=warn is for.
+//
+// The findings never reach the model. Handing them to the repair loop would
+// ask it to invent what the application must do, and a model asked that will
+// invent something that passes — the false pass arriving by another door.
+func lintScript(req RunRequest, source string, outcome *RunOutcome, logf func(string, ...any)) error {
+	if req.Lint == LintModeOff {
+		return nil
+	}
+
+	findings, err := testscript.Lint(source)
+	if err != nil {
+		// The script does not parse. The runtime already reports that as a
+		// script fault and repairs it; a worse message first helps nobody.
+		return nil
+	}
+	outcome.Lint = findings
+
+	for _, f := range findings {
+		logf("lint: %s", f)
+	}
+
+	blocking := testscript.Blocking(findings)
+	if len(blocking) == 0 || req.Lint == LintModeWarn {
+		return nil
+	}
+
+	reasons := make([]string, 0, len(blocking))
+	for _, f := range blocking {
+		reasons = append(reasons, f.String())
+	}
+	return fmt.Errorf("%s: %w\n  say in %s what must be true for the test to have passed, then re-run with --recompile (or --lint=warn to accept it as it is)",
+		strings.Join(reasons, "\n  "), ErrScriptCannotFail, req.SpecPath)
 }
 
 // loadOrCompile returns the script to run, compiling it when the stored one
@@ -317,12 +448,14 @@ func (a *Agent) loadOrCompile(ctx context.Context, req RunRequest, outcome *RunO
 	}
 
 	outcome.ModelCalls++
+	compileStart := time.Now()
 	source, properties, err := a.CompileBehavior(ctx, CompileRequest{
 		Progress: req.Progress,
 		SpecPath: req.SpecPath,
 		Spec:     req.Spec,
 		BaseURL:  req.BaseURL,
 	})
+	outcome.CompileDuration = time.Since(compileStart)
 	if err != nil {
 		return "", fmt.Errorf("compiling %s: %w", req.SpecPath, err)
 	}

@@ -35,6 +35,7 @@ atr run --behavior tests/e2e/ --browser-url http://localhost:3000
 | `--recompile` | Regenerate the script even if it matches the spec | false |
 | `--no-repair` | Diagnose a drifted script but do not rewrite it | false |
 | `--prune-values` | Remove inputs the script no longer reads | false |
+| `--lint <mode>` | What to do about a script that cannot fail: `error`, `warn`, `off` | error |
 | `--interpret` | Skip compilation; let the agent drive every step | false |
 | `-v, --verbose` | Show the script's own `atr.log()` output | false |
 
@@ -54,6 +55,25 @@ atr run --behavior tests/login.test.txt  # local: compile if needed
 
 Each run prints how it was serviced (`compiled →`, `repaired →`) and how many
 model calls it cost. A replay costing more than zero is worth investigating.
+
+## A script that cannot fail is refused
+
+Before a script runs, ATR checks statically that it *can* fail: that the script
+asserts something, and that no step is built only from reads. A step of pure
+`atr.log` reports success whatever the application does, and a suite of those
+reports that everything works right up until someone opens the application.
+
+A blocking finding stops the run and exits 2 — nothing was learned about the
+application, so it is not a test failure. The findings never go to the model: a
+model asked to invent the missing assertions will invent ones that pass.
+
+```bash
+atr run --behavior tests/ --lint=warn   # report but run; for adopting the check
+atr run --behavior tests/ --lint=off    # skip it
+```
+
+Looser problems — a short substring matched against the whole page, a fixed
+`atr.sleep` outside a retry — are reported and not enforced.
 
 ## Freshness
 
@@ -158,6 +178,58 @@ behavior:
     page_timeout: "30s"
     action_timeout: "10s"
 ```
+
+## What was run, over time
+
+Every behaviour run is recorded locally in `~/.atr/history.db`, including the
+runs that never reached the application — a missing input, a browser that would
+not start, a stale script under `--no-compile`. Those are the ones a pass rate
+has to exclude to mean anything.
+
+```bash
+atr history                          # per spec: runs, pass/fail/infra, flakes, repairs
+atr history --spec tests/login.test.txt --runs
+atr history --since 7d --json
+```
+
+Two numbers only ATR can give you:
+
+- **Repair frequency.** A spec repaired again and again is not flaky — the
+  application's DOM is churning underneath it.
+- **True failure rate.** Pass rate over the runs that actually tested the
+  application. FLAKE counts runs that passed only after a retry, which are
+  green in every other report.
+
+The median REPLAY duration is worth watching: a replay is deterministic with no
+model in the loop, so a suite drifting from 9s to 15s means the *application*
+got slower.
+
+The database is plain SQLite and the views (`runs`, `attempts`, `compiles`) are
+a stable contract, so anything the command will not tell you is one query away:
+
+```bash
+sqlite3 ~/.atr/history.db "SELECT spec, outcome, count(*) FROM runs GROUP BY 1,2"
+```
+
+Set `OTEL_EXPORTER_OTLP_ENDPOINT` and the same runs are exported as traces,
+metrics and logs — which is how a CI run's history survives the container
+being torn down. With no endpoint set, nothing is emitted and no error is
+logged.
+
+Turn either off in `~/.atr/config.yaml`; both may be off at once:
+
+```yaml
+history:
+  enabled: true
+  keep_days: 90
+telemetry:
+  enabled: true
+```
+
+Nothing ATR records lifts a resolved value into a field of its own. A value can
+appear inside a failure message, because the message quotes the application and
+your own expectations back at you — so whether messages leave the machine is
+governed by whether you export the logs signal.
 
 ## Related
 

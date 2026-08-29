@@ -238,7 +238,8 @@ func TestDriftIsRepairedAndRerun(t *testing.T) {
 	b, url := sharedRunBrowser(t)
 	specPath := writeSpec(t, sampleSpec)
 
-	stale := `atr.step(1, "Click sign in", () => { atr.click("#button-that-moved"); });`
+	stale := `atr.step(1, "Click sign in", () => { atr.click("#button-that-moved"); });
+atr.step(2, "Verify status", () => { expect(atr.text("#status")).toBe("signed in"); });`
 	if _, err := testscript.Save(specPath, sampleSpec, stale); err != nil {
 		t.Fatal(err)
 	}
@@ -292,7 +293,8 @@ func TestAgentCanOverrideDriftIntoTestFailure(t *testing.T) {
 	b, url := sharedRunBrowser(t)
 	specPath := writeSpec(t, sampleSpec)
 
-	stale := `atr.step(1, "Click sign in", () => { atr.click("#checkout-button"); });`
+	stale := `atr.step(1, "Click sign in", () => { atr.click("#checkout-button"); });
+atr.step(2, "Verify status", () => { expect(atr.text("#status")).toBe("signed in"); });`
 	if _, err := testscript.Save(specPath, sampleSpec, stale); err != nil {
 		t.Fatal(err)
 	}
@@ -333,7 +335,8 @@ func TestRepairWithoutCodeIsUnresolved(t *testing.T) {
 	b, url := sharedRunBrowser(t)
 	specPath := writeSpec(t, sampleSpec)
 
-	stale := `atr.step(1, "Click", () => { atr.click("#gone"); });`
+	stale := `atr.step(1, "Click", () => { atr.click("#gone"); });
+atr.step(2, "Verify status", () => { expect(atr.text("#status")).toBe("signed in"); });`
 	if _, err := testscript.Save(specPath, sampleSpec, stale); err != nil {
 		t.Fatal(err)
 	}
@@ -432,7 +435,8 @@ func TestReflowingSpecDoesNotRecompile(t *testing.T) {
 	b, url := sharedRunBrowser(t)
 	specPath := writeSpec(t, sampleSpec)
 
-	src := `atr.step(1, "Click sign in", () => { atr.click("#submit"); });`
+	src := `atr.step(1, "Click sign in", () => { atr.click("#submit"); });
+atr.step(2, "Verify status", () => { expect(atr.text("#status")).toBe("signed in"); });`
 	if _, err := testscript.Save(specPath, sampleSpec, src); err != nil {
 		t.Fatal(err)
 	}
