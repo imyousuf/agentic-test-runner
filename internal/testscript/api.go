@@ -24,7 +24,9 @@ const defaultWaitTimeout = 10 * time.Second
 //
 // The one exception is exists(), which returns a boolean precisely so that
 // scripts can branch on optional page furniture (cookie banners, A/B variants)
-// without a missing element being treated as drift.
+// without a missing element being treated as drift. It still throws when the
+// browser could not answer at all, because a fault is not an answer — see
+// existsOutcome.
 func (r *runtime) install() error {
 	atr := r.vm.NewObject()
 
@@ -61,6 +63,10 @@ func (r *runtime) install() error {
 	// Waiting
 	set("waitFor", r.jsWaitFor)
 	set("waitForText", r.jsWaitForText)
+
+	// Presence assertions
+	set("expectExists", r.jsExpectExists)
+	set("expectMissing", r.jsExpectMissing)
 
 	// Inspection
 	set("exists", r.jsExists)
@@ -428,15 +434,121 @@ func (r *runtime) jsWaitForText(text string, opts map[string]any) {
 	}
 }
 
+// --- assertions about presence -----------------------------------------------
+
+// jsExpectExists asserts that a target is on the page, waiting for it the way
+// a person would.
+//
+// This exists because the composition it replaces had incompatible halves.
+// expect(atr.exists(x)).toBeTruthy() gives the lookup exists()'s 500ms branch
+// budget and then reports the miss through expect, which raises KindAssertion:
+// terminal, never retried, never triaged. A page that renders in 800ms was
+// therefore reported as a broken application.
+func (r *runtime) jsExpectExists(target string, opts map[string]any) {
+	r.checkCtx()
+	r.curTarget = target
+
+	timeout := durationOf(opts["timeout"], defaultWaitTimeout)
+	err := r.browser.WaitForElement(r.ctx, target, timeout)
+	present, fatal := existsOutcome(err)
+	if fatal != "" {
+		r.throw(fatal, target, "looking for %q: %v", target, err)
+	}
+	if !present {
+		r.throw(KindAssertion, target,
+			"expected %q to be on the page; it was not there after %s", target, timeout)
+	}
+}
+
+// jsExpectMissing asserts that a target is not on the page, allowing time for
+// something already there to go away.
+//
+// Absence cannot be proved by looking once: an element that has not rendered
+// yet is indistinguishable from one that never will, and a check that passes
+// on the first is a false pass. Nothing here can close that gap — the script
+// has to wait for the state that implies removal first, which is why the
+// compile prompt says so. What this does close is the other half: an element
+// that is on its way out gets the full budget to leave.
+func (r *runtime) jsExpectMissing(target string, opts map[string]any) {
+	r.checkCtx()
+	r.curTarget = target
+
+	timeout := durationOf(opts["timeout"], defaultWaitTimeout)
+	deadline := time.Now().Add(timeout)
+
+	for {
+		err := r.browser.WaitForElement(r.ctx, target, existsBranchTimeout)
+		present, fatal := existsOutcome(err)
+		if fatal != "" {
+			r.throw(fatal, target, "looking for %q: %v", target, err)
+		}
+		if !present {
+			return
+		}
+		if !time.Now().Before(deadline) {
+			r.throw(KindAssertion, target,
+				"expected %q to be gone from the page; it was still there after %s", target, timeout)
+		}
+		r.checkCtx()
+		time.Sleep(expectMissingPoll)
+	}
+}
+
 // --- inspection --------------------------------------------------------------
+
+// existsBranchTimeout is how long a branching exists() waits. Short on
+// purpose: it answers "is the cookie banner up?", and a script should not pay
+// ten seconds to learn that it is not.
+const existsBranchTimeout = 500 * time.Millisecond
+
+// expectMissingPoll is how often expectMissing re-checks a target that is
+// still there.
+const expectMissingPoll = 200 * time.Millisecond
+
+// existsOutcome separates "the element is not there" from "the browser could
+// not tell us".
+//
+// exists() used to collapse both into false, so a closed page, a dead
+// renderer or a selector that does not parse all read as "absent" — and
+// whatever the script did with that false was reported as the application's
+// behaviour. A fault is not an answer.
+//
+// It can only classify an error that arrives as itself. A lookup whose
+// deadline expired has already been mapped to ErrElementNotFound by the
+// browser layer, which is the right reading for the ordinary case and
+// indistinguishable from a wedged renderer by the time it gets here.
+func existsOutcome(err error) (present bool, fatal FailureKind) {
+	switch {
+	case err == nil:
+		return true, ""
+	case errors.Is(err, ErrElementNotFound):
+		return false, ""
+	case errors.Is(err, ErrInvalidSelector):
+		// A selector that cannot parse can never match, so "absent" would be
+		// a true answer to the wrong question. It is a defect in the script.
+		return false, KindScript
+	default:
+		return false, KindEnvironment
+	}
+}
 
 // jsExists reports whether a target is present, without throwing. This is the
 // branch point for optional UI, and the only read that treats absence as an
 // answer rather than a fault.
+//
+// For branching only. Asserting through it — expect(atr.exists(x)) — gives
+// the lookup this short budget and reports the miss as a test failure; that is
+// what atr.expectExists is for.
 func (r *runtime) jsExists(target string) bool {
 	r.checkCtx()
-	err := r.browser.WaitForElement(r.ctx, target, 500*time.Millisecond)
-	return err == nil
+	r.curTarget = target
+
+	err := r.browser.WaitForElement(r.ctx, target, existsBranchTimeout)
+	present, fatal := existsOutcome(err)
+	if fatal != "" {
+		r.throw(fatal, target, "checking whether %q exists: %v", target, err)
+	}
+	return present
 }
 
 // jsText returns the visible text of a selector, or of the whole page.
