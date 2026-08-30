@@ -172,6 +172,69 @@ func TestLintFindings(t *testing.T) {
 				});`,
 			want: nil,
 		},
+		{
+			// Wrapping is not something a compiler does deliberately, but it
+			// is exactly what a model does when it tidies — and a step of
+			// report() where report only logs still cannot fail.
+			name: "a helper that only logs does not rescue a step",
+			source: `
+				function report() {
+					atr.log("we are on the dashboard");
+				}
+				atr.step(1, "Look at the page", () => {
+					report();
+				});
+				atr.step(2, "Check the heading", () => {
+					expect(atr.text("#heading")).toBe("Welcome");
+				});`,
+			want: []string{CodeStepCannotFail},
+		},
+		{
+			name: "an arrow helper is followed too",
+			source: `
+				const report = () => { atr.log("nothing"); };
+				atr.step(1, "Look at the page", () => { report(); });
+				atr.step(2, "Check", () => {
+					expect(atr.text("#heading")).toBe("Welcome");
+				});`,
+			want: []string{CodeStepCannotFail},
+		},
+		{
+			// A helper that acts is a step that can fail, so following the
+			// call must not turn every wrapper into a finding.
+			name: "a helper that acts keeps its step",
+			source: `
+				function openMenu() { atr.click("#menu"); }
+				atr.step(1, "Open the menu", () => { openMenu(); });
+				atr.step(2, "Check", () => {
+					expect(atr.text("#heading")).toBe("Welcome");
+				});`,
+			want: nil,
+		},
+		{
+			// Mutual recursion must not hang the lint.
+			name: "recursive helpers terminate",
+			source: `
+				function a() { b(); }
+				function b() { a(); }
+				atr.step(1, "Go", () => { a(); });
+				atr.step(2, "Check", () => {
+					expect(atr.text("#heading")).toBe("Welcome");
+				});`,
+			want: []string{CodeStepCannotFail},
+		},
+		{
+			// A call to something declared outside the script — a shared
+			// library — cannot be followed, so it is taken at its word rather
+			// than assumed toothless.
+			name: "an unknown callee is taken at its word",
+			source: `
+				atr.step(1, "Sign in", () => { signIn(); });
+				atr.step(2, "Check", () => {
+					expect(atr.text("#heading")).toBe("Welcome");
+				});`,
+			want: nil,
+		},
 	}
 
 	for _, tt := range tests {

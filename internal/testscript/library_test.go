@@ -241,3 +241,46 @@ func TestAWhitespaceOnlyLibraryEditKeepsTheSameHash(t *testing.T) {
 		t.Error("reflowing the library changed its hash, which would recompile a whole directory")
 	}
 }
+
+// callerIsLibrary captures a bounded number of stack frames, so a deep call
+// chain inside the library is worth checking: if the boundary can be walked
+// around by nesting helpers, it is not a boundary.
+func TestADeepChainInsideTheLibraryIsStillRefused(t *testing.T) {
+	res := runWithLibrary(t, `
+		function a() { expect(atr.text("#status")).toBe("signed in"); }
+		function b() { a(); }
+		function c() { b(); }
+		function d() { c(); }
+		function e() { d(); }
+		function f() { e(); }
+		function checkSignedIn() { f(); }
+	`, `
+		atr.step(1, "Sign in", () => { atr.click("#submit"); });
+		atr.step(2, "Check", () => { checkSignedIn(); });
+	`)
+
+	if res.Passed {
+		t.Fatal("nesting helpers walked around the assertion boundary")
+	}
+	if res.Failure.Kind != KindConfig {
+		t.Errorf("kind = %q, want %q", res.Failure.Kind, KindConfig)
+	}
+}
+
+// The mirror case, which must NOT be refused: the assertion is written in the
+// spec, and the library merely reaches it. The boundary is about where the
+// assertion lives, not about which frame happens to be on the stack below it.
+func TestAScriptAssertionReachedThroughTheLibraryIsAllowed(t *testing.T) {
+	res := runWithLibrary(t, `
+		function runCheck(check) { check(); }
+	`, `
+		atr.step(1, "Sign in", () => { atr.click("#submit"); });
+		atr.step(2, "Check", () => {
+			runCheck(() => { expect(atr.text("#status")).toBe("signed in"); });
+		});
+	`)
+
+	if !res.Passed {
+		t.Fatalf("an assertion written in the spec was refused: %v", res.Failure)
+	}
+}
