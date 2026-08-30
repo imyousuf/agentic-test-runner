@@ -36,6 +36,7 @@ atr run --behavior tests/e2e/ --browser-url http://localhost:3000
 | `--no-repair` | Diagnose a drifted script but do not rewrite it | false |
 | `--prune-values` | Remove inputs the script no longer reads | false |
 | `--lint <mode>` | What to do about a script that cannot fail: `error`, `warn`, `off` | error |
+| `--no-triage` | Never ask the model why a failure happened, even to classify it | false |
 | `--otel-endpoint <url>` | OTLP collector for run telemetry, e.g. `http://localhost:4318` | from config or env |
 | `--interpret` | Skip compilation; let the agent drive every step | false |
 | `-v, --verbose` | Show the script's own `atr.log()` output | false |
@@ -161,13 +162,23 @@ An assertion failure never reaches the model. That is deliberate: asking a
 model to confirm a regression spends the tokens compilation exists to save, and
 risks it "fixing" the assertion that caught the regression.
 
-**A regression often presents as a `timeout`.** A compiled script waits for the
-state the spec names before asserting it, so when the application stops
-reaching that state the *wait* fails first. Those are retried, then triaged —
-and if the agent finds the application at fault, the failure is reclassified as
-`assertion` and the run exits 1. Under `--no-compile` there is no triage, so
-the same break exits 2: correct, because CI was told not to spend a model call
-deciding, and 2 means "a person should look".
+**A regression can present as a `timeout`.** If a script waits for a state and
+then asserts it, the wait fails first — so a page that stops reaching that
+state is reported as a timeout rather than as the application being wrong.
+`atr.expectText` waits and asserts in one call and cannot be misattributed that
+way; the lint reports the two-call form and names it.
+
+For scripts already written the other way, triage covers it: a failure that
+survives its retries is classified, and a verdict of "the application is at
+fault" makes the run exit 1.
+
+**Triage is not compilation.** `--no-compile` refuses to *generate* a script;
+it no longer refuses to *judge* one. A replay that fails will spend one model
+call to classify it — only on a run that has already gone red, and never to
+rewrite anything, since CI asked for a replay. If no backend is configured it
+says so and reports the runtime's own classification, so nothing new is
+required of a CI job that had none. `--no-triage` restores the absolute
+guarantee.
 
 ## Debugging a failure
 

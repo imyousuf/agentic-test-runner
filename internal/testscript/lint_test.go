@@ -525,3 +525,64 @@ func TestAnUnreadableCalleeDoesNotBlockAStep(t *testing.T) {
 		})
 	}
 }
+
+// A wait followed by an assertion about the same thing is one intent split in
+// two, and the split hands the diagnosis to whichever hits the wall first —
+// always the wait. So a page that stops reaching the state is reported as a
+// timeout, retried, and in CI read as infrastructure rather than as the
+// feature being broken.
+func TestWaitThenAssertIsReported(t *testing.T) {
+	findings := lint(t, `
+		atr.step(1, "Check out", () => {
+			atr.click("#checkout");
+			atr.waitForText("Order placed", {timeout: 5000});
+			expect(atr.text("#message")).toBe("Order placed");
+		});
+	`)
+
+	var found bool
+	for _, f := range findings {
+		if f.Code == CodeWaitThenAssert {
+			found = true
+			if f.Severity != SeverityWarn {
+				t.Error("wait-then-assert blocks a run; the script does still fail, just under the wrong name")
+			}
+			if !strings.Contains(f.Message, "expectText") {
+				t.Errorf("the finding does not name the call that fixes it: %s", f)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("the split was not reported: %v", codes(findings))
+	}
+}
+
+// The single call is the whole point, and reporting it would be absurd.
+func TestExpectTextIsNotReported(t *testing.T) {
+	for _, f := range lint(t, `
+		atr.step(1, "Check out", () => {
+			atr.click("#checkout");
+			atr.expectText("#message", "Order placed", {timeout: 5000});
+		});
+	`) {
+		if f.Code == CodeWaitThenAssert {
+			t.Errorf("the one-call form was reported: %s", f)
+		}
+	}
+}
+
+// Waiting on the way to something else is not the same mistake: the wait
+// reaches a state, and the assertion is about something different.
+func TestWaitingOnTheWayToSomethingElseIsFine(t *testing.T) {
+	for _, f := range lint(t, `
+		atr.step(1, "Check out", () => {
+			atr.click("#checkout");
+			atr.waitForText("Loading");
+			expect(atr.text("#message")).toBe("Order placed");
+		});
+	`) {
+		if f.Code == CodeWaitThenAssert {
+			t.Errorf("a wait for a different state was reported: %s", f)
+		}
+	}
+}

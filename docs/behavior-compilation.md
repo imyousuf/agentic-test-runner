@@ -277,13 +277,28 @@ that removes the thing and then assert it is gone.
 expression is matched by JavaScript, so its flags apply and JavaScript-only
 syntax such as lookahead works — Go's own regexp engine has neither.
 
-A regression often presents as a `timeout` rather than an assertion, because a
-script waits for the state the spec names before asserting it: when the
-application stops reaching that state, the wait fails first. Those are retried
-and then triaged, and an agent verdict of "the application is at fault"
-reclassifies the failure as an assertion, so the run exits `1`. Under
-`--no-compile` there is no triage and the same break exits `2` — correct, since
-CI was told not to spend a model call deciding.
+**Assert a state with one call, not with a wait and then a check.** The
+two-call form hands the diagnosis to whichever hits the wall first, and that is
+always the wait:
+
+```javascript
+// WRONG — a page that never reaches this state reports a timeout, and CI
+// reads a broken feature as an infrastructure problem and retries it.
+atr.waitForText("Order placed", {timeout: 5000});
+expect(atr.text("#message")).toBe("Order placed");
+
+// RIGHT — waits like a wait, fails like an assertion.
+atr.expectText("#message", "Order placed", {timeout: 5000});
+```
+
+`atr.waitFor` and `atr.waitForText` are for reaching a state on the way to
+something else — a page you must load before you can click — never for
+checking that the state arrived. The lint reports the two-call form.
+
+For scripts already written the other way, triage covers it: a failure that
+survives its retries is classified, and a verdict of "the application is at
+fault" reclassifies it as an assertion so the run exits `1`. That now happens
+under `--no-compile` too — see below.
 
 Three calls look similar and are not:
 
@@ -461,9 +476,18 @@ leave the machine is governed by whether you export the logs signal.
 | `--prune-values` | Remove inputs neither the script nor the library reads |
 | `--lint <mode>` | `error` (default), `warn`, or `off` for the cannot-fail check |
 
-**Use `--no-compile` in CI.** It guarantees no model calls, no cost surprises,
-and no repair that nobody reviewed — a drifted script becomes a visible
-failure that someone fixes deliberately, on a branch, in a diff.
+**Use `--no-compile` in CI.** It never compiles and never rewrites a committed
+script — a drifted script becomes a visible failure that someone fixes
+deliberately, on a branch, in a diff.
+
+It does allow one thing: **classifying a failure that has already gone red.**
+Compiling generates a script; triage only judges one, and conflating the two
+meant CI could never learn that its red run was the application breaking rather
+than the box being slow — so it reported a regression as infrastructure and
+retried it. At most one model call, only on a failing run, never a rewrite. If
+no backend is configured, nothing is called and the runtime's own
+classification is reported, so a CI job that had no credentials still needs
+none. `--no-triage` refuses outright.
 
 ```yaml
 - run: atr run --behavior tests/*.test.txt --no-compile --headless

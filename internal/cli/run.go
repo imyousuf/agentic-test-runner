@@ -42,6 +42,7 @@ var (
 	pruneValuesFlag  bool
 	lintFlag         string
 	otelEndpointFlag string
+	noTriageFlag     bool
 	interpretFlag    bool
 	sandboxFlag      bool // opt-in to enable sandbox (default: disabled for compatibility)
 	viewportFlag     string
@@ -116,6 +117,8 @@ a CI job can retry rather than escalate.`,
 		"Replay only; never call the model. Fails if a script is missing or stale (use in CI)")
 	runCmd.Flags().BoolVar(&noRepairFlag, "no-repair", false,
 		"Diagnose a drifted script but do not rewrite it")
+	runCmd.Flags().BoolVar(&noTriageFlag, "no-triage", false,
+		"Never ask the model why a failure happened, even to classify it")
 	runCmd.Flags().StringVar(&otelEndpointFlag, "otel-endpoint", "",
 		"OTLP collector for run telemetry, e.g. http://localhost:4318 (overrides OTEL_EXPORTER_OTLP_ENDPOINT)")
 	runCmd.Flags().StringVar(&lintFlag, "lint", string(agent.LintModeError),
@@ -422,16 +425,9 @@ func runBehaviorTest(ctx context.Context, cfg *config.Config, cwd string) error 
 		llmCfg.CDPEndpoint = b.CDPEndpoint()
 	}
 
-	var llmClient llm.Client
-	if runNeedsModel() {
-		llmClient, err = llm.NewClient(ctx, llmCfg)
-		if err != nil {
-			return exitWith(ExitInfra, fmt.Errorf("failed to create LLM client: %w", err))
-		}
-	} else {
-		// A stub rather than nil: if some path did reach the model despite
-		// --no-compile, this says which flag forbade it instead of crashing.
-		llmClient = llm.NewUnavailable("--no-compile is set")
+	llmClient := openModel(ctx, cfg, llmCfg)
+	if unusable, ok := llmClient.(*llm.Unavailable); ok && unusable.Fatal {
+		return exitWith(ExitInfra, fmt.Errorf("failed to create LLM client: %w", unusable.Err))
 	}
 	defer llmClient.Close()
 
@@ -560,6 +556,7 @@ func runBehaviorTest(ctx context.Context, cfg *config.Config, cwd string) error 
 			SecretFiller:  behaviorSecretFiller(b, cfg),
 			Recompile:     recompileFlag,
 			NoCompile:     noCompileFlag,
+			NoTriage:      noTriageFlag,
 			Lint:          agent.LintMode(lintFlag),
 			NoRepair:      noRepairFlag,
 			ScriptTimeout: cfg.Agent.Timeout,
@@ -658,17 +655,58 @@ func runBehaviorTest(ctx context.Context, cfg *config.Config, cwd string) error 
 	return nil
 }
 
-// runNeedsModel reports whether this invocation can reach the model at all.
+// runNeedsModel reports whether this invocation cannot proceed without one.
 //
-// Only one shape cannot: replaying compiled behaviour specs under
-// --no-compile, where loadOrCompile refuses instead of compiling and triage is
-// skipped outright. Command analysis is nothing but a model call, and
-// --interpret drives every step with one.
+// Only one shape can: replaying compiled behaviour specs under --no-compile,
+// where loadOrCompile refuses instead of compiling. Command analysis is
+// nothing but a model call, and --interpret drives every step with one.
+//
+// "Can proceed without" is not "will not use": a replay that fails still wants
+// a verdict on why. See openModel.
 func runNeedsModel() bool {
 	if behaviorFlag == "" {
 		return true
 	}
 	return !noCompileFlag || interpretFlag
+}
+
+// openModel returns the client this run should use.
+//
+// A replay needs no backend, and requiring one turned "this never calls the
+// model" into "this never calls the model, but you still need credentials to
+// find that out". It may still *want* one: without a verdict, a failure is
+// reported under whatever kind the runtime guessed, and a regression that
+// presented as a timeout reads as an infrastructure problem — so CI retries a
+// broken feature instead of escalating it.
+//
+// So a replay uses a backend if one is configured and stays silent if not. It
+// is a strict improvement on refusing to look: no new requirement, and one
+// model call at most, only on a run that has already gone red.
+func openModel(ctx context.Context, cfg *config.Config, llmCfg llm.Config) llm.Client {
+	if runNeedsModel() {
+		client, err := llm.NewClient(ctx, llmCfg)
+		if err != nil {
+			return &llm.Unavailable{Reason: "the model could not be reached", Fatal: true, Err: err}
+		}
+		return client
+	}
+
+	if noTriageFlag {
+		return llm.NewUnavailable("--no-triage is set")
+	}
+
+	// Nothing configured: do not go looking, so a CI replay pays neither the
+	// delay of a credential lookup nor a warning about a backend it never
+	// asked for.
+	if err := cfg.Validate(); err != nil {
+		return llm.NewUnavailable("no LLM backend is configured")
+	}
+
+	client, err := llm.NewClient(ctx, llmCfg)
+	if err != nil {
+		return llm.NewUnavailable("the configured backend could not be reached")
+	}
+	return client
 }
 
 // collectTestFiles collects .test.txt files from a path.

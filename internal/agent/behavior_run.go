@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/imyousuf/agentic-test-runner/internal/testscript"
+	"github.com/imyousuf/agentic-test-runner/pkg/llm"
 )
 
 // LintMode says what to do about a compiled script that cannot fail.
@@ -63,6 +64,15 @@ type RunRequest struct {
 	// NoRepair keeps the agent's diagnosis but refuses to apply a rewrite.
 	// Useful when a run should report drift rather than silently absorb it.
 	NoRepair bool
+
+	// NoTriage forbids even asking why a failure happened.
+	//
+	// Separate from NoCompile, which used to imply it. Compiling generates a
+	// script; triage only classifies one, and conflating the two meant a CI
+	// job could never learn that its red run was the application breaking
+	// rather than the box being slow — so it reported a regression as
+	// infrastructure and retried it.
+	NoTriage bool
 
 	// Reset returns the browser to a clean starting state before a re-run.
 	// Without it a second attempt would begin wherever the failed one
@@ -319,8 +329,17 @@ func (a *Agent) RunBehavior(ctx context.Context, req RunRequest) (*RunOutcome, e
 		}
 
 		// Everything else needs judgement.
-		if req.NoCompile {
-			logf("not triaging: --no-compile is set")
+		if req.NoTriage {
+			logf("not triaging: --no-triage is set")
+			return outcome, nil
+		}
+		if !llm.Available(a.llmClient) {
+			// A replay needs no backend, so one may well not be configured.
+			// Say what that costs rather than failing: without a verdict this
+			// failure is reported under the kind the runtime guessed, and a
+			// regression that presented as a timeout reads as infrastructure.
+			logf("not triaging: no model is configured for this run, so %s is reported as-is",
+				failure.Kind)
 			return outcome, nil
 		}
 		if failure.Kind.Repairable() && repairs >= req.MaxRepairs {
@@ -357,8 +376,11 @@ func (a *Agent) RunBehavior(ctx context.Context, req RunRequest) (*RunOutcome, e
 			return outcome, nil
 
 		case VerdictRepaired:
-			if req.NoRepair {
-				logf("the agent proposed a repair but --no-repair is set — %s", triage.Reason)
+			// --no-compile forbids rewriting a committed script as firmly as
+			// --no-repair does: CI asked for a replay, and a script rewritten
+			// on a machine nobody is watching is a change nobody reviewed.
+			if req.NoRepair || req.NoCompile {
+				logf("the agent proposed a repair but this run may not rewrite the script — %s", triage.Reason)
 				return outcome, nil
 			}
 			repairs++

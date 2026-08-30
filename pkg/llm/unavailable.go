@@ -18,8 +18,13 @@ import (
 // flag responsible.
 type Unavailable struct {
 	// Reason says what made the model unavailable, phrased as the thing the
-	// caller chose: "--no-compile is set".
+	// caller chose: "--no-triage is set".
 	Reason string
+	// Fatal marks a run that needed a model and could not have one, as
+	// opposed to one that merely would have liked a second opinion.
+	Fatal bool
+	// Err is what went wrong, when something did.
+	Err error
 }
 
 // NewUnavailable returns a Client that errors on every call.
@@ -40,5 +45,14 @@ func (u *Unavailable) ChatWithHistory(context.Context, []Message, []Tool) (*Resp
 }
 
 func (u *Unavailable) Model() string      { return "none" }
-func (u *Unavailable) Provider() Provider { return Provider("none") }
+func (u *Unavailable) Provider() Provider { return ProviderNone }
 func (u *Unavailable) Close() error       { return nil }
+
+// ProviderNone marks a client that cannot reach a model, so a caller can ask
+// before spending a call it knows will fail.
+const ProviderNone = Provider("none")
+
+// Available reports whether a client can actually reach a model.
+func Available(c Client) bool {
+	return c != nil && c.Provider() != ProviderNone
+}

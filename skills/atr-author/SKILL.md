@@ -85,6 +85,12 @@ Not one event. Say what state ends the step:
 Never ask for a fixed sleep. The compiler will wait for a state if you name
 one, and will guess if you do not.
 
+Say it as **one** expectation, not a wait and then a check. The compiler emits
+`atr.expectText`, which waits and asserts together; the two-call form hands the
+diagnosis to whichever call hits the wall first — always the wait — so a page
+that stops reaching the state is reported as a timeout rather than as the
+feature being broken, and CI retries it instead of escalating.
+
 ## Rule 6: a destructive test rebuilds its own fixture
 
 **A compile drives your spec more than once** — once to learn the application,
