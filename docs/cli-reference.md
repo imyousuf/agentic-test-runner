@@ -81,7 +81,7 @@ Run browser-based behavior tests using AI-driven automation.
 | `--behavior <path>` | Path to `.test.txt` file or directory |
 | `--browser-url <url>` | Base URL for tests (overrides config) |
 | `--headless` | Run browser headless (default: `false`) |
-| `--no-compile` | Replay only; never call the model. Fails if a script is missing or stale (use in CI) |
+| `--no-compile` | Replay only; never call the model, and needs no backend configured. Fails if a script is missing or stale (use in CI) |
 | `--recompile` | Regenerate the compiled script even if it matches the spec |
 | `--no-repair` | Diagnose a drifted script but do not rewrite it |
 | `--prune-values` | Remove inputs neither the compiled script nor `_shared.js` reads |

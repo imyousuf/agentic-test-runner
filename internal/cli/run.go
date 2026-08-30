@@ -170,9 +170,16 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
-	// Early validation for LLM-dependent operations
-	if err := cfg.ValidateForLLM(); err != nil {
-		return err
+	// Early validation for LLM-dependent operations.
+	//
+	// Skipped for a run that cannot call the model: a replay under
+	// --no-compile has no use for a backend, and demanding one turns "this
+	// never calls the model" into "this never calls the model, but you still
+	// need credentials to find that out".
+	if runNeedsModel() {
+		if err := cfg.ValidateForLLM(); err != nil {
+			return err
+		}
 	}
 
 	// Route to appropriate handler
@@ -317,6 +324,14 @@ func runCommand(cmd *cobra.Command, args []string) error {
 
 // runBehaviorTest runs browser-based behavior tests.
 func runBehaviorTest(ctx context.Context, cfg *config.Config, cwd string) error {
+	// --interpret is nothing but model calls and --no-compile forbids them, so
+	// the two cannot both be honoured. Better to say so than to let one win
+	// silently and bill for it.
+	if noCompileFlag && interpretFlag {
+		return exitWith(ExitInfra, fmt.Errorf(
+			"--interpret drives every step with the model, which --no-compile forbids; pass one or the other"))
+	}
+
 	// Checked here rather than left to default: an unrecognised value would
 	// otherwise behave as "error", so a typo in --lint=of would look like it
 	// disabled the check and quietly do the opposite.
@@ -404,9 +419,16 @@ func runBehaviorTest(ctx context.Context, cfg *config.Config, cwd string) error 
 		llmCfg.CDPEndpoint = b.CDPEndpoint()
 	}
 
-	llmClient, err := llm.NewClient(ctx, llmCfg)
-	if err != nil {
-		return exitWith(ExitInfra, fmt.Errorf("failed to create LLM client: %w", err))
+	var llmClient llm.Client
+	if runNeedsModel() {
+		llmClient, err = llm.NewClient(ctx, llmCfg)
+		if err != nil {
+			return exitWith(ExitInfra, fmt.Errorf("failed to create LLM client: %w", err))
+		}
+	} else {
+		// A stub rather than nil: if some path did reach the model despite
+		// --no-compile, this says which flag forbade it instead of crashing.
+		llmClient = llm.NewUnavailable("--no-compile is set")
 	}
 	defer llmClient.Close()
 
@@ -631,6 +653,19 @@ func runBehaviorTest(ctx context.Context, cfg *config.Config, cwd string) error 
 	}
 
 	return nil
+}
+
+// runNeedsModel reports whether this invocation can reach the model at all.
+//
+// Only one shape cannot: replaying compiled behaviour specs under
+// --no-compile, where loadOrCompile refuses instead of compiling and triage is
+// skipped outright. Command analysis is nothing but a model call, and
+// --interpret drives every step with one.
+func runNeedsModel() bool {
+	if behaviorFlag == "" {
+		return true
+	}
+	return !noCompileFlag || interpretFlag
 }
 
 // collectTestFiles collects .test.txt files from a path.

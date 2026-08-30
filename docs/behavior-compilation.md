@@ -466,6 +466,11 @@ failure that someone fixes deliberately, on a branch, in a diff.
 - run: atr run --behavior tests/*.test.txt --no-compile --headless
 ```
 
+That job needs **no LLM backend configured at all** — no API key, no project,
+no `gcloud auth application-default login`. A run that cannot reach the model
+should not require credentials to find that out. `--interpret` is refused
+alongside `--no-compile`, since it is nothing but model calls.
+
 The exit code tells a CI job which kind of red it is:
 
 | Code | Meaning |
