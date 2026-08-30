@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/imyousuf/agentic-test-runner/internal/agent"
 	"github.com/imyousuf/agentic-test-runner/internal/config"
@@ -111,6 +112,25 @@ func infra(rec *history.Run, format string, args ...any) bool {
 	rec.Message = fmt.Sprintf(format, args...)
 	return true
 }
+
+// recordRun writes what just happened, even when the run itself was cut short.
+//
+// Detached from the run's context on purpose. Ctrl-C cancels ctx, and a
+// recorder handed that context refuses every write from then on — losing the
+// history of the spec that was interrupted and every one after it, which is
+// exactly the run somebody will want to look up. The work is already done; the
+// only question is whether it gets written down.
+//
+// Bounded, so a wedged sink delays the exit rather than owning it.
+func recordRun(ctx context.Context, recorder *history.Multi, rec history.Run) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), recordTimeout)
+	defer cancel()
+
+	_ = recorder.Record(ctx, rec)
+}
+
+// recordTimeout bounds writing one run down.
+const recordTimeout = 5 * time.Second
 
 // closeHistory flushes the sinks.
 func closeHistory(ctx context.Context, m *history.Multi) {

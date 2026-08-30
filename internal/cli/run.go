@@ -624,7 +624,7 @@ func runBehaviorTest(ctx context.Context, cfg *config.Config, cwd string) error 
 		failed := runSpec(testFile, &rec)
 
 		rec.FinishedAt = time.Now()
-		_ = recorder.Record(ctx, rec)
+		recordRun(ctx, recorder, rec)
 
 		if failed {
 			failedTests = append(failedTests, testFile)

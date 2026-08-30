@@ -132,6 +132,7 @@ func TestReplayDurationExcludesCompiles(t *testing.T) {
 
 	compile := run("tests/x.test.txt", now.Add(-3*time.Hour), OutcomePassed)
 	compile.Compiled = true
+	compile.AgentInvocations = 1
 	compile.FinishedAt = compile.StartedAt.Add(4 * time.Minute)
 	record(t, s, compile)
 
@@ -208,5 +209,48 @@ func TestRecentListsNewestFirst(t *testing.T) {
 	}
 	if got[0].Attempts != 1 {
 		t.Errorf("attempt count = %d, want 1", got[0].Attempts)
+	}
+}
+
+// A repaired run paid for a model: a triage call, a rewrite, and a second
+// execution. Its duration says nothing about how fast the application is, and
+// one of them in the bucket moved a 9s median to 64s — which is the number
+// somebody would have read as "the app got seven times slower".
+//
+// The predicate is "no model in the loop", not "did not compile".
+func TestARepairedRunIsNotAReplay(t *testing.T) {
+	s := openTemp(t)
+	now := time.Now().UTC()
+
+	repaired := run("tests/a.test.txt", now.Add(-3*time.Hour), OutcomePassed)
+	repaired.FinishedAt = repaired.StartedAt.Add(2 * time.Minute)
+	repaired.Repaired = true
+	repaired.Repairs = 1
+	repaired.AgentInvocations = 1
+	repaired.Attempts = []Attempt{
+		{Number: 1, Started: repaired.StartedAt, Duration: 5 * time.Second, Kind: "not_found"},
+		{Number: 2, Started: repaired.StartedAt.Add(100 * time.Second), Duration: 6 * time.Second,
+			Passed: true, AfterRepair: true},
+	}
+	record(t, s, repaired)
+
+	for i, d := range []time.Duration{9 * time.Second, 11 * time.Second} {
+		r := run("tests/a.test.txt", now.Add(-time.Duration(i+1)*time.Hour), OutcomePassed)
+		r.FinishedAt = r.StartedAt.Add(d)
+		record(t, s, r)
+	}
+
+	got, err := Summarise(context.Background(), s.DB(), now.Add(-24*time.Hour), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got[0].MedianReplayMS != 10000 {
+		t.Errorf("median replay = %dms, want 10000 — a run that paid for a model leaked into the bucket",
+			got[0].MedianReplayMS)
+	}
+	// It is still a run, still a flake, and still a repair.
+	if got[0].Runs != 3 || got[0].Repairs != 1 || got[0].Flakes != 1 {
+		t.Errorf("the repaired run was dropped from the counts too: %+v", got[0])
 	}
 }
