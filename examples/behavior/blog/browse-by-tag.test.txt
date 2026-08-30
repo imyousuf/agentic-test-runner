@@ -1,0 +1,25 @@
+Test: A reader can narrow the blog to one tag
+
+Why this matters:
+Tags are the only filtering the blog offers. If a tag page stops listing the
+posts that carry it, the archive becomes a flat list nobody can search.
+
+Prerequisites:
+- The blog is published and at least one post carries the "rest" tag
+
+Steps:
+1. Open the tags page at /tags/
+2. Follow the link for the "rest" tag
+3. Confirm the reader is looking at that tag's posts
+
+Expected Results:
+- The URL is the rest tag's page
+- The page names the tag it is showing
+- At least one post is listed
+- The listing is narrower than the front page: the "Older" pagination link
+  that the front page shows is not present here
+
+Notes for the compiler:
+- Tag links are ordinary anchors whose href contains /tags/.
+- Count the post headings rather than asserting an exact number: the author
+  can publish another post about REST at any time.
