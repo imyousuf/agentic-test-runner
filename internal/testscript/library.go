@@ -112,27 +112,98 @@ func ValidateLibrary(source, name string) error {
 		}
 	}
 
-	// A declaration can still hide a call: `const page = atr.url()` is a
-	// variable declaration that drives the browser.
+	// A declaration can still hide a program. `const page = atr.url()` drives
+	// the browser, and `const boot = (function () { atr.navigate("/") })()`
+	// hides the same thing behind a function literal — which a check for atr.*
+	// calls outside a function body walks straight past, because the call *is*
+	// inside a function; it is just called immediately.
+	//
+	// What must not happen at load time is reaching ATR: the browser, the
+	// inputs, the assertions. So a top-level call is refused when it names one
+	// of ours, when it is a function literal called on the spot, when it calls
+	// something this file declares (which can contain anything), or when its
+	// name cannot be read at all — since an unreadable name is exactly how the
+	// first case hides.
+	//
+	// A plain call to a host global is left alone. `const SELECTORS =
+	// Object.freeze({...})` is how a person writes a constant, and a rule that
+	// rejects it is a rule that gets worked around.
 	inside := callsInsideFunctions(prg)
+	optional := callsInsideOptionalChains(prg)
+	locals := declaredFunctions(prg)
+
 	var offender string
+	var found bool
 	walk(prg, func(n ast.Node) bool {
 		call, ok := n.(*ast.CallExpression)
-		if !ok || inside[n] || offender != "" {
+		if !ok || inside[n] || found {
 			return true
 		}
-		if name := calleeName(call.Callee); strings.HasPrefix(name, "atr.") ||
-			strings.HasPrefix(name, "values.") || name == "expect" {
-			offender = name
+
+		named := calleeName(call.Callee)
+		switch {
+		case isCallable(call.Callee):
+			offender, found = "a function defined and called on the spot", true
+		case optional[n]:
+			offender, found = "a call whose target cannot be read", true
+		case named == "expect" || strings.HasPrefix(named, "atr.") || strings.HasPrefix(named, "values."):
+			offender, found = named, true
+		case named != "" && locals[named]:
+			offender, found = named, true
 		}
 		return true
 	})
-	if offender != "" {
-		return fmt.Errorf("%s calls %s at the top level; it may only declare "+
+	if found {
+		return fmt.Errorf("%s runs %s at the top level; it may only declare "+
 			"operations, which each spec then calls for itself", name, offender)
 	}
 
 	return nil
+}
+
+// declaredFunctions names the functions this file declares, since a top-level
+// call to one can reach anything the file can.
+func declaredFunctions(prg *ast.Program) map[string]bool {
+	out := map[string]bool{}
+
+	walk(prg, func(n ast.Node) bool {
+		switch v := n.(type) {
+		case *ast.FunctionDeclaration:
+			if v.Function != nil && v.Function.Name != nil {
+				out[string(v.Function.Name.Name)] = true
+			}
+		case *ast.Binding:
+			if id, ok := v.Target.(*ast.Identifier); ok && isCallable(v.Initializer) {
+				out[string(id.Name)] = true
+			}
+		}
+		return true
+	})
+
+	return out
+}
+
+// callsInsideOptionalChains marks calls whose callee is reached through `?.`,
+// where the name a check would read is not there to read.
+func callsInsideOptionalChains(prg *ast.Program) map[ast.Node]bool {
+	out := map[ast.Node]bool{}
+
+	walk(prg, func(n ast.Node) bool {
+		switch n.(type) {
+		case *ast.OptionalChain, *ast.Optional:
+		default:
+			return true
+		}
+		walk(n, func(inner ast.Node) bool {
+			if _, ok := inner.(*ast.CallExpression); ok {
+				out[inner] = true
+			}
+			return true
+		})
+		return true
+	})
+
+	return out
 }
 
 // isDeclaration reports whether a top-level statement only introduces a name.

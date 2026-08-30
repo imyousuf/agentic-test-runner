@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"context"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -182,5 +184,42 @@ func TestParseSince(t *testing.T) {
 				t.Errorf("parseSince(%q) went back %s, want about %s", tt.in, delta, tt.within)
 			}
 		})
+	}
+}
+
+// Ctrl-C cancels the run's context, and a recorder handed that context refuses
+// every write from then on — losing the history of the spec that was
+// interrupted and every one after it, which is exactly the run somebody will
+// want to look up afterwards. The work is already done by the time this is
+// called; the only question is whether it gets written down.
+func TestARecordSurvivesACancelledRun(t *testing.T) {
+	db, err := history.OpenSQLite(filepath.Join(t.TempDir(), "history.db"), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close(context.Background())
+
+	recorder := &history.Multi{Recorders: []history.Recorder{db}}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	now := time.Now()
+	recordRun(ctx, recorder, history.Run{
+		ID:         history.NewID(),
+		Spec:       "tests/login.test.txt",
+		SpecPath:   "/repo/tests/login.test.txt",
+		StartedAt:  now,
+		FinishedAt: now.Add(time.Second),
+		Outcome:    history.OutcomeInfra,
+		Message:    "interrupted",
+	})
+
+	var rows int
+	if err := db.DB().QueryRow(`SELECT count(*) FROM runs`).Scan(&rows); err != nil {
+		t.Fatal(err)
+	}
+	if rows != 1 {
+		t.Error("an interrupted run left no trace, which is the run most worth looking up")
 	}
 }

@@ -123,6 +123,18 @@ func UnreferencedKeys(specPath string) ([]string, error) {
 // Line-wise, leaving every other byte alone. Rewriting through
 // FormatProperties would sort the file and discard every comment in it, which
 // is not an acceptable thing to do silently to committed source.
+//
+// "Line-wise" has to mean the same thing ParseProperties means by it, though,
+// or this corrupts the file it is tidying. A value continues across lines with
+// a trailing backslash, so dropping only the first line of
+//
+//	search_term = hello \
+//	  world
+//
+// leaves "world" behind as a line that is not key=value, and the whole file
+// stops parsing on every later run. And a property may be separated by ':' as
+// well as '=', which a scan for '=' alone never removes — reporting it unused
+// for ever while silently failing to prune it.
 func PruneValues(specPath string, keys []string) ([]string, error) {
 	if len(keys) == 0 {
 		return nil, nil
@@ -141,17 +153,21 @@ func PruneValues(specPath string, keys []string) ([]string, error) {
 		}
 	}
 
+	lines := strings.Split(data, "\n")
+
 	var kept []string
 	var removed []string
-	for _, line := range strings.Split(data, "\n") {
-		if key, _, ok := strings.Cut(strings.TrimSpace(line), "="); ok {
-			if name := strings.TrimSpace(key); drop[name] {
-				removed = append(removed, name)
-				continue
-			}
+
+	for i := 0; i < len(lines); i++ {
+		start := i
+		key, ok := propertyAt(lines, &i)
+		if ok && drop[key] {
+			removed = append(removed, key)
+			continue
 		}
-		kept = append(kept, line)
+		kept = append(kept, lines[start:i+1]...)
 	}
+
 	if len(removed) == 0 {
 		return nil, nil
 	}
@@ -161,6 +177,31 @@ func PruneValues(specPath string, keys []string) ([]string, error) {
 	}
 	sort.Strings(removed)
 	return removed, nil
+}
+
+// propertyAt reads the property starting at lines[*i], advancing *i past any
+// continuation lines it consumed.
+//
+// It mirrors ParseProperties deliberately: a pruner that disagrees with the
+// parser about where a property ends is a pruner that edits the wrong lines.
+func propertyAt(lines []string, i *int) (key string, ok bool) {
+	trimmed := strings.TrimSpace(strings.TrimRight(lines[*i], "\r"))
+
+	if trimmed == "" || strings.HasPrefix(trimmed, "#") || strings.HasPrefix(trimmed, "!") {
+		return "", false
+	}
+
+	for strings.HasSuffix(trimmed, `\`) && !strings.HasSuffix(trimmed, `\\`) && *i+1 < len(lines) {
+		trimmed = strings.TrimSuffix(trimmed, `\`)
+		*i++
+		trimmed += strings.TrimSpace(strings.TrimRight(lines[*i], "\r"))
+	}
+
+	key, _, ok = splitProperty(trimmed)
+	if !ok || key == "" {
+		return "", false
+	}
+	return key, true
 }
 
 // committedValues parses only the committed properties file for a spec.

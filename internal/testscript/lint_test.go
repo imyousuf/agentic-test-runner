@@ -347,3 +347,149 @@ func TestAnUnparseableScriptIsNotTheLintsProblem(t *testing.T) {
 		t.Errorf("findings = %v, want none", codes(findings))
 	}
 }
+
+// `expect(x)` builds a matcher object and asserts nothing. Counting the bare
+// call let a step of `expect(atr.text("#b"));` pass as a step that can fail —
+// and that shape is exactly what a truncated or half-edited script looks like.
+func TestAMatcherlessExpectIsNotAnAssertion(t *testing.T) {
+	findings := lint(t, `
+		atr.step(1, "Check the banner", () => {
+			expect(atr.text("#banner"));
+		});
+	`)
+
+	if len(Blocking(findings)) == 0 {
+		t.Errorf("a script whose only assertion has no matcher was accepted: %v", codes(findings))
+	}
+}
+
+// A compiled script has no legitimate reason to catch its own assertion:
+// atr.retry exists for transient failures, and an assertion is deliberately
+// the one kind never retried. A try/catch around one can only turn a red test
+// green.
+func TestASwallowedAssertionIsRefused(t *testing.T) {
+	findings := lint(t, `
+		atr.step(1, "Check the status", () => {
+			atr.click("#submit");
+			try {
+				expect(atr.text("#status")).toBe("signed in");
+			} catch (e) {
+				atr.log("never mind");
+			}
+		});
+	`)
+
+	var found bool
+	for _, f := range findings {
+		if f.Code == CodeSwallowed {
+			found = true
+			if f.Severity != SeverityBlocking {
+				t.Error("a swallowed assertion is only a warning")
+			}
+		}
+	}
+	if !found {
+		t.Errorf("a swallowed assertion was accepted: %v", codes(findings))
+	}
+
+	// And it must not count towards the script having any assertions at all.
+	var counted bool
+	for _, f := range findings {
+		if f.Code == CodeNoAssertions {
+			counted = true
+		}
+	}
+	if !counted {
+		t.Error("the swallowed assertion still counted as the script's assertion")
+	}
+}
+
+// A catch that rethrows, or fails the test itself, is not swallowing anything:
+// the failure still reaches the runner, which is all the rule is about.
+// Refusing those would block the legitimate shape of "add context, then let it
+// through".
+func TestACatchThatEscalatesIsNotSwallowing(t *testing.T) {
+	sound := map[string]string{
+		"rethrows": `atr.step(1, "Check", () => {
+			try { expect(atr.text("#x")).toBe("ok"); } catch (e) { atr.log("x"); throw e; }
+		});`,
+		"fails the test itself": `atr.step(1, "Check", () => {
+			try { atr.click("#x"); } catch (e) { atr.fail("could not click"); }
+		});`,
+		"cleans up, then asserts": `atr.step(1, "Check", () => {
+			try { atr.click("#optional"); } catch (e) {}
+			expect(atr.text("#y")).toBe("ok");
+		});`,
+	}
+
+	for name, source := range sound {
+		t.Run(name, func(t *testing.T) {
+			for _, f := range lint(t, source) {
+				if f.Code == CodeSwallowed || f.Code == CodeNoAssertions {
+					t.Errorf("a sound try/catch was refused: %s", f)
+				}
+			}
+		})
+	}
+}
+
+// Three swallowed assertions in one try are one mistake, and iterating the set
+// of offending nodes would order the findings differently on every run, since
+// Go randomises map iteration.
+func TestFindingsComeOutInAStableOrder(t *testing.T) {
+	const source = `atr.step(1, "Check", () => {
+		try {
+			expect(atr.text("#x")).toBe("1");
+			expect(atr.text("#y")).toBe("2");
+			expect(atr.text("#z")).toBe("3");
+		} catch (e) {}
+	});`
+
+	var first []string
+	for i := range 30 {
+		got := codes(lint(t, source))
+		if i == 0 {
+			first = got
+			continue
+		}
+		if len(got) != len(first) {
+			t.Fatalf("run %d produced %v, first run produced %v", i, got, first)
+		}
+		for j := range got {
+			if got[j] != first[j] {
+				t.Fatalf("run %d produced %v, first run produced %v", i, got, first)
+			}
+		}
+	}
+
+	// One per step, not one per assertion.
+	swallowed := 0
+	for _, code := range first {
+		if code == CodeSwallowed {
+			swallowed++
+		}
+	}
+	if swallowed != 1 {
+		t.Errorf("reported %d swallowed-assertion findings for one try, want 1", swallowed)
+	}
+}
+
+// A try with no catch does not swallow anything — the assertion still
+// propagates, and refusing it would block a legitimate finally.
+func TestATryWithoutACatchIsFine(t *testing.T) {
+	findings := lint(t, `
+		atr.step(1, "Check the status", () => {
+			try {
+				expect(atr.text("#status")).toBe("signed in");
+			} finally {
+				atr.log("done");
+			}
+		});
+	`)
+
+	for _, f := range findings {
+		if f.Code == CodeSwallowed || f.Code == CodeNoAssertions {
+			t.Errorf("a try/finally was treated as swallowing: %v", codes(findings))
+		}
+	}
+}

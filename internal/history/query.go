@@ -31,10 +31,12 @@ type SpecSummary struct {
 	Flakes int
 	// Compiles is how many runs paid for a model.
 	Compiles int
-	// MedianReplayMS is the median duration of the runs that replayed with no
-	// model in the loop. Those are deterministic, so their duration is
-	// dominated by the application under test — which makes this a measure of
-	// the application getting slower, not of the model getting chattier.
+	// MedianReplayMS is the median duration of the runs that had no model in
+	// the loop at all — not merely the ones that did not compile, since a run
+	// that was repaired also paid for a model. Those runs are deterministic,
+	// so their duration is dominated by the application under test, which
+	// makes this a measure of the application getting slower rather than of
+	// the model getting chattier.
 	MedianReplayMS int64
 }
 
@@ -58,7 +60,7 @@ func Summarise(ctx context.Context, db *sql.DB, since time.Time, spec string) ([
 	}
 
 	rows, err := db.QueryContext(ctx, `
-		SELECT spec, outcome, compiled, repairs, duration_ms, id
+		SELECT spec, outcome, compiled, repairs, duration_ms, id, agent_invocations
 		FROM runs WHERE `+where+` ORDER BY spec, started_at`, args...)
 	if err != nil {
 		return nil, err
@@ -81,8 +83,9 @@ func Summarise(ctx context.Context, db *sql.DB, since time.Time, spec string) ([
 			repairs  int
 			duration int64
 			id       string
+			agent    int
 		)
-		if err := rows.Scan(&spec, &outcome, &compiled, &repairs, &duration, &id); err != nil {
+		if err := rows.Scan(&spec, &outcome, &compiled, &repairs, &duration, &id, &agent); err != nil {
 			return nil, err
 		}
 
@@ -106,7 +109,15 @@ func Summarise(ctx context.Context, db *sql.DB, since time.Time, spec string) ([
 		}
 		if compiled {
 			a.Compiles++
-		} else if Outcome(outcome) != OutcomeInfra {
+		}
+		// A replay is a run with no model in the loop at all — which is what
+		// makes its duration a measure of the application rather than of the
+		// model. "Not compiled" is not the same thing: a run that was
+		// *repaired* paid for a triage call and a rewrite, and one of those
+		// in the bucket moved a 9s median to 64s.
+		//
+		// Both conditions, not either: neither flag has to be trusted alone.
+		if !compiled && agent == 0 && Outcome(outcome) != OutcomeInfra {
 			a.replays = append(a.replays, duration)
 		}
 	}

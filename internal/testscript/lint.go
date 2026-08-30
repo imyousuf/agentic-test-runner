@@ -69,6 +69,7 @@ const (
 	CodeNoAssertions   = "no-assertions"
 	CodeStepCannotFail = "step-cannot-fail"
 	CodeWeakTextMatch  = "weak-text-match"
+	CodeSwallowed      = "swallowed-assertion"
 	CodeFixedSleep     = "fixed-sleep"
 )
 
@@ -92,12 +93,24 @@ var nonThrowing = map[string]bool{
 	"failedRequests": true,
 }
 
-// assertions are the calls that state what the application must do.
+// assertions are the calls that state what the application must do on their
+// own. expect is deliberately absent: `expect(x)` builds a matcher object and
+// asserts nothing, so counting the bare call would let a step of
+// `expect(atr.text("#b"));` pass as one that can fail. Only the matcher call
+// on the end of it counts — see matcherCall.
 var assertions = map[string]bool{
-	"expect":            true,
 	"atr.fail":          true,
 	"atr.expectExists":  true,
 	"atr.expectMissing": true,
+}
+
+// isAssertion reports whether a call states something about the application.
+func isAssertion(call *ast.CallExpression) bool {
+	if assertions[calleeName(call.Callee)] {
+		return true
+	}
+	_, _, ok := matcherCall(call)
+	return ok
 }
 
 // Lint reports the ways a compiled script could pass without testing anything.
@@ -147,6 +160,7 @@ func Lint(source string) ([]Finding, error) {
 		})
 	}
 
+	findings = append(findings, swallowedAssertions(prg, steps)...)
 	findings = append(findings, weakMatches(prg, steps)...)
 	findings = append(findings, fixedSleeps(prg, steps, exempt)...)
 
@@ -223,13 +237,20 @@ func stepsIn(prg *ast.Program) []lintStep {
 // a thing a compiler does deliberately but is exactly what a model does when
 // it tidies. seen stops a recursive helper from doing the same to us.
 func stepCapabilities(body ast.Node, locals map[string]ast.Node, seen map[string]bool) (asserts int, throws bool) {
+	swallowed := assertionsInsideTry(body)
+
 	walk(body, func(n ast.Node) bool {
 		switch v := n.(type) {
 		case *ast.ThrowStatement:
 			throws = true
 		case *ast.CallExpression:
 			name := calleeName(v.Callee)
-			if assertions[name] {
+			if isAssertion(v) {
+				// An assertion whose throw is caught and dropped states
+				// nothing: the step goes green whatever the application did.
+				if swallowed[n] {
+					return true
+				}
 				asserts++
 				throws = true
 				return true
@@ -290,14 +311,103 @@ func localFunctions(prg *ast.Program) map[string]ast.Node {
 }
 
 func countAssertions(n ast.Node) int {
+	swallowed := assertionsInsideTry(n)
+
 	count := 0
 	walk(n, func(node ast.Node) bool {
-		if call, ok := node.(*ast.CallExpression); ok && assertions[calleeName(call.Callee)] {
+		call, ok := node.(*ast.CallExpression)
+		if ok && isAssertion(call) && !swallowed[node] {
 			count++
 		}
 		return true
 	})
 	return count
+}
+
+// assertionsInsideTry marks the assertions whose failure is caught.
+//
+// A compiled script has no legitimate reason to catch its own assertion.
+// atr.retry exists for transient failures, and an assertion is deliberately
+// the one kind that is never retried — so a try/catch around one can only
+// turn a red test green.
+func assertionsInsideTry(root ast.Node) map[ast.Node]bool {
+	swallowed := map[ast.Node]bool{}
+
+	walk(root, func(n ast.Node) bool {
+		try, ok := n.(*ast.TryStatement)
+		if !ok || try.Catch == nil || try.Body == nil {
+			return true
+		}
+		// A catch that rethrows, or fails the test itself, is not swallowing
+		// anything — the failure still reaches the runner, which is all the
+		// rule is about.
+		if catchEscalates(try.Catch) {
+			return true
+		}
+		walk(try.Body, func(inner ast.Node) bool {
+			if call, ok := inner.(*ast.CallExpression); ok && isAssertion(call) {
+				swallowed[inner] = true
+			}
+			return true
+		})
+		return true
+	})
+
+	return swallowed
+}
+
+// catchEscalates reports whether a catch block rethrows or fails the test.
+func catchEscalates(catch *ast.CatchStatement) bool {
+	escalates := false
+	walk(catch, func(n ast.Node) bool {
+		switch v := n.(type) {
+		case *ast.ThrowStatement:
+			escalates = true
+		case *ast.CallExpression:
+			if isAssertion(v) {
+				escalates = true
+			}
+		}
+		return true
+	})
+	return escalates
+}
+
+// swallowedAssertions reports the assertions a catch block discards.
+//
+// One finding per step, not per assertion: three swallowed assertions in one
+// try are one mistake, and iterating the set of nodes would order the findings
+// differently on every run, since Go randomises map iteration.
+func swallowedAssertions(prg *ast.Program, steps []lintStep) []Finding {
+	perStep := map[int]lintStep{}
+	var order []int
+
+	for node := range assertionsInsideTry(prg) {
+		step := stepAt(steps, int(node.Idx0()))
+		if _, seen := perStep[step.from]; seen {
+			continue
+		}
+		perStep[step.from] = step
+		order = append(order, step.from)
+	}
+	sort.Ints(order)
+
+	var findings []Finding
+	for _, at := range order {
+		step := perStep[at]
+		findings = append(findings, Finding{
+			Code:     CodeSwallowed,
+			Severity: SeverityBlocking,
+			Step:     step.number,
+			StepDesc: step.desc,
+			Message: "an assertion here is inside a try whose catch discards it, so it " +
+				"states nothing — the step goes green whatever the application did. " +
+				"Assertions are never retried on purpose; use atr.retry around the " +
+				"action if it is the action that is flaky",
+		})
+	}
+
+	return findings
 }
 
 // --- weak matches ------------------------------------------------------------

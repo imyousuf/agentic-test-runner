@@ -284,3 +284,56 @@ func TestAScriptAssertionReachedThroughTheLibraryIsAllowed(t *testing.T) {
 		t.Fatalf("an assertion written in the spec was refused: %v", res.Failure)
 	}
 }
+
+// A declaration can hide a program. `const boot = (function () { … })()` is a
+// variable declaration whose initialiser drives the browser at load time, and
+// a check that looks for atr.* calls outside a function body walks straight
+// past it — the call *is* inside a function, it is just called immediately.
+//
+// So the rule is every call, not every interesting call.
+func TestALibraryMayNotCallAnythingAtTheTopLevel(t *testing.T) {
+	tests := []struct {
+		name    string
+		library string
+	}{
+		{"an immediately-invoked function", `const boot = (function () { atr.navigate("/login"); return 1; })();`},
+		{"an immediately-invoked arrow", `const here = (() => atr.url())();`},
+		{"optional chaining, which hides the name", `const here = atr?.url();`},
+		{"a plain helper call", `function f() { return 1; } const x = f();`},
+		{"a class static block", `class Boot { static { atr.navigate("/x"); } }`},
+		{"reading an input", `const user = values.get("username");`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := ValidateLibrary(tt.library, LibraryName); err == nil {
+				t.Error("a library that runs code at load time was accepted")
+			}
+		})
+	}
+}
+
+// The rule must not reject the thing a library is for.
+func TestALibraryOfPlainDeclarationsIsAccepted(t *testing.T) {
+	const library = `
+		const SUBMIT = "#submit";
+		const TIMEOUT = 5000;
+		// A call to a host global is how a person writes a constant, and a
+		// rule that rejects it is a rule that gets worked around.
+		const SELECTORS = Object.freeze({user: "#username"});
+		const STEPS = "one,two".split(",");
+		const ORDER = new RegExp("^ORD-");
+		let attempts = 0;
+		class Helper {}
+		function signIn(user) {
+			attempts++;
+			atr.fill("#username", user);
+			atr.click(SUBMIT);
+			atr.waitFor("#dashboard", {timeout: TIMEOUT});
+		}
+		const alsoSignIn = (user) => signIn(user);
+	`
+	if err := ValidateLibrary(library, LibraryName); err != nil {
+		t.Errorf("a library of declarations was rejected: %v", err)
+	}
+}
