@@ -3,6 +3,7 @@ package history
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp"
@@ -42,8 +43,13 @@ func routeSDKErrors(report func(error)) {
 	otel.SetErrorHandler(otel.ErrorHandlerFunc(report))
 }
 
-func (t *Telemetry) startTraces(ctx context.Context, res *resource.Resource) error {
-	exp, err := otlptracehttp.New(ctx)
+func (t *Telemetry) startTraces(ctx context.Context, res *resource.Resource, endpoint string) error {
+	opts := []otlptracehttp.Option{}
+	if endpoint != "" {
+		opts = append(opts, otlptracehttp.WithEndpointURL(traceURL(endpoint)))
+	}
+
+	exp, err := otlptracehttp.New(ctx, opts...)
 	if err != nil {
 		return fmt.Errorf("starting the trace exporter: %w", err)
 	}
@@ -55,8 +61,13 @@ func (t *Telemetry) startTraces(ctx context.Context, res *resource.Resource) err
 	return nil
 }
 
-func (t *Telemetry) startMetrics(ctx context.Context, res *resource.Resource) error {
-	exp, err := otlpmetrichttp.New(ctx)
+func (t *Telemetry) startMetrics(ctx context.Context, res *resource.Resource, endpoint string) error {
+	opts := []otlpmetrichttp.Option{}
+	if endpoint != "" {
+		opts = append(opts, otlpmetrichttp.WithEndpointURL(metricURL(endpoint)))
+	}
+
+	exp, err := otlpmetrichttp.New(ctx, opts...)
 	if err != nil {
 		return fmt.Errorf("starting the metric exporter: %w", err)
 	}
@@ -98,8 +109,13 @@ func (t *Telemetry) instruments() error {
 	return nil
 }
 
-func (t *Telemetry) startLogs(ctx context.Context, res *resource.Resource) error {
-	exp, err := otlploghttp.New(ctx)
+func (t *Telemetry) startLogs(ctx context.Context, res *resource.Resource, endpoint string) error {
+	opts := []otlploghttp.Option{}
+	if endpoint != "" {
+		opts = append(opts, otlploghttp.WithEndpointURL(logURL(endpoint)))
+	}
+
+	exp, err := otlploghttp.New(ctx, opts...)
 	if err != nil {
 		return fmt.Errorf("starting the log exporter: %w", err)
 	}
@@ -109,6 +125,23 @@ func (t *Telemetry) startLogs(ctx context.Context, res *resource.Resource) error
 	)
 	t.logger = t.lp.Logger("github.com/imyousuf/agentic-test-runner")
 	return nil
+}
+
+// The exporters take a full signal URL, while the endpoint people configure —
+// and the one the standard variable carries — is the collector's base. These
+// append the signal path the SDK would have appended itself, and leave a URL
+// that already names a signal alone, so both `http://host:4318` and
+// `http://host:4318/v1/traces` do what the person meant.
+func traceURL(base string) string  { return signalURL(base, "traces") }
+func metricURL(base string) string { return signalURL(base, "metrics") }
+func logURL(base string) string    { return signalURL(base, "logs") }
+
+func signalURL(base, signal string) string {
+	base = strings.TrimRight(base, "/")
+	if strings.Contains(base, "/v1/") {
+		return base
+	}
+	return base + "/v1/" + signal
 }
 
 func otelDesc(s string) metric.InstrumentOption { return metric.WithDescription(s) }

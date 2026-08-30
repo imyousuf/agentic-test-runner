@@ -422,9 +422,11 @@ are not, so anything the command will not tell you is one query away:
 sqlite3 ~/.atr/history.db "SELECT spec, outcome, count(*) FROM runs GROUP BY 1,2"
 ```
 
-Set `OTEL_EXPORTER_OTLP_ENDPOINT` and the same runs export as traces, metrics
-and logs — which is how a CI run's history survives its container. With no
-endpoint set, nothing is emitted and no error is logged. Metrics carry only
+Point ATR at an OTLP collector — `--otel-endpoint`, `OTEL_EXPORTER_OTLP_ENDPOINT`,
+or `telemetry.endpoint` in the config, in that precedence order — and the same
+runs export as traces, metrics and logs, which is how a CI run's history
+survives its container. Give the collector's base URL; the signal path is
+appended. With no endpoint anywhere, nothing is emitted and no error is logged. Metrics carry only
 bounded dimensions; a failure message would be one time series per distinct
 message. Duration is dimensioned by compiled-versus-replayed, because a
 four-minute compile and a nine-second replay in one bucket destroy the
@@ -436,6 +438,7 @@ history:
   keep_days: 90
 telemetry:
   enabled: true      # inert unless an endpoint is configured
+  endpoint: ""       # or OTEL_EXPORTER_OTLP_ENDPOINT, or --otel-endpoint
 ```
 
 Both may be disabled, including at once.

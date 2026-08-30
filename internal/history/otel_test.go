@@ -257,13 +257,51 @@ func TestNothingIsConfiguredWithoutAnEndpoint(t *testing.T) {
 	} {
 		t.Setenv(key, "")
 	}
-	if Configured() {
-		t.Error("telemetry reports itself configured with no endpoint set")
+	if Configured("") {
+		t.Error("telemetry reports itself configured with no endpoint anywhere")
 	}
 
-	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4318")
-	if !Configured() {
-		t.Error("telemetry ignores the standard endpoint variable")
+	// An endpoint ATR resolved itself — from --otel-endpoint or config.
+	if !Configured("http://localhost:4318") {
+		t.Error("an explicitly configured endpoint was ignored")
+	}
+
+	// The SDK honours the per-signal variables on its own, and a collector
+	// reached only through one of those is still a collector.
+	t.Setenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", "http://localhost:4318/v1/traces")
+	if !Configured("") {
+		t.Error("a per-signal endpoint variable was ignored")
+	}
+}
+
+// The exporters take a full signal URL; the endpoint a person configures is
+// the collector's base. Getting this wrong sends every signal to /v1/traces,
+// or to a 404, and the run reports a connection problem it does not have.
+func TestSignalURLs(t *testing.T) {
+	tests := []struct {
+		base   string
+		traces string
+	}{
+		{"http://localhost:4318", "http://localhost:4318/v1/traces"},
+		{"http://localhost:4318/", "http://localhost:4318/v1/traces"},
+		{"https://collector.example.com:443", "https://collector.example.com:443/v1/traces"},
+		// Already names a signal: left alone, because the person meant it.
+		{"http://localhost:4318/v1/traces", "http://localhost:4318/v1/traces"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.base, func(t *testing.T) {
+			if got := traceURL(tt.base); got != tt.traces {
+				t.Errorf("traceURL(%q) = %q, want %q", tt.base, got, tt.traces)
+			}
+		})
+	}
+
+	if got := metricURL("http://localhost:4318"); got != "http://localhost:4318/v1/metrics" {
+		t.Errorf("metricURL = %q", got)
+	}
+	if got := logURL("http://localhost:4318"); got != "http://localhost:4318/v1/logs" {
+		t.Errorf("logURL = %q", got)
 	}
 }
 
@@ -430,4 +468,112 @@ type attributeKV = attribute.KeyValue
 
 func kvs(set attribute.Set) []attributeKV {
 	return set.ToSlice()
+}
+
+// recordingLogs captures what was emitted, with the span it was emitted under.
+type recordingLogs struct {
+	mu      sync.Mutex
+	records []loggedRecord
+}
+
+type loggedRecord struct {
+	body   string
+	spanID string
+}
+
+func (r *recordingLogs) Export(ctx context.Context, records []sdklog.Record) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, rec := range records {
+		r.records = append(r.records, loggedRecord{
+			body:   rec.Body().AsString(),
+			spanID: rec.SpanID().String(),
+		})
+	}
+	return nil
+}
+
+func (r *recordingLogs) Shutdown(context.Context) error   { return nil }
+func (r *recordingLogs) ForceFlush(context.Context) error { return nil }
+
+func (r *recordingLogs) all() []loggedRecord {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]loggedRecord(nil), r.records...)
+}
+
+// A log record carries the span id of whatever context it is emitted with, so
+// emitting under the run's context attaches the failure to the run rather than
+// to the attempt that produced it. "Which attempt failed, and why" is the
+// question the correlation exists to answer, and the answer is in the span id.
+//
+// Caught against a real collector: the record arrived attached to behavior.run.
+func TestAFailureIsCorrelatedWithTheAttemptThatProducedIt(t *testing.T) {
+	spans := tracetest.NewInMemoryExporter()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(spans))
+
+	logs := &recordingLogs{}
+	lp := sdklog.NewLoggerProvider(sdklog.WithProcessor(sdklog.NewSimpleProcessor(logs)))
+
+	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(sdkmetric.NewManualReader()))
+
+	tel, err := newTelemetryWith(tp, mp, lp, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { tel.Close(context.Background()) })
+
+	now := time.Now()
+	run := Run{
+		ID: NewID(), Spec: "tests/a.test.txt",
+		StartedAt: now, FinishedAt: now.Add(3 * time.Second),
+		Outcome: OutcomeTestFailure, FailureKind: "assertion",
+		Attempts: []Attempt{
+			{Number: 1, Started: now, Duration: time.Second, Kind: "timeout", Message: "waiting for #done"},
+			{Number: 2, Started: now.Add(time.Second), Duration: time.Second,
+				Kind: "assertion", Message: `expected "1", got "0"`},
+		},
+	}
+	if err := tel.Record(context.Background(), run); err != nil {
+		t.Fatal(err)
+	}
+
+	// Map each attempt span to the attempt number it carries.
+	attemptSpans := map[string]int64{}
+	for _, s := range spans.GetSpans() {
+		if s.Name != "attempt" {
+			continue
+		}
+		for _, kv := range s.Attributes {
+			if string(kv.Key) == "atr.attempt" {
+				attemptSpans[s.SpanContext.SpanID().String()] = kv.Value.AsInt64()
+			}
+		}
+	}
+	if len(attemptSpans) != 2 {
+		t.Fatalf("found %d attempt spans, want 2", len(attemptSpans))
+	}
+
+	records := logs.all()
+	if len(records) != 2 {
+		t.Fatalf("emitted %d log records, want one per failed attempt", len(records))
+	}
+
+	for _, rec := range records {
+		number, ok := attemptSpans[rec.spanID]
+		if !ok {
+			t.Errorf("log record %q is not attached to an attempt span (span %s)", rec.body, rec.spanID)
+			continue
+		}
+		switch number {
+		case 1:
+			if rec.body != "waiting for #done" {
+				t.Errorf("attempt 1 carries %q", rec.body)
+			}
+		case 2:
+			if rec.body != `expected "1", got "0"` {
+				t.Errorf("attempt 2 carries %q", rec.body)
+			}
+		}
+	}
 }

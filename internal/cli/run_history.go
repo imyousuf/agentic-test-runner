@@ -35,9 +35,14 @@ func openHistory(ctx context.Context, cfg *config.Config) *history.Multi {
 	// Gated on the standard OTLP variable rather than a flag of our own, so a
 	// laptop with no collector emits nothing and produces no connection
 	// errors, and a CI job opts in with one line.
-	if cfg.Telemetry.Enabled && history.Configured() {
+	endpoint := cfg.Telemetry.Endpoint
+	if otelEndpointFlag != "" {
+		endpoint = otelEndpointFlag
+	}
+	if cfg.Telemetry.Enabled && history.Configured(endpoint) {
 		tel, err := history.NewTelemetry(ctx, history.TelemetryOptions{
 			ServiceName:     cfg.Telemetry.ServiceName,
+			Endpoint:        endpoint,
 			ShutdownTimeout: cfg.Telemetry.ShutdownTimeout,
 			OnError:         m.OnError,
 		})

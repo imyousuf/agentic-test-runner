@@ -86,6 +86,7 @@ Run browser-based behavior tests using AI-driven automation.
 | `--no-repair` | Diagnose a drifted script but do not rewrite it |
 | `--prune-values` | Remove inputs neither the compiled script nor `_shared.js` reads |
 | `--lint <mode>` | What to do about a script that cannot fail: `error` (default), `warn`, `off` |
+| `--otel-endpoint <url>` | OTLP collector for run telemetry, e.g. `http://localhost:4318` |
 | `--interpret` | Skip compilation and let the agent drive every step (slower, costs tokens per run) |
 | `--viewport <WxH>` | Viewport size, e.g., `1920x1080` |
 | `--cdp-endpoint <url>` | Connect to existing browser via CDP |
@@ -792,10 +793,12 @@ away:
 sqlite3 ~/.atr/history.db "SELECT spec, outcome, count(*) FROM runs GROUP BY 1,2"
 ```
 
-Set `OTEL_EXPORTER_OTLP_ENDPOINT` and the same runs export as OpenTelemetry
+Point ATR at an OTLP collector and the same runs export as OpenTelemetry
 traces, metrics and logs — which is how a CI run's history survives the
-container being torn down. With no endpoint set, nothing is emitted and no
-error is logged.
+container being torn down. In precedence order: `--otel-endpoint`, then
+`OTEL_EXPORTER_OTLP_ENDPOINT`, then `telemetry.endpoint` in the config file.
+Give the collector's base URL; the signal path is appended. With no endpoint
+anywhere, nothing is emitted and no error is logged.
 
 Configure in `~/.atr/config.yaml`; both sinks may be disabled, including at
 once:
@@ -806,7 +809,8 @@ history:
   path: ""            # default ~/.atr/history.db
   keep_days: 90
 telemetry:
-  enabled: true       # inert unless an endpoint is configured
+  enabled: true                       # inert unless an endpoint is configured
+  endpoint: "http://localhost:4318"   # or OTEL_EXPORTER_OTLP_ENDPOINT
   service_name: atr
   shutdown_timeout: 5s
 ```
