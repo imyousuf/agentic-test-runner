@@ -33,18 +33,19 @@ var (
 	contextFlag string
 
 	// Behavior testing flags
-	behaviorFlag    string
-	browserURLFlag  string
-	headlessFlag    bool
-	recompileFlag   bool
-	noCompileFlag   bool
-	noRepairFlag    bool
-	pruneValuesFlag bool
-	lintFlag        string
-	interpretFlag   bool
-	sandboxFlag     bool // opt-in to enable sandbox (default: disabled for compatibility)
-	viewportFlag    string
-	cdpEndpointFlag string
+	behaviorFlag     string
+	browserURLFlag   string
+	headlessFlag     bool
+	recompileFlag    bool
+	noCompileFlag    bool
+	noRepairFlag     bool
+	pruneValuesFlag  bool
+	lintFlag         string
+	otelEndpointFlag string
+	interpretFlag    bool
+	sandboxFlag      bool // opt-in to enable sandbox (default: disabled for compatibility)
+	viewportFlag     string
+	cdpEndpointFlag  string
 
 	// Environment flags
 	pythonVenvFlag string
@@ -115,6 +116,8 @@ a CI job can retry rather than escalate.`,
 		"Replay only; never call the model. Fails if a script is missing or stale (use in CI)")
 	runCmd.Flags().BoolVar(&noRepairFlag, "no-repair", false,
 		"Diagnose a drifted script but do not rewrite it")
+	runCmd.Flags().StringVar(&otelEndpointFlag, "otel-endpoint", "",
+		"OTLP collector for run telemetry, e.g. http://localhost:4318 (overrides OTEL_EXPORTER_OTLP_ENDPOINT)")
 	runCmd.Flags().StringVar(&lintFlag, "lint", string(agent.LintModeError),
 		"What to do about a compiled script that cannot fail: error, warn, off")
 	runCmd.Flags().BoolVar(&pruneValuesFlag, "prune-values", false,

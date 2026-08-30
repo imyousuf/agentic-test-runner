@@ -53,6 +53,10 @@ type Telemetry struct {
 // TelemetryOptions configures the exporter.
 type TelemetryOptions struct {
 	ServiceName string
+	// Endpoint is the OTLP collector. Empty leaves the SDK reading the
+	// standard OTEL_EXPORTER_OTLP_* variables, which is what makes the
+	// per-signal ones work.
+	Endpoint string
 	// ShutdownTimeout bounds the flush on exit. An unreachable collector must
 	// delay a run's exit, never hang it.
 	ShutdownTimeout time.Duration
@@ -62,16 +66,30 @@ type TelemetryOptions struct {
 	OnError func(error)
 }
 
-// Configured reports whether an OTLP endpoint is set.
+// Configured reports whether there is anywhere to export to.
 //
-// The standard variable rather than a flag of our own: a laptop with no
-// collector then emits nothing and produces no connection errors, and a CI job
-// opts in with one line and no ATR-specific knowledge.
-func Configured() bool {
-	return os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT") != "" ||
-		os.Getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT") != "" ||
-		os.Getenv("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT") != "" ||
-		os.Getenv("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT") != ""
+// endpoint is what ATR resolved from --otel-endpoint, config, or the standard
+// OTEL_EXPORTER_OTLP_ENDPOINT variable. The per-signal variables are checked
+// separately because the SDK honours them on its own, and a collector reached
+// only through one of those is still a collector.
+//
+// Nothing is exported without one, so a laptop emits nothing and produces no
+// connection errors.
+func Configured(endpoint string) bool {
+	if endpoint != "" {
+		return true
+	}
+	for _, key := range []string{
+		"OTEL_EXPORTER_OTLP_ENDPOINT",
+		"OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
+		"OTEL_EXPORTER_OTLP_METRICS_ENDPOINT",
+		"OTEL_EXPORTER_OTLP_LOGS_ENDPOINT",
+	} {
+		if os.Getenv(key) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // NewTelemetry builds the exporter. Providers are ours rather than global, so
@@ -93,14 +111,14 @@ func NewTelemetry(ctx context.Context, opts TelemetryOptions) (*Telemetry, error
 
 	t := &Telemetry{shutdown: opts.ShutdownTimeout}
 
-	if err := t.startTraces(ctx, res); err != nil {
+	if err := t.startTraces(ctx, res, opts.Endpoint); err != nil {
 		return nil, err
 	}
-	if err := t.startMetrics(ctx, res); err != nil {
+	if err := t.startMetrics(ctx, res, opts.Endpoint); err != nil {
 		t.Close(ctx)
 		return nil, err
 	}
-	if err := t.startLogs(ctx, res); err != nil {
+	if err := t.startLogs(ctx, res, opts.Endpoint); err != nil {
 		t.Close(ctx)
 		return nil, err
 	}
@@ -151,7 +169,12 @@ func (t *Telemetry) Record(ctx context.Context, run Run) error {
 	}
 
 	for _, a := range run.Attempts {
-		_, attemptSpan := t.tracer.Start(ctx, "attempt",
+		// attemptCtx, not ctx: a log record carries the span id of whatever
+		// context it is emitted with, so emitting the failure message under
+		// the run's context would attach it to the run rather than to the
+		// attempt that produced it — and "which attempt failed, and why" is
+		// the question the correlation exists to answer.
+		attemptCtx, attemptSpan := t.tracer.Start(ctx, "attempt",
 			trace.WithTimestamp(a.Started),
 			trace.WithAttributes(
 				attribute.Int("atr.attempt", a.Number),
@@ -165,7 +188,7 @@ func (t *Telemetry) Record(ctx context.Context, run Run) error {
 		// attribute: it is unbounded content, and correlating it by span id is
 		// what makes it findable anyway.
 		if a.Message != "" {
-			t.log(ctx, a.Message, a.Kind, run.Spec)
+			t.log(attemptCtx, a.Message, a.Kind, run.Spec)
 		}
 		attemptSpan.End(trace.WithTimestamp(a.Started.Add(a.Duration)))
 	}

@@ -36,6 +36,7 @@ atr run --behavior tests/e2e/ --browser-url http://localhost:3000
 | `--no-repair` | Diagnose a drifted script but do not rewrite it | false |
 | `--prune-values` | Remove inputs the script no longer reads | false |
 | `--lint <mode>` | What to do about a script that cannot fail: `error`, `warn`, `off` | error |
+| `--otel-endpoint <url>` | OTLP collector for run telemetry, e.g. `http://localhost:4318` | from config or env |
 | `--interpret` | Skip compilation; let the agent drive every step | false |
 | `-v, --verbose` | Show the script's own `atr.log()` output | false |
 
@@ -240,10 +241,23 @@ a stable contract, so anything the command will not tell you is one query away:
 sqlite3 ~/.atr/history.db "SELECT spec, outcome, count(*) FROM runs GROUP BY 1,2"
 ```
 
-Set `OTEL_EXPORTER_OTLP_ENDPOINT` and the same runs are exported as traces,
-metrics and logs — which is how a CI run's history survives the container
-being torn down. With no endpoint set, nothing is emitted and no error is
-logged.
+Point ATR at an OTLP collector and the same runs are exported as traces,
+metrics and logs — which is how a CI run's history survives the container being
+torn down. Three ways, in precedence order:
+
+```bash
+atr run --behavior tests/ --otel-endpoint http://localhost:4318   # this run only
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318          # the standard variable
+```
+
+```yaml
+telemetry:
+  endpoint: "http://localhost:4318"    # ~/.atr/config.yaml
+```
+
+Give the collector's base URL; the signal path (`/v1/traces` and friends) is
+appended, and a URL that already names a signal is left alone. With no endpoint
+anywhere, nothing is emitted and no error is logged.
 
 Turn either off in `~/.atr/config.yaml`; both may be off at once:
 

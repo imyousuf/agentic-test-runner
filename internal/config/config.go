@@ -85,15 +85,18 @@ type HistoryConfig struct {
 }
 
 // TelemetryConfig holds the OpenTelemetry settings.
-//
-// There is no endpoint here on purpose: OTEL_EXPORTER_OTLP_ENDPOINT is the
-// standard variable, so a laptop with no collector emits nothing and produces
-// no connection errors, and a CI job opts in with one line and no ATR-specific
-// knowledge.
 type TelemetryConfig struct {
 	// Enabled allows export when an endpoint is configured. On by default,
 	// and inert without one.
 	Enabled bool `mapstructure:"enabled"`
+	// Endpoint is the OTLP collector, e.g. http://localhost:4318.
+	//
+	// Bound to OTEL_EXPORTER_OTLP_ENDPOINT, so the standard variable works
+	// with no ATR-specific knowledge and a laptop with no collector emits
+	// nothing rather than producing connection errors. --otel-endpoint
+	// overrides both, for the case the variable cannot reach: a shell where
+	// exporting it would also point unrelated tools somewhere.
+	Endpoint string `mapstructure:"endpoint"`
 	// ServiceName names ATR in the collector.
 	ServiceName string `mapstructure:"service_name"`
 	// ShutdownTimeout bounds the flush on exit. A replay takes nine seconds
@@ -325,6 +328,7 @@ func Load() (*Config, error) {
 	_ = v.BindEnv("vertex.project", "GOOGLE_CLOUD_PROJECT")
 	_ = v.BindEnv("vertex.location", "GOOGLE_CLOUD_LOCATION")
 	_ = v.BindEnv("vertex.credentials_file", "GOOGLE_APPLICATION_CREDENTIALS")
+	_ = v.BindEnv("telemetry.endpoint", "OTEL_EXPORTER_OTLP_ENDPOINT")
 
 	// Computer feature env bindings (also reachable via AutomaticEnv, but
 	// explicit binding ensures struct unmarshal sees the override even when

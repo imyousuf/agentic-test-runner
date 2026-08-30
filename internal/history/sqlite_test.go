@@ -312,3 +312,171 @@ func mkdirAll(t *testing.T, path string) {
 		t.Fatal(err)
 	}
 }
+
+// The claim this design rests on: tables are ours, views are the contract. It
+// only holds if the views are recreated on open, or the first schema change
+// leaves everyone querying a view that describes the old shape.
+func TestViewsAreRecreatedOnEveryOpen(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "history.db")
+
+	s, err := OpenSQLite(path, DefaultKeep)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Stand in for a view left behind by an older version.
+	if _, err := s.DB().Exec(`DROP VIEW runs; CREATE VIEW runs AS SELECT id FROM run`); err != nil {
+		t.Fatal(err)
+	}
+	s.Close(context.Background())
+
+	s2, err := OpenSQLite(path, DefaultKeep)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s2.Close(context.Background())
+
+	record(t, s2, sampleRun())
+
+	// The current view exposes far more than an id; a stale one would fail here.
+	var spec, outcome string
+	if err := s2.DB().QueryRow(`SELECT spec, outcome FROM runs LIMIT 1`).Scan(&spec, &outcome); err != nil {
+		t.Fatalf("the stale view survived the open: %v", err)
+	}
+}
+
+// WAL is what lets a second atr run write while this one is reading. Asserting
+// it directly, because the concurrency test would still pass by luck on a
+// single-threaded run.
+func TestWALIsEnabled(t *testing.T) {
+	s := openTemp(t)
+
+	var mode string
+	if err := s.DB().QueryRow(`PRAGMA journal_mode`).Scan(&mode); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.EqualFold(mode, "wal") {
+		t.Errorf("journal_mode = %q, want wal", mode)
+	}
+
+	var busy int
+	if err := s.DB().QueryRow(`PRAGMA busy_timeout`).Scan(&busy); err != nil {
+		t.Fatal(err)
+	}
+	if busy <= 0 {
+		t.Errorf("busy_timeout = %d; without one a concurrent write errors instead of waiting", busy)
+	}
+}
+
+// A recorder that cannot open its database must report and be skipped, never
+// stop the run: the exit code belongs to the application under test.
+func TestAnUnwritableDatabaseIsAnErrorNotAPanic(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "readonly")
+	if err := os.MkdirAll(dir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(dir, 0o700) })
+
+	if os.Geteuid() == 0 {
+		t.Skip("running as root, which can write to a read-only directory")
+	}
+
+	s, err := OpenSQLite(filepath.Join(dir, "sub", "history.db"), DefaultKeep)
+	if err == nil {
+		s.Close(context.Background())
+		t.Fatal("a database in an unwritable directory opened")
+	}
+	if !strings.Contains(err.Error(), "history") && !strings.Contains(err.Error(), "permission") {
+		t.Errorf("the error does not say what failed: %v", err)
+	}
+}
+
+// A file that is not a database at all — a truncated copy, something else
+// written to the same path — must fail rather than crash the run.
+func TestACorruptDatabaseIsAnErrorNotAPanic(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "history.db")
+	if err := os.WriteFile(path, []byte("this is not a database"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := OpenSQLite(path, DefaultKeep)
+	if err == nil {
+		// Some drivers defer the header check; a write must still fail rather
+		// than corrupt anything.
+		recErr := s.Record(context.Background(), sampleRun())
+		s.Close(context.Background())
+		if recErr == nil {
+			t.Fatal("a corrupt file accepted a run record")
+		}
+	}
+}
+
+// A run is written once. Recording the same id twice — a retry of the write,
+// two sinks fed the same record — must not double-count it in every report.
+func TestRecordingTheSameRunTwiceDoesNotDuplicateIt(t *testing.T) {
+	s := openTemp(t)
+	run := sampleRun()
+	run.Attempts = []Attempt{{Number: 1, Started: run.StartedAt, Passed: true}}
+
+	record(t, s, run)
+	record(t, s, run)
+
+	var runs, attempts int
+	if err := s.DB().QueryRow(`SELECT count(*) FROM runs`).Scan(&runs); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DB().QueryRow(`SELECT count(*) FROM attempts`).Scan(&attempts); err != nil {
+		t.Fatal(err)
+	}
+	if runs != 1 {
+		t.Errorf("recorded %d runs for one id", runs)
+	}
+	if attempts != 1 {
+		t.Errorf("recorded %d attempts for one attempt", attempts)
+	}
+}
+
+// The database is meant to be queried directly — the primary consumer is an
+// agent with a shell. Every view has to be readable without knowing the tables.
+func TestEveryViewIsQueryable(t *testing.T) {
+	s := openTemp(t)
+	run := sampleRun()
+	run.Attempts = []Attempt{{Number: 1, Started: run.StartedAt, Passed: true}}
+	record(t, s, run)
+
+	for _, view := range []string{"runs", "attempts", "compiles"} {
+		var n int
+		if err := s.DB().QueryRow(`SELECT count(*) FROM ` + view).Scan(&n); err != nil {
+			t.Errorf("SELECT from %s: %v", view, err)
+		}
+	}
+}
+
+// Retention has to be opt-out, not accidental: passing zero means keep
+// everything, which is what `atr history` does so reporting never deletes.
+func TestZeroRetentionKeepsEverything(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "history.db")
+
+	s, err := OpenSQLite(path, DefaultKeep)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := sampleRun()
+	old.StartedAt = time.Now().UTC().Add(-1000 * 24 * time.Hour)
+	old.FinishedAt = old.StartedAt.Add(time.Second)
+	record(t, s, old)
+	s.Close(context.Background())
+
+	s2, err := OpenSQLite(path, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s2.Close(context.Background())
+
+	var runs int
+	if err := s2.DB().QueryRow(`SELECT count(*) FROM runs`).Scan(&runs); err != nil {
+		t.Fatal(err)
+	}
+	if runs != 1 {
+		t.Error("opening for reporting pruned the history it was asked to report on")
+	}
+}
