@@ -122,8 +122,19 @@ atr.step(2, "Verify status", () => { expect(atr.text("#status")).toBe("signed in
 	}
 
 	// The compile is the expensive thing ATR does, and nothing measured it.
-	if outcome.CompileDuration <= 0 {
-		t.Error("the compile was not timed")
+	//
+	// Not asserted as strictly positive: a scripted compile does no real work,
+	// and a clock with coarse granularity — Windows' is about 15ms — measures
+	// it as zero. What can be checked is that it is bounded by the run it sits
+	// inside, and that a replay reports nothing at all. That a compile is
+	// *visible* is asserted where it matters, on the trace shape, which keys
+	// off Compiled rather than off the duration.
+	if outcome.CompileDuration < 0 {
+		t.Errorf("compile duration = %s", outcome.CompileDuration)
+	}
+	if outcome.Result != nil && outcome.CompileDuration > time.Minute {
+		t.Errorf("compile duration = %s, longer than this run could possibly have taken",
+			outcome.CompileDuration)
 	}
 
 	// A replay is not a compile, and must not inherit its cost.
