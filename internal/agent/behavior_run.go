@@ -342,7 +342,16 @@ func (a *Agent) RunBehavior(ctx context.Context, req RunRequest) (*RunOutcome, e
 				failure.Kind)
 			return outcome, nil
 		}
-		if failure.Kind.Repairable() && repairs >= req.MaxRepairs {
+		// Whatever the kind, once the script has been rewritten as often as
+		// the budget allows, stop.
+		//
+		// This used to apply only to repairable kinds, which left it applying
+		// to almost nothing: a timeout is not repairable, so a triage that
+		// kept answering "repaired" rewrote the committed script and asked
+		// again, and again — twelve rewrites and thirteen model calls against
+		// a budget of one. The budget is about rewrites, and a rewrite is a
+		// rewrite whatever prompted it.
+		if repairs >= req.MaxRepairs {
 			logf("repair budget exhausted (%d)", req.MaxRepairs)
 			return outcome, nil
 		}

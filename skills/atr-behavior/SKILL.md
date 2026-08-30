@@ -57,11 +57,14 @@ atr run --behavior tests/login.test.txt  # local: compile if needed
 
 **`--no-compile` needs no backend at all** — no API key, no project, no
 `gcloud auth application-default login`. A CI job that only replays does not
-have to hold credentials for calls it will never make. (`--interpret` is
-refused alongside it, since it is nothing but model calls.)
+have to hold credentials, and one that has them spends at most a single call,
+only when a run has already failed, to say *why* (see below). (`--interpret`
+is refused alongside it, since it is nothing but model calls.)
 
 Each run prints how it was serviced (`compiled →`, `repaired →`) and how many
-model calls it cost. A replay costing more than zero is worth investigating.
+model calls it cost. **A passing replay costing more than zero is worth
+investigating**; a failing one costs one call to classify the failure, which
+is the point.
 
 ## A script that cannot fail is refused
 

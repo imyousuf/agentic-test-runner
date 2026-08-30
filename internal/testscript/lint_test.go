@@ -586,3 +586,177 @@ func TestWaitingOnTheWayToSomethingElseIsFine(t *testing.T) {
 		}
 	}
 }
+
+// Asserting and then waiting is a different shape — odd, but not the split
+// this rule warns about, and reporting it under this name would send the
+// reader looking for a mistake that is not there.
+func TestAssertingBeforeWaitingIsNotTheSplit(t *testing.T) {
+	for _, f := range lint(t, `
+		atr.step(1, "Check", () => {
+			expect(atr.text("#message")).toBe("Order placed");
+			atr.waitForText("Order placed");
+		});
+	`) {
+		if f.Code == CodeWaitThenAssert {
+			t.Errorf("an assertion followed by a wait was reported as the split: %s", f)
+		}
+	}
+}
+
+// The two calls have to be in the same step to be the same intent. A wait in
+// one step and an assertion in another are a sequence, not a split.
+func TestAWaitAndAnAssertionInDifferentStepsAreNotTheSplit(t *testing.T) {
+	for _, f := range lint(t, `
+		atr.step(1, "Get there", () => {
+			atr.waitForText("Order placed");
+			atr.click("#next");
+		});
+		atr.step(2, "Check", () => {
+			expect(atr.text("#message")).toBe("Order placed");
+		});
+	`) {
+		if f.Code == CodeWaitThenAssert {
+			t.Errorf("a wait and an assertion in different steps were reported: %s", f)
+		}
+	}
+}
+
+// The lint refuses a script that cannot fail, and expectText is the call the
+// compile prompt now prescribes — so a lint that does not recognise it as an
+// assertion blocks every script written the way we asked for. A blocking
+// finding on the recommended form is the worst shape a rule can have.
+func TestExpectTextCountsAsAnAssertion(t *testing.T) {
+	findings := lint(t, `
+		atr.step(1, "Check out", () => {
+			atr.click("#checkout");
+			atr.expectText("#message", "Order placed", {timeout: 5000});
+		});
+	`)
+
+	for _, f := range findings {
+		if f.Severity == SeverityBlocking {
+			t.Errorf("a script the prompt prescribes was refused: %s — %s", f.Code, f)
+		}
+	}
+}
+
+// The weak-match rule has to cover both phrasings, or it is bypassed by the
+// one the prompt prescribes.
+func TestAShortNeedleAgainstTheWholePageIsWeakEitherWay(t *testing.T) {
+	forms := map[string]string{
+		"through a matcher":  `atr.step(1, "Check", () => { expect(atr.text()).toContain("archiv"); });`,
+		"through expectText": `atr.step(1, "Check", () => { atr.expectText("body", "archiv", {contains: true}); });`,
+	}
+
+	for name, source := range forms {
+		t.Run(name, func(t *testing.T) {
+			var found bool
+			for _, f := range lint(t, source) {
+				if f.Code == CodeWeakTextMatch {
+					found = true
+				}
+			}
+			if !found {
+				t.Error("a short substring against the whole page was not reported")
+			}
+		})
+	}
+
+	// Naming the element is the fix, and must not be reported.
+	for _, f := range lint(t, `atr.step(1, "Check", () => { atr.expectText("#status", "archiv", {contains: true}); });`) {
+		if f.Code == CodeWeakTextMatch {
+			t.Errorf("a substring against a named element was reported: %s", f)
+		}
+	}
+}
+
+// A wait for page text and an assertion about the URL share a literal and mean
+// entirely different things. Reporting that pair sends the reader looking for
+// a split that is not there.
+func TestAWaitAndAnAssertionAboutDifferentThingsAreNotTheSplit(t *testing.T) {
+	for _, f := range lint(t, `
+		atr.step(1, "Go to the dashboard", () => {
+			atr.waitForText("Dashboard");
+			expect(atr.url()).toContain("Dashboard");
+		});
+	`) {
+		if f.Code == CodeWaitThenAssert {
+			t.Errorf("a wait and a URL assertion sharing a literal were reported as one intent: %s", f)
+		}
+	}
+}
+
+// The prompt forbids hardcoding inputs, so a compiled script writes the same
+// values.get on both sides of the split — inline, or hoisted into a local
+// first. A rule that only sees string literals misses the scripts most likely
+// to have the problem.
+func TestTheSplitIsFoundThroughAnInput(t *testing.T) {
+	forms := map[string]string{
+		"inline": `atr.step(1, "Check", () => {
+			atr.waitForText(values.get("confirmation"));
+			expect(atr.text("#message")).toBe(values.get("confirmation"));
+		});`,
+		"hoisted into a local": `atr.step(1, "Check", () => {
+			const msg = values.get("confirmation");
+			atr.waitForText(msg, {timeout: 5000});
+			expect(atr.text("#message")).toBe(msg);
+		});`,
+	}
+
+	for name, source := range forms {
+		t.Run(name, func(t *testing.T) {
+			var found bool
+			for _, f := range lint(t, source) {
+				if f.Code != CodeWaitThenAssert {
+					continue
+				}
+				found = true
+				if !strings.Contains(f.Message, "confirmation") {
+					t.Errorf("the finding does not name what was waited for: %s", f)
+				}
+			}
+			if !found {
+				t.Error("the split was not reported")
+			}
+		})
+	}
+}
+
+// The presence half of the same mistake. The wait fails first, exactly as it
+// does for text, so an element that never appears is reported as a timeout
+// rather than as the application being wrong.
+func TestWaitForThenAssertExistsIsReported(t *testing.T) {
+	var found bool
+	for _, f := range lint(t, `
+		atr.step(1, "The message appears", () => {
+			atr.click("#send");
+			atr.waitFor("#message", {timeout: 5000});
+			expect(atr.exists("#message")).toBeTruthy();
+		});
+	`) {
+		if f.Code == CodeWaitThenAssert {
+			found = true
+			if !strings.Contains(f.Message, "expectExists") {
+				t.Errorf("the finding does not name the call that fixes it: %s", f)
+			}
+		}
+	}
+	if !found {
+		t.Error("the presence form of the split was not reported")
+	}
+}
+
+// Waiting for one thing and asserting another is not the split, in the
+// presence form either.
+func TestWaitingForADifferentTargetIsNotTheSplit(t *testing.T) {
+	for _, f := range lint(t, `
+		atr.step(1, "Send", () => {
+			atr.waitFor("#composer");
+			expect(atr.exists("#message")).toBeTruthy();
+		});
+	`) {
+		if f.Code == CodeWaitThenAssert {
+			t.Errorf("a wait for a different target was reported: %s", f)
+		}
+	}
+}
