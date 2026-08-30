@@ -22,6 +22,17 @@ import (
 
 const skillsDir = "../../skills"
 
+// normalise flattens line endings before anything is matched against them.
+//
+// These files are committed with LF and checked out with CRLF on Windows,
+// where git's autocrlf is on by default — so a check for "---\n" at the start
+// of a skill fails on a file that is perfectly well formed. What is being
+// asserted here is content, and content does not change because a checkout
+// chose different line endings.
+func normalise(body string) string {
+	return strings.ReplaceAll(body, "\r\n", "\n")
+}
+
 // skillFiles returns every markdown and template file shipped under skills/.
 func skillFiles(t *testing.T) map[string]string {
 	t.Helper()
@@ -43,7 +54,7 @@ func skillFiles(t *testing.T) map[string]string {
 		if err != nil {
 			return err
 		}
-		files[path] = string(data)
+		files[path] = normalise(string(data))
 		return nil
 	})
 	if err != nil {
@@ -150,7 +161,7 @@ func TestEverySkillHasFrontmatter(t *testing.T) {
 		}
 		found++
 
-		body := string(data)
+		body := normalise(string(data))
 		if !strings.HasPrefix(body, "---\n") {
 			t.Errorf("%s does not open with frontmatter", path)
 			continue
@@ -182,7 +193,7 @@ func TestShippedTemplateHasNoWeakExpectations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reading the spec template: %v", err)
 	}
-	body := string(data)
+	body := normalise(string(data))
 
 	for _, phrase := range []string{"Steps completed successfully", "No console errors"} {
 		if strings.Contains(body, phrase) {

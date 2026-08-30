@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -370,15 +371,21 @@ func TestWALIsEnabled(t *testing.T) {
 // A recorder that cannot open its database must report and be skipped, never
 // stop the run: the exit code belongs to the application under test.
 func TestAnUnwritableDatabaseIsAnErrorNotAPanic(t *testing.T) {
+	// Windows does not honour the Unix mode bits on a directory, so there is
+	// no cheap way to make one unwritable — and the behaviour under test is
+	// the error path, not the permission model.
+	if runtime.GOOS == "windows" {
+		t.Skip("a directory's Unix mode bits do not make it unwritable on Windows")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("running as root, which can write to a read-only directory")
+	}
+
 	dir := filepath.Join(t.TempDir(), "readonly")
 	if err := os.MkdirAll(dir, 0o500); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { os.Chmod(dir, 0o700) })
-
-	if os.Geteuid() == 0 {
-		t.Skip("running as root, which can write to a read-only directory")
-	}
 
 	s, err := OpenSQLite(filepath.Join(dir, "sub", "history.db"), DefaultKeep)
 	if err == nil {
