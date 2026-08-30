@@ -170,7 +170,12 @@ func (t *Telemetry) Record(ctx context.Context, run Run) error {
 
 	// A compile span only when a compile happened, so the shape of the trace
 	// answers "did this cost a model?" without reading an attribute.
-	if run.Compiled && run.CompileDuration > 0 {
+	//
+	// Keyed on Compiled alone. A duration of zero is not evidence that no
+	// compile happened — a clock with coarse granularity measures a fast one
+	// as zero, which is exactly how this was found — and suppressing the span
+	// would make the trace say a run cost no model when it did.
+	if run.Compiled {
 		_, compileSpan := t.tracer.Start(ctx, "compile",
 			trace.WithTimestamp(run.StartedAt),
 			trace.WithAttributes(attribute.Int("atr.agent_invocations", run.AgentInvocations)))

@@ -603,3 +603,26 @@ func TestClosingTelemetryTwiceIsQuiet(t *testing.T) {
 		t.Errorf("second close reported a failure that did not happen: %v", err)
 	}
 }
+
+// A duration of zero is not evidence that no compile happened: a clock with
+// coarse granularity measures a fast one as zero, and suppressing the span on
+// that basis makes the trace say a run cost no model when it did.
+func TestAZeroLengthCompileStillGetsASpan(t *testing.T) {
+	h := newHarness(t)
+	now := time.Now()
+
+	if err := h.t.Record(context.Background(), Run{
+		ID: NewID(), Spec: "tests/a.test.txt",
+		StartedAt: now, FinishedAt: now.Add(time.Second),
+		Outcome: OutcomePassed, Compiled: true, AgentInvocations: 1,
+		// Measured as zero by a clock that could not see it.
+		CompileDuration: 0,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if !contains(spanNames(h.spans.GetSpans()), "compile") {
+		t.Error("a compile too fast to measure produced no compile span, so the trace " +
+			"reports a run that cost a model as one that did not")
+	}
+}
