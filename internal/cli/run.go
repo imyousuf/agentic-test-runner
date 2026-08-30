@@ -43,6 +43,7 @@ var (
 	lintFlag         string
 	otelEndpointFlag string
 	noTriageFlag     bool
+	noExtractFlag    bool
 	interpretFlag    bool
 	sandboxFlag      bool // opt-in to enable sandbox (default: disabled for compatibility)
 	viewportFlag     string
@@ -117,6 +118,8 @@ a CI job can retry rather than escalate.`,
 		"Replay only; never call the model. Fails if a script is missing or stale (use in CI)")
 	runCmd.Flags().BoolVar(&noRepairFlag, "no-repair", false,
 		"Diagnose a drifted script but do not rewrite it")
+	runCmd.Flags().BoolVar(&noExtractFlag, "no-extract", false,
+		"Do not hoist repeated operations into the shared library after compiling")
 	runCmd.Flags().BoolVar(&noTriageFlag, "no-triage", false,
 		"Never ask the model why a failure happened, even to classify it")
 	runCmd.Flags().StringVar(&otelEndpointFlag, "otel-endpoint", "",
@@ -629,6 +632,16 @@ func runBehaviorTest(ctx context.Context, cfg *config.Config, cwd string) error 
 		if rec.Outcome == history.OutcomeTestFailure {
 			sawTestFailure = true
 		}
+	}
+
+	// Hoist what the compiles kept re-deriving.
+	//
+	// After the loop, not during it: extraction reads the compiled scripts,
+	// and the last spec's script does not exist until its compile finishes.
+	// Doing it here also means one refactor for a directory run rather than
+	// one per spec, each seeing a different subset.
+	if extracted := runExtraction(ctx, cfg, ag, testFiles, baseURL, b); extracted != nil {
+		printRefactorOutcome(behaviorFlag, extracted)
 	}
 
 	// Summary (only show if multiple tests)

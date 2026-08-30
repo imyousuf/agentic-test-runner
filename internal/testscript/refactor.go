@@ -2,6 +2,7 @@ package testscript
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -198,120 +199,247 @@ const minOverlap = 2
 // the same thing are not duplicating an operation, and an assertion is the one
 // thing extraction may never move.
 func FindOverlaps(scripts map[string]string) ([]Overlap, error) {
-	ops := make(map[string][]string, len(scripts))
-	for path, source := range scripts {
-		seq, err := operationSequence(source)
+	type script struct {
+		path string
+		runs [][]operation
+	}
+
+	var all []script
+	for _, path := range sortedPaths(scripts) {
+		runs, err := operationSequence(scripts[path])
 		if err != nil {
 			// A script that does not parse cannot be refactored, and is not a
 			// reason to refuse to look at the others.
 			continue
 		}
-		ops[path] = seq
-	}
-
-	// Every run of minOverlap or more, and which scripts perform it.
-	seen := map[string]map[string]bool{}
-	for path, seq := range ops {
-		for size := len(seq); size >= minOverlap; size-- {
-			for start := 0; start+size <= len(seq); start++ {
-				key := strings.Join(seq[start:start+size], "\n")
-				if seen[key] == nil {
-					seen[key] = map[string]bool{}
-				}
-				seen[key][path] = true
-			}
-		}
+		all = append(all, script{path: path, runs: runs})
 	}
 
 	var out []Overlap
-	for key, where := range seen {
-		if len(where) < 2 {
-			continue
+	for i := range all {
+		for j := i + 1; j < len(all); j++ {
+			best, ok := bestSharedRun(all[i].runs, all[j].runs)
+			if !ok {
+				continue
+			}
+			out = append(out, Overlap{
+				Steps:   renderRun(best),
+				Scripts: []string{all[i].path, all[j].path},
+			})
 		}
-		steps := strings.Split(key, "\n")
-		paths := make([]string, 0, len(where))
-		for p := range where {
-			paths = append(paths, p)
-		}
-		sort.Strings(paths)
-		out = append(out, Overlap{Steps: steps, Scripts: paths})
 	}
 
-	// Longest first: a six-operation sign-in is worth naming, and the
-	// two-operation prefix inside it is the same finding said smaller.
 	sort.Slice(out, func(i, j int) bool {
 		if len(out[i].Steps) != len(out[j].Steps) {
 			return len(out[i].Steps) > len(out[j].Steps)
 		}
-		return strings.Join(out[i].Steps, "\n") < strings.Join(out[j].Steps, "\n")
+		return strings.Join(out[i].Scripts, ",") < strings.Join(out[j].Scripts, ",")
 	})
 
-	return longestOnly(out), nil
+	return out, nil
 }
 
-// longestOnly drops a sequence that is wholly contained in a longer one
-// covering the same scripts, so a six-operation overlap is reported once
-// rather than as every window inside it.
-func longestOnly(all []Overlap) []Overlap {
-	var out []Overlap
-	for _, candidate := range all {
-		contained := false
-		for _, kept := range out {
-			if sameScripts(kept.Scripts, candidate.Scripts) &&
-				strings.Contains(strings.Join(kept.Steps, "\n"), strings.Join(candidate.Steps, "\n")) {
-				contained = true
-				break
+// bestSharedRun finds the longest sequence shared by any run of one script and
+// any run of the other.
+func bestSharedRun(a, b [][]operation) ([]operation, bool) {
+	var best []operation
+	for _, ra := range a {
+		for _, rb := range b {
+			if shared, ok := longestSharedRun(ra, rb); ok && len(shared) > len(best) {
+				best = shared
 			}
 		}
-		if !contained {
-			out = append(out, candidate)
+	}
+	return best, len(best) >= minOverlap
+}
+
+// longestSharedRun finds the longest sequence of operations both scripts
+// perform, in the same order.
+//
+// A subsequence, not a contiguous run. Two compiles of the same journey
+// interleave it differently — one counts the links before clicking and the
+// other after — so requiring the operations to be adjacent finds nothing on
+// exactly the scripts this exists to serve. Observed on two specs that both
+// open the tags page and click a tag: navigate→click→waitFor against
+// navigate→eval→click, sharing everything that matters and adjacent in
+// neither.
+//
+// What is returned is the shared spine. Whether it is worth naming is the
+// agent's call, and it is told it may decline.
+func longestSharedRun(a, b []operation) ([]operation, bool) {
+	// Longest common subsequence, with sameOperation for equality.
+	table := make([][]int, len(a)+1)
+	for i := range table {
+		table[i] = make([]int, len(b)+1)
+	}
+	for i := 1; i <= len(a); i++ {
+		for j := 1; j <= len(b); j++ {
+			if sameOperation(a[i-1], b[j-1]) {
+				table[i][j] = table[i-1][j-1] + 1
+				continue
+			}
+			table[i][j] = max(table[i-1][j], table[i][j-1])
 		}
 	}
+
+	if table[len(a)][len(b)] < minOverlap {
+		return nil, false
+	}
+
+	var run []operation
+	for i, j := len(a), len(b); i > 0 && j > 0; {
+		switch {
+		case sameOperation(a[i-1], b[j-1]):
+			run = append(run, a[i-1])
+			i, j = i-1, j-1
+		case table[i-1][j] >= table[i][j-1]:
+			i--
+		default:
+			j--
+		}
+	}
+	slices.Reverse(run)
+
+	return run, true
+}
+
+func sortedPaths(m map[string]string) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
 	return out
 }
 
-func sameScripts(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
+// operation is one thing a script does to the page.
+type operation struct {
+	// name is the call, like "atr.click".
+	name string
+	// tokens are the identifiers and literals it was given, which is the
+	// evidence that two calls are about the same thing.
+	tokens map[string]bool
+	// text is the source, for reporting.
+	text string
 }
 
-// operationSequence is what a script *does*, in order, with everything it
-// claims left out.
-func operationSequence(source string) ([]string, error) {
+// operationSequence is what a script *does*, grouped into the runs that could
+// become one function.
+//
+// A run is broken by a step boundary and by an assertion. Hoisting replaces a
+// contiguous block of statements inside one step with a call, so operations
+// either side of an assertion cannot be gathered into one operation without
+// moving the assertion, which is the one thing extraction may never do.
+//
+// Learned by proposing an overlap the agent then had to refuse: two specs
+// that both opened a tag page shared a navigate and a click, with an
+// expectExists between them and a step boundary as well. Detection that
+// ignores the constraint the extractor works under just buys refusals, one
+// model call at a time.
+func operationSequence(source string) ([][]operation, error) {
 	prg, err := parser.ParseFile(nil, "script.js", source, 0)
 	if err != nil {
 		return nil, err
 	}
 
 	steps := stepsIn(prg)
-	var seq []string
+	var runs [][]operation
 
 	for _, s := range steps {
+		var current []operation
+
 		walk(s.body, func(n ast.Node) bool {
 			call, ok := n.(*ast.CallExpression)
-			if !ok || isAssertion(call) {
+			if !ok {
 				return true
 			}
+
+			if isAssertion(call) {
+				// The run ends here: what follows cannot join what precedes
+				// without carrying the assertion along.
+				if len(current) > 0 {
+					runs = append(runs, current)
+					current = nil
+				}
+				return true
+			}
+
 			name := calleeName(call.Callee)
-			// Only the calls that do something to the page. A helper the
-			// script defines is already shared; values.get is an input.
 			if !strings.HasPrefix(name, "atr.") || nonThrowing[strings.TrimPrefix(name, "atr.")] {
 				return true
 			}
 			if name == "atr.step" || name == "atr.setup" {
 				return true
 			}
-			seq = append(seq, normaliseSource(sourceOf(source, call)))
+
+			current = append(current, operation{
+				name:   name,
+				tokens: tokensIn(call),
+				text:   normaliseSource(sourceOf(source, call)),
+			})
+			return true
+		})
+
+		if len(current) > 0 {
+			runs = append(runs, current)
+		}
+	}
+
+	return runs, nil
+}
+
+// tokensIn collects the names and literals a call was given.
+func tokensIn(call *ast.CallExpression) map[string]bool {
+	out := map[string]bool{}
+	for _, arg := range call.ArgumentList {
+		walk(arg, func(n ast.Node) bool {
+			switch v := n.(type) {
+			case *ast.Identifier:
+				out[string(v.Name)] = true
+			case *ast.StringLiteral:
+				if lit := strings.TrimSpace(string(v.Value)); lit != "" {
+					out[lit] = true
+				}
+			}
 			return true
 		})
 	}
+	return out
+}
 
-	return seq, nil
+// sameOperation reports whether two calls are plausibly the same step of the
+// same journey.
+//
+// Not textual equality. Two compiles of similar specs never produce identical
+// operations — one scopes a selector to the main region and the other does
+// not, one waits for the list and the other asserts it — so an exact match
+// finds nothing on precisely the directories this exists to serve. Observed:
+// two specs that both open the tags page and click a tag shared exactly one
+// call verbatim.
+//
+// So: the same call, given at least one thing in common. The shared token is
+// what separates "both click a tag link" from "both click something".
+func sameOperation(a, b operation) bool {
+	if a.name != b.name {
+		return false
+	}
+	if a.text == b.text {
+		return true
+	}
+	for token := range a.tokens {
+		if b.tokens[token] {
+			return true
+		}
+	}
+	return false
+}
+
+// renderRun describes a sequence for a person, preferring the text of the
+// script it came from.
+func renderRun(run []operation) []string {
+	out := make([]string, 0, len(run))
+	for _, op := range run {
+		out = append(out, op.text)
+	}
+	return out
 }
