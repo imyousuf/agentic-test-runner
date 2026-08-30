@@ -42,6 +42,7 @@ type Telemetry struct {
 	lp       *sdklog.LoggerProvider
 	logger   otellog.Logger
 	shutdown time.Duration
+	closed   bool
 
 	runs      metric.Int64Counter
 	duration  metric.Float64Histogram
@@ -143,6 +144,14 @@ func newTelemetryWith(tp *sdktrace.TracerProvider, mp *sdkmetric.MeterProvider, 
 // Record emits one run as a trace, a set of measurements, and a log record
 // per failure.
 func (t *Telemetry) Record(ctx context.Context, run Run) error {
+	// A Telemetry whose providers never started has no instruments, and every
+	// line below would nil-deref on one. Not reachable through NewTelemetry,
+	// which returns an error instead — but a sink that crashes the run it was
+	// only meant to observe is the one outcome this package must never have.
+	if t.tracer == nil || t.runs == nil {
+		return nil
+	}
+
 	common := []attribute.KeyValue{
 		attribute.String("atr.spec", run.Spec),
 		attribute.String("atr.outcome", string(run.Outcome)),
@@ -235,6 +244,13 @@ func (t *Telemetry) log(ctx context.Context, message, kind, spec string) {
 //
 // Bounded so an unreachable collector delays exit rather than hanging it.
 func (t *Telemetry) Close(ctx context.Context) error {
+	// Idempotent: a second Close would otherwise report "reader is shutdown"
+	// as though the export had failed, which is a warning about nothing.
+	if t.closed {
+		return nil
+	}
+	t.closed = true
+
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), t.shutdown)
 	defer cancel()
 

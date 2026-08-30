@@ -165,6 +165,8 @@ func (s *SQLite) prune(keep time.Duration) error {
 
 // Record writes one run and its attempts in a single transaction.
 func (s *SQLite) Record(ctx context.Context, run Run) error {
+	run = withStartTime(run)
+
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("recording %s: %w", run.Spec, err)
@@ -228,6 +230,28 @@ func (s *SQLite) Close(context.Context) error { return s.db.Close() }
 // could drop a row it meant to keep. Nine digits and no trimming makes
 // lexicographic order and chronological order the same thing.
 const timeFormat = "2006-01-02T15:04:05.000000000Z07:00"
+
+// withStartTime makes sure a run has one.
+//
+// stamp writes a zero time as the empty string, which sorts before every real
+// timestamp — so a run with no start time is outside every window, invisible
+// to `atr history`, and deleted by the first retention pass. Nothing produces
+// one today, and a row that silently vanishes is a poor way to find out that
+// something started to.
+func withStartTime(run Run) Run {
+	if !run.StartedAt.IsZero() {
+		return run
+	}
+	if !run.FinishedAt.IsZero() {
+		run.StartedAt = run.FinishedAt
+		return run
+	}
+	run.StartedAt = time.Now().UTC()
+	if run.FinishedAt.IsZero() {
+		run.FinishedAt = run.StartedAt
+	}
+	return run
+}
 
 // stamp renders a time in UTC, so rows written in two timezones sort.
 func stamp(t time.Time) string {

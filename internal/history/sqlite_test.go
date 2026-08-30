@@ -584,3 +584,48 @@ func TestRetentionRespectsSubSecondBoundaries(t *testing.T) {
 		t.Errorf("kept %d rows, want only the one inside the window", len(ids))
 	}
 }
+
+// stamp writes a zero time as the empty string, which sorts before every real
+// timestamp — so a run with no start time is outside every window, invisible
+// to `atr history`, and deleted by the first retention pass. Nothing produces
+// one today, and a row that silently vanishes is a poor way to find out that
+// something started to.
+func TestARunWithNoStartTimeIsStillVisible(t *testing.T) {
+	s := openTemp(t)
+
+	if err := s.Record(context.Background(), Run{
+		ID: "zero", Spec: "tests/a.test.txt", SpecPath: "/repo/tests/a.test.txt",
+		Outcome: OutcomePassed,
+	}); err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+
+	var started string
+	if err := s.DB().QueryRow(`SELECT started_at FROM runs WHERE id = 'zero'`).Scan(&started); err != nil {
+		t.Fatal(err)
+	}
+	if started == "" {
+		t.Fatal("a run with no start time was stored with an empty timestamp, which sorts before everything")
+	}
+
+	got, err := Summarise(context.Background(), s.DB(), time.Now().UTC().Add(-time.Hour), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Error("the run is invisible to every window")
+	}
+}
+
+// A second Close reported "reader is shutdown" as though an export had failed,
+// which is a warning about nothing — and the warning is the only thing a user
+// ever sees from this package.
+func TestClosingTwiceIsQuiet(t *testing.T) {
+	s := openTemp(t)
+	if err := s.Close(context.Background()); err != nil {
+		t.Fatalf("first close: %v", err)
+	}
+	if err := s.Close(context.Background()); err != nil {
+		t.Errorf("second close: %v", err)
+	}
+}
