@@ -70,6 +70,7 @@ const (
 	CodeStepCannotFail = "step-cannot-fail"
 	CodeWeakTextMatch  = "weak-text-match"
 	CodeSwallowed      = "swallowed-assertion"
+	CodeWaitThenAssert = "wait-then-assert"
 	CodeFixedSleep     = "fixed-sleep"
 )
 
@@ -160,6 +161,7 @@ func Lint(source string) ([]Finding, error) {
 		})
 	}
 
+	findings = append(findings, waitThenAssert(steps)...)
 	findings = append(findings, swallowedAssertions(prg, steps)...)
 	findings = append(findings, weakMatches(prg, steps)...)
 	findings = append(findings, fixedSleeps(prg, steps, exempt)...)
@@ -376,6 +378,90 @@ func catchEscalates(catch *ast.CatchStatement) bool {
 		return true
 	})
 	return escalates
+}
+
+// waitThenAssert reports a step that waits for a state and then asserts the
+// same state.
+//
+// The two calls are one intent, and splitting them hands the diagnosis to
+// whichever hits the wall first — always the wait. So when the application
+// stops reaching the state, which is the thing the test exists to catch, the
+// run reports a timeout: retried, and in CI read as an infrastructure problem
+// rather than a broken feature. atr.expectText waits and asserts in one call
+// and cannot be misattributed that way.
+//
+// A warning, not a block: the script still fails when the application breaks,
+// just under the wrong name.
+func waitThenAssert(steps []lintStep) []Finding {
+	var findings []Finding
+
+	for _, s := range steps {
+		wanted := textWaitedFor(s.body)
+		if len(wanted) == 0 {
+			continue
+		}
+		for _, text := range assertedText(s.body) {
+			if !wanted[text] {
+				continue
+			}
+			findings = append(findings, Finding{
+				Code:     CodeWaitThenAssert,
+				Severity: SeverityWarn,
+				Step:     s.number,
+				StepDesc: s.desc,
+				Message: fmt.Sprintf("waits for %q and then asserts it: the wait fails first, "+
+					"so a page that never reaches this state is reported as a timeout rather "+
+					"than as the application being wrong. atr.expectText does both in one call",
+					text),
+			})
+			break
+		}
+	}
+
+	return findings
+}
+
+// textWaitedFor collects the literals a step waits for.
+func textWaitedFor(body ast.Node) map[string]bool {
+	out := map[string]bool{}
+
+	walk(body, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpression)
+		if !ok || calleeName(call.Callee) != "atr.waitForText" || len(call.ArgumentList) == 0 {
+			return true
+		}
+		if text := stringLiteral(call.ArgumentList[0]); text != "" {
+			out[text] = true
+		}
+		return true
+	})
+
+	return out
+}
+
+// assertedText collects the literals a step asserts a target reads.
+func assertedText(body ast.Node) []string {
+	var out []string
+
+	walk(body, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpression)
+		if !ok {
+			return true
+		}
+		matcher, _, ok := matcherCall(call)
+		if !ok || len(call.ArgumentList) != 1 {
+			return true
+		}
+		switch matcher {
+		case "toBe", "toEqual", "toContain":
+			if text := stringLiteral(call.ArgumentList[0]); text != "" {
+				out = append(out, text)
+			}
+		}
+		return true
+	})
+
+	return out
 }
 
 // swallowedAssertions reports the assertions a catch block discards.

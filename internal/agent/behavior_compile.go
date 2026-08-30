@@ -102,6 +102,8 @@ Assertions — these are how you state what the application must do:
   expect(v).toBeGreaterThan(n) .toBeLessThan(n) .toHaveLength(n)
   atr.expectExists(target, {timeout: ms})    the target must be on the page
   atr.expectMissing(target, {timeout: ms})   the target must not be on the page
+  atr.expectText(target, "text", {timeout: ms, contains: true})
+                                             the target must come to read this
 
 CHOOSING THE RIGHT CALL MATTERS. A failing run is triaged by which kind of
 failure it raised, and the wrong call produces the wrong diagnosis:
@@ -136,9 +138,21 @@ failure it raised, and the wrong call produces the wrong diagnosis:
 - atr.exists() returns a boolean. Use it to branch on optional page furniture
   (cookie banners, A/B variants) so their absence is not mistaken for drift.
 - atr.retry only re-runs transient failures. Wrapping an expect() in it
-  achieves nothing, because a failing assertion is never retried. To let the
-  page settle before asserting, wait for the state first — atr.waitForText or
-  atr.waitFor — and then assert once.
+  achieves nothing, because a failing assertion is never retried.
+- To assert a state the page has to reach, use ONE call that waits and
+  asserts: atr.expectText, atr.expectExists, atr.expectMissing. Do NOT write
+  a wait followed by an assertion about the same thing:
+
+    WRONG: atr.waitForText("Order placed"); expect(atr.text("#msg")).toBe("Order placed");
+    RIGHT: atr.expectText("#msg", "Order placed");
+
+  The two-call form hands the diagnosis to whichever call hits the wall
+  first, and that is always the wait — so when the application stops
+  reaching the state, a real regression is reported as a timeout, retried,
+  and read by CI as an infrastructure problem rather than a broken feature.
+- Use atr.waitFor and atr.waitForText only to reach a state on the way to
+  something else — a page you must load before you can click — never as the
+  check that the state arrived.
 
 TEST INPUTS MUST NOT BE HARDCODED. Anything the test types, searches for,
 navigates to, or expects as data is an input, and belongs in the properties

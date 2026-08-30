@@ -93,6 +93,8 @@ func TestSkillsDocumentCurrentCapabilities(t *testing.T) {
 		{"a configurable collector", "--otel-endpoint"},
 		{"the shared operations library", "_shared.js"},
 		{"the library freshness header", "atr-lib-sha256"},
+		{"assertions that wait for a value", "atr.expectText"},
+		{"triage separated from compilation", "--no-triage"},
 	}
 
 	files := skillFiles(t)

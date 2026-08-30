@@ -86,6 +86,7 @@ Run browser-based behavior tests using AI-driven automation.
 | `--no-repair` | Diagnose a drifted script but do not rewrite it |
 | `--prune-values` | Remove inputs neither the compiled script nor `_shared.js` reads |
 | `--lint <mode>` | What to do about a script that cannot fail: `error` (default), `warn`, `off` |
+| `--no-triage` | Never ask the model why a failure happened, even to classify it |
 | `--otel-endpoint <url>` | OTLP collector for run telemetry, e.g. `http://localhost:4318` |
 | `--interpret` | Skip compilation and let the agent drive every step (slower, costs tokens per run) |
 | `--viewport <WxH>` | Viewport size, e.g., `1920x1080` |
@@ -938,4 +939,5 @@ after, so a passing run costs no model calls. See
 | `--no-repair` | Diagnose drift but leave the script alone |
 | `--prune-values` | Remove inputs neither the script nor `_shared.js` reads |
 | `--lint <mode>` | `error` (default), `warn`, `off` for the cannot-fail check |
+| `--no-triage` | Never ask the model why a failure happened |
 | `--interpret` | Skip compilation; the agent drives every step |

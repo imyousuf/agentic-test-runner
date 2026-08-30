@@ -64,9 +64,10 @@ func (r *runtime) install() error {
 	set("waitFor", r.jsWaitFor)
 	set("waitForText", r.jsWaitForText)
 
-	// Presence assertions
+	// Assertions that wait
 	set("expectExists", r.jsExpectExists)
 	set("expectMissing", r.jsExpectMissing)
+	set("expectText", r.jsExpectText)
 
 	// Inspection
 	set("exists", r.jsExists)
@@ -497,6 +498,81 @@ func (r *runtime) jsExpectMissing(target string, opts map[string]any) {
 	}
 }
 
+// expectTextPoll is how often expectText re-reads a target that has not
+// reached the value the spec asks for.
+const expectTextPoll = 200 * time.Millisecond
+
+// jsExpectText asserts that a target reads what the spec says it should,
+// waiting for it to get there.
+//
+// This exists because the wait and the assertion are one intent, and splitting
+// them across two calls hands the classification to whichever hits the wall
+// first — which is always the wait:
+//
+//	atr.waitForText("Order placed", {timeout: 5000});   // timeout: retryable
+//	expect(atr.text("#message")).toBe("Order placed");  // assertion: terminal
+//
+// When the application stops reaching that state — a regression, the thing a
+// test exists to catch — the wait fails, and the run reports a timeout. CI
+// then reads a genuine break as infrastructure and retries it. One call cannot
+// be misattributed that way: it waits like a wait and fails like an assertion.
+//
+// The same shape as expectExists, for the same reason.
+func (r *runtime) jsExpectText(target, expected string, opts map[string]any) {
+	r.checkCtx()
+	r.curTarget = target
+
+	timeout := durationOf(opts["timeout"], defaultWaitTimeout)
+	contains, _ := opts["contains"].(bool)
+	deadline := time.Now().Add(timeout)
+
+	var last string
+	var everFound bool
+
+	for {
+		text, err := r.readText(target)
+		switch {
+		case err == nil:
+			everFound, last = true, text
+			if textMatches(text, expected, contains) {
+				return
+			}
+		case errors.Is(err, ErrElementNotFound):
+			// Not there yet. That is what the waiting is for, and only the
+			// deadline turns it into a verdict.
+		default:
+			// A selector that does not parse, a renderer that stopped
+			// answering: faults, not answers, and not worth waiting out.
+			r.throwErr(err, target, fmt.Sprintf("reading text of %q", target))
+		}
+
+		if !time.Now().Before(deadline) {
+			break
+		}
+		r.checkCtx()
+		time.Sleep(expectTextPoll)
+	}
+
+	if !everFound {
+		r.throw(KindAssertion, target,
+			"expected %q to read %q; it was not on the page after %s", target, expected, timeout)
+	}
+	verb := "read"
+	if contains {
+		verb = "contain"
+	}
+	r.throw(KindAssertion, target,
+		"expected %q to %s %q, got %q after %s", target, verb, expected, last, timeout)
+}
+
+// textMatches compares what a target reads against what the spec asked for.
+func textMatches(actual, expected string, contains bool) bool {
+	if contains {
+		return strings.Contains(actual, expected)
+	}
+	return actual == expected
+}
+
 // --- inspection --------------------------------------------------------------
 
 // existsBranchTimeout is how long a branching exists() waits. Short on
@@ -562,9 +638,20 @@ func (r *runtime) jsText(selector string) string {
 	}
 	r.curTarget = selector
 
-	res, err := r.browser.GetTextContent(selector, "flat")
+	text, err := r.readText(selector)
 	if err != nil {
 		r.throwErr(err, selector, fmt.Sprintf("read text of %q", selector))
+	}
+	return text
+}
+
+// readText reads a selector's visible text and returns the error rather than
+// throwing it, so a caller that is still waiting can tell "not there yet"
+// apart from "the browser could not answer".
+func (r *runtime) readText(selector string) (string, error) {
+	res, err := r.browser.GetTextContent(selector, "flat")
+	if err != nil {
+		return "", err
 	}
 
 	var sb strings.Builder
@@ -574,7 +661,7 @@ func (r *runtime) jsText(selector string) string {
 		}
 		sb.WriteString(g.Text)
 	}
-	return strings.TrimSpace(sb.String())
+	return strings.TrimSpace(sb.String()), nil
 }
 
 func (r *runtime) jsHTML() string {

@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -173,5 +174,140 @@ atr.step(2, "Verify status", () => { atr.log(atr.text("#status")); });`
 	}
 	if len(outcome.Lint) != 0 {
 		t.Errorf("off mode still linted: %v", outcome.Lint)
+	}
+}
+
+// Compiling generates a script; triage only classifies one. Conflating them
+// meant a CI job could never learn that its red run was the application
+// breaking rather than the box being slow — so it reported a regression as
+// infrastructure and retried it.
+func TestNoCompileStillGetsAVerdict(t *testing.T) {
+	b, url := sharedRunBrowser(t)
+	specPath := writeSpec(t, sampleSpec)
+
+	// Waits for a state the page never reaches: a timeout by classification,
+	// a broken application in fact.
+	waiting := `atr.step(1, "Wait for the confirmation", () => {
+	atr.waitForText("Order placed", {timeout: 300});
+	expect(atr.text("#status")).toBe("Order placed");
+});`
+	if _, err := testscript.Save(specPath, sampleSpec, waiting, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	client := &scriptedClient{replies: []string{
+		verdictBlock("test_failure", "the page never reaches the confirmed state"),
+	}}
+	a := newRunAgent(t, client)
+
+	out, err := a.RunBehavior(context.Background(), RunRequest{
+		SpecPath:      specPath,
+		Spec:          sampleSpec,
+		BaseURL:       url,
+		NoCompile:     true,
+		MaxRetries:    1,
+		ScriptTimeout: 30 * time.Second,
+		Reset:         func(ctx context.Context) error { return b.Navigate(ctx, url) },
+	})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	if out.Result.Failure.Kind != testscript.KindAssertion {
+		t.Errorf("kind = %q, want %q — CI would report a broken feature as infrastructure",
+			out.Result.Failure.Kind, testscript.KindAssertion)
+	}
+	if client.callCount() != 1 {
+		t.Errorf("spent %d model calls; a verdict on an already-red run is worth exactly one",
+			client.callCount())
+	}
+}
+
+// --no-triage keeps the old guarantee for anyone who wants it absolutely.
+func TestNoTriageSpendsNothing(t *testing.T) {
+	b, url := sharedRunBrowser(t)
+	specPath := writeSpec(t, sampleSpec)
+
+	waiting := `atr.step(1, "Wait", () => {
+	atr.waitForText("never", {timeout: 300});
+	expect(atr.text("#status")).toBe("never");
+});`
+	if _, err := testscript.Save(specPath, sampleSpec, waiting, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	// No replies at all: any model call fails the test loudly.
+	client := &scriptedClient{}
+	a := newRunAgent(t, client)
+
+	out, err := a.RunBehavior(context.Background(), RunRequest{
+		SpecPath:      specPath,
+		Spec:          sampleSpec,
+		BaseURL:       url,
+		NoCompile:     true,
+		NoTriage:      true,
+		MaxRetries:    1,
+		ScriptTimeout: 30 * time.Second,
+		Reset:         func(ctx context.Context) error { return b.Navigate(ctx, url) },
+	})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if client.callCount() != 0 {
+		t.Errorf("--no-triage spent %d model calls", client.callCount())
+	}
+	if out.Result.Failure.Kind != testscript.KindTimeout {
+		t.Errorf("kind = %q, want the runtime's own guess", out.Result.Failure.Kind)
+	}
+}
+
+// CI asked for a replay. A script rewritten on a machine nobody is watching is
+// a change nobody reviewed, so a verdict of "repaired" must not be applied
+// even though the verdict itself is now allowed.
+func TestNoCompileRefusesTheRewriteItAsksAbout(t *testing.T) {
+	b, url := sharedRunBrowser(t)
+	specPath := writeSpec(t, sampleSpec)
+
+	stale := `atr.step(1, "Click", () => { atr.click("#gone"); });
+atr.step(2, "Verify", () => { expect(atr.text("#status")).toBe("signed in"); });`
+	if _, err := testscript.Save(specPath, sampleSpec, stale, ""); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(testscript.ScriptPath(specPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	repaired := `atr.step(1, "Click", () => { atr.click("#submit"); });
+atr.step(2, "Verify", () => { expect(atr.text("#status")).toBe("signed in"); });`
+	client := &scriptedClient{replies: []string{
+		verdictBlock("repaired", "the button was renamed") + jsBlock(repaired),
+	}}
+	a := newRunAgent(t, client)
+
+	out, err := a.RunBehavior(context.Background(), RunRequest{
+		SpecPath:      specPath,
+		Spec:          sampleSpec,
+		BaseURL:       url,
+		NoCompile:     true,
+		ScriptTimeout: 30 * time.Second,
+		Reset:         func(ctx context.Context) error { return b.Navigate(ctx, url) },
+	})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	if out.Repaired {
+		t.Error("--no-compile applied a repair")
+	}
+	after, err := os.ReadFile(testscript.ScriptPath(specPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(before) != string(after) {
+		t.Error("--no-compile rewrote a committed script")
+	}
+	if out.Triage == nil {
+		t.Error("the diagnosis was not kept, so nobody learns what the agent found")
 	}
 }
