@@ -293,6 +293,18 @@ job can retry rather than escalate.
 
 ---
 
+## A worked example
+
+`examples/behavior/blog/` is three specs against a live blog, with the inputs,
+the shared library and the JavaScript the compiler produced from them. It is
+the only example written against a site with no `data-testid` anywhere, whose
+content changes when its author publishes — which is what most real
+applications look like.
+
+Worth reading for what the compiler did with the notes section, and for how
+the expectations are phrased so that publishing a new post does not break
+them.
+
 ## Related
 
 - **`atr-behavior`** — running specs that already exist: flags, exit codes,

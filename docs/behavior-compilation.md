@@ -569,6 +569,20 @@ as the setup failing rather than as the application misbehaving.
 The compiler is told to reach for it when a spec consumes what it needs in
 order to run.
 
+## A worked example
+
+`examples/behavior/blog/` holds three specs against a live blog, together with
+their inputs, a shared `_shared.js`, and the compiled scripts. It shows the
+whole shape in one place, against a site with no test ids and content that
+changes when its author publishes.
+
+They are deliberately outside `make test`: a unit suite that reaches the public
+internet fails for reasons unrelated to the change under review.
+
+```bash
+atr run --behavior examples/behavior/blog/ --no-compile --headless
+```
+
 ## Limitations
 
 - Compilation drives the real application, so the first run needs the app in a

@@ -1,0 +1,31 @@
+Test: A reader can open the newest post from the front page
+
+Why this matters:
+The front page is the only route most readers take into the blog. If the post
+links stop resolving, every article is unreachable even though each one still
+exists at its own URL.
+
+Prerequisites:
+- The blog is published and the front page lists at least one post
+
+Steps:
+1. Open the front page using openFirstPost() from the shared library, which
+   follows the first post link
+2. Confirm the reader has landed on the post itself
+
+Expected Results:
+- The browser is no longer on the front page: the URL contains a post path
+- The page shows the post's own title as a heading
+- The post's body text is on the page, not just its summary
+- The site header linking back to the blog home is still present
+
+Notes for the compiler:
+- This is a Hugo blog with no data-testid attributes anywhere. Use the
+  structural selectors that are actually there.
+- On the front page the whole card is wrapped in <a class="post-link">, which
+  contains the date, an h3 with the title, and the summary. The link is
+  a.post-link — there is no anchor nested inside the heading.
+- On a post page the title is the h1, and the body is in .post-content.
+- Do not assert an exact post title: the newest post changes when the author
+  publishes. Assert the shape instead — that a title exists and that the same
+  text appears in the page heading.

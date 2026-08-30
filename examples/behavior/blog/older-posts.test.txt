@@ -1,0 +1,26 @@
+Test: A reader can page back through older posts
+
+Why this matters:
+The front page shows only the newest few posts. Pagination is the only way to
+reach the archive, and a broken "Older" link strands every post beyond the
+first page.
+
+Prerequisites:
+- The blog has published enough posts to need a second page
+
+Steps:
+1. Open the front page and note which post titles it lists
+2. Follow the "Older" link at the foot of the list
+3. Confirm this is a different page of posts
+
+Expected Results:
+- The URL is the second page of the listing
+- The post titles here are different from the ones on the front page
+- A link back towards the newer posts is now offered
+- Posts are still listed: the page is not empty
+
+Notes for the compiler:
+- Capture the first post title on the front page before paging, and assert
+  the second page's first title differs from it. Do not hardcode either
+  title; both change as the author publishes.
+- The pagination links read "Older" and "Newer".
