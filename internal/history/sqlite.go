@@ -142,7 +142,9 @@ func (s *SQLite) migrate() error {
 }
 
 func (s *SQLite) prune(keep time.Duration) error {
-	cutoff := time.Now().UTC().Add(-keep).Format(time.RFC3339Nano)
+	// stamp, not RFC3339Nano: the cutoff is compared against stored strings,
+	// so it has to be written the same fixed-width way they are.
+	cutoff := stamp(time.Now().UTC().Add(-keep))
 
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -217,10 +219,20 @@ func (s *SQLite) Record(ctx context.Context, run Run) error {
 
 func (s *SQLite) Close(context.Context) error { return s.db.Close() }
 
+// timeFormat is RFC 3339 with a fixed-width fraction.
+//
+// Fixed-width because every window and every ordering in this package is a
+// string comparison in SQL, and RFC3339Nano trims trailing zeros — so
+// "10:00:00Z" sorts *after* "10:00:00.5Z", the '.' being below 'Z'. Two runs
+// in the same second came back in the wrong order, and the retention cutoff
+// could drop a row it meant to keep. Nine digits and no trimming makes
+// lexicographic order and chronological order the same thing.
+const timeFormat = "2006-01-02T15:04:05.000000000Z07:00"
+
 // stamp renders a time in UTC, so rows written in two timezones sort.
 func stamp(t time.Time) string {
 	if t.IsZero() {
 		return ""
 	}
-	return t.UTC().Format(time.RFC3339Nano)
+	return t.UTC().Format(timeFormat)
 }

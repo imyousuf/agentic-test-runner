@@ -217,6 +217,8 @@ func Recent(ctx context.Context, db *sql.DB, since time.Time, spec string, limit
 			return nil, err
 		}
 		r.Outcome = Outcome(outcome)
+		// RFC3339Nano parses the fixed-width form too, and still reads a row
+		// written before the format was pinned.
 		r.StartedAt, _ = time.Parse(time.RFC3339Nano, started)
 		out = append(out, r)
 	}

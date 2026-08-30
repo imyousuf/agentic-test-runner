@@ -480,3 +480,107 @@ func TestZeroRetentionKeepsEverything(t *testing.T) {
 		t.Error("opening for reporting pruned the history it was asked to report on")
 	}
 }
+
+// Every window and every ordering in this package is a string comparison in
+// SQL. RFC3339Nano trims trailing zeros, so "10:00:00Z" sorts after
+// "10:00:00.5Z" — the '.' being below 'Z' — and two runs in the same second
+// came back in the wrong order while the retention cutoff could drop a row it
+// meant to keep.
+func TestTimestampsSortChronologically(t *testing.T) {
+	base := time.Date(2026, 8, 29, 10, 0, 0, 0, time.UTC)
+
+	moments := []time.Time{
+		base,
+		base.Add(500 * time.Millisecond),
+		base.Add(time.Second),
+		base.Add(time.Second + time.Nanosecond),
+		base.Add(time.Minute),
+	}
+
+	for i := 1; i < len(moments); i++ {
+		earlier, later := stamp(moments[i-1]), stamp(moments[i])
+		if !(earlier < later) {
+			t.Errorf("%q does not sort before %q, so a window or an ordering is wrong",
+				earlier, later)
+		}
+	}
+}
+
+// The same thing, through the database, because the bug only bites in SQL.
+func TestRunsInTheSameSecondComeBackInOrder(t *testing.T) {
+	s := openTemp(t)
+	base := time.Now().UTC().Truncate(time.Second)
+
+	// Deliberately spanning a whole second and a fractional one, which is the
+	// pair that inverted.
+	for _, offset := range []time.Duration{0, 500 * time.Millisecond, time.Second} {
+		r := run("tests/a.test.txt", base.Add(offset), OutcomePassed)
+		r.FinishedAt = r.StartedAt.Add(time.Second)
+		record(t, s, r)
+	}
+
+	got, err := Recent(context.Background(), s.DB(), base.Add(-time.Hour), "", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("returned %d runs, want 3", len(got))
+	}
+	for i := 1; i < len(got); i++ {
+		if got[i].StartedAt.After(got[i-1].StartedAt) {
+			t.Errorf("run %d (%s) is newer than the one before it (%s), but --runs lists newest first",
+				i, got[i].StartedAt.Format(time.RFC3339Nano), got[i-1].StartedAt.Format(time.RFC3339Nano))
+		}
+	}
+}
+
+// The retention cutoff is the same comparison, and getting it wrong deletes
+// history somebody was keeping on purpose.
+func TestRetentionRespectsSubSecondBoundaries(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "history.db")
+
+	s, err := OpenSQLite(path, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	keep := time.Hour
+	cutoff := time.Now().UTC().Add(-keep)
+
+	// Half a second the safe side of the cutoff: must survive.
+	safe := run("tests/a.test.txt", cutoff.Add(500*time.Millisecond), OutcomePassed)
+
+	// On an exact second, just the wrong side of a cutoff that has a fraction
+	// — which is every cutoff, since it comes from time.Now(). This is the
+	// pair that inverts under a trimmed format: "…:00Z" against
+	// "…:00.123456789Z" compares as *greater*, because '.' sits below 'Z', so
+	// the stale row survived its own deletion.
+	stale := run("tests/a.test.txt", cutoff.Truncate(time.Second), OutcomePassed)
+	record(t, s, safe)
+	record(t, s, stale)
+	s.Close(context.Background())
+
+	s2, err := OpenSQLite(path, keep)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s2.Close(context.Background())
+
+	var ids []string
+	rows, err := s2.DB().Query(`SELECT id FROM runs`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, id)
+	}
+
+	if len(ids) != 1 || ids[0] != safe.ID {
+		t.Errorf("kept %d rows, want only the one inside the window", len(ids))
+	}
+}
