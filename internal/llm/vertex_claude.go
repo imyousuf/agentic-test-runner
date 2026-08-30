@@ -12,6 +12,7 @@ import (
 	anthropic "github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
 	"github.com/anthropics/anthropic-sdk-go/vertex"
+	"golang.org/x/oauth2/google"
 
 	"github.com/imyousuf/agentic-test-runner/pkg/llm"
 )
@@ -63,6 +64,36 @@ type vertexClaudeClient struct {
 	noTemperature atomic.Bool
 }
 
+// vertexAuth resolves Application Default Credentials into a request option.
+//
+// The SDK's WithGoogleAuth panics when it cannot find credentials, so a machine
+// that has never run `gcloud auth application-default login` got a Go stack
+// trace instead of the one line that fixes it — and ATR already prints proper
+// setup guidance for every other backend. Finding the credentials here removes
+// that path and leaves an ordinary error.
+//
+// The recover covers what is left. WithCredentials panics too, on a transport
+// it cannot build, and an empty region panics before either. A backend that
+// will not start is a configuration problem, and a test runner reports those
+// rather than crashing on them.
+func vertexAuth(ctx context.Context, location, project string) (opt option.RequestOption, err error) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			opt, err = nil, fmt.Errorf("configuring Claude on Vertex AI: %v", rec)
+		}
+	}()
+
+	creds, credErr := google.FindDefaultCredentials(ctx, googleCloudScope)
+	if credErr != nil {
+		return nil, fmt.Errorf("no Google credentials for Claude on Vertex AI: %w\n"+
+			"  Run: gcloud auth application-default login\n"+
+			"  or set GOOGLE_APPLICATION_CREDENTIALS to a service account key file",
+			credErr)
+	}
+
+	return vertex.WithCredentials(ctx, location, project, creds), nil
+}
+
 func newVertexClaudeClient(ctx context.Context, cfg llm.Config) (llm.Client, error) {
 	if cfg.Project == "" {
 		return nil, fmt.Errorf("project is required for Claude on Vertex AI")
@@ -76,9 +107,11 @@ func newVertexClaudeClient(ctx context.Context, cfg llm.Config) (llm.Client, err
 	// Application Default Credentials: whatever gcloud auth application-default
 	// login, a service account on the machine, or GOOGLE_APPLICATION_CREDENTIALS
 	// provides. No API key, so nothing to leak into a config file.
-	opts := []option.RequestOption{
-		vertex.WithGoogleAuth(ctx, location, cfg.Project, googleCloudScope),
+	auth, err := vertexAuth(ctx, location, cfg.Project)
+	if err != nil {
+		return nil, err
 	}
+	opts := []option.RequestOption{auth}
 
 	maxTokens := cfg.MaxTokens
 	if maxTokens <= 0 {
