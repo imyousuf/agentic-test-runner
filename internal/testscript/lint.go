@@ -113,12 +113,13 @@ func Lint(source string) ([]Finding, error) {
 
 	var findings []Finding
 	exempt := sleepsInsideRetry(prg)
+	locals := localFunctions(prg)
 
 	steps := stepsIn(prg)
 	assertionsAnywhere := 0
 
 	for _, s := range steps {
-		asserts, throws := stepCapabilities(s.body)
+		asserts, throws := stepCapabilities(s.body, locals, map[string]bool{})
 		assertionsAnywhere += asserts
 
 		if asserts == 0 && !throws {
@@ -215,7 +216,13 @@ func stepsIn(prg *ast.Program) []lintStep {
 
 // stepCapabilities reports how many assertions a step body makes and whether
 // anything in it can throw.
-func stepCapabilities(body ast.Node) (asserts int, throws bool) {
+//
+// A call to a function the script declared itself is followed into that
+// function's body. Without that, `atr.step(1, "x", () => { report(); })` where
+// report only logs would be read as a step that can fail, and wrapping is not
+// a thing a compiler does deliberately but is exactly what a model does when
+// it tidies. seen stops a recursive helper from doing the same to us.
+func stepCapabilities(body ast.Node, locals map[string]ast.Node, seen map[string]bool) (asserts int, throws bool) {
 	walk(body, func(n ast.Node) bool {
 		switch v := n.(type) {
 		case *ast.ThrowStatement:
@@ -233,15 +240,53 @@ func stepCapabilities(body ast.Node) (asserts int, throws bool) {
 				}
 				return true
 			}
+			if fn, ok := locals[name]; ok && !seen[name] {
+				seen[name] = true
+				a, t := stepCapabilities(fn, locals, seen)
+				asserts += a
+				throws = throws || t
+				return true
+			}
 			// values.get on a key this checkout does not define throws, and a
-			// call to anything the script defined itself may throw too.
-			if name != "" && !strings.HasPrefix(name, "console.") {
+			// call to something declared elsewhere — a shared library — is not
+			// visible here, so it is taken at its word.
+			if _, known := locals[name]; name != "" && !known && !strings.HasPrefix(name, "console.") {
 				throws = true
 			}
 		}
 		return true
 	})
 	return asserts, throws
+}
+
+// localFunctions collects the functions the script declares for itself, by
+// name, so a call to one can be followed rather than assumed.
+//
+// Top-level declarations and `const f = () => {}` both, since the compiler
+// emits either. Anything it cannot name — a method, a function built at run
+// time — is simply absent, and a call to it is taken at its word.
+func localFunctions(prg *ast.Program) map[string]ast.Node {
+	out := map[string]ast.Node{}
+
+	walk(prg, func(n ast.Node) bool {
+		switch v := n.(type) {
+		case *ast.FunctionDeclaration:
+			if v.Function != nil && v.Function.Name != nil {
+				out[string(v.Function.Name.Name)] = v.Function
+			}
+		case *ast.Binding:
+			id, ok := v.Target.(*ast.Identifier)
+			if !ok {
+				return true
+			}
+			if isCallable(v.Initializer) {
+				out[string(id.Name)] = v.Initializer
+			}
+		}
+		return true
+	})
+
+	return out
 }
 
 func countAssertions(n ast.Node) int {
