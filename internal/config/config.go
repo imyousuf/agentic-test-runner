@@ -71,6 +71,19 @@ type Config struct {
 	Telemetry TelemetryConfig `mapstructure:"telemetry"`
 }
 
+// ExtractOperations says when a compile may hoist a directory's repeated
+// operations into its shared library.
+//
+// "always" by default. Duplication that is only ever reported accumulates:
+// the whole cost the library exists to remove is the compile time spent
+// re-deriving the same eight steps, and it is paid before anyone reads the
+// report.
+const (
+	ExtractAlways   = "always"
+	ExtractOnDemand = "on-demand"
+	ExtractOff      = "off"
+)
+
 // HistoryConfig holds the local execution history settings.
 type HistoryConfig struct {
 	// Enabled records every behaviour run in a local database. On by
@@ -181,6 +194,10 @@ type ExecutorEnvironmentConfig struct {
 
 // BehaviorConfig holds browser behavior testing configuration.
 type BehaviorConfig struct {
+	// ExtractOperations is when a compile hoists repeated operations into
+	// _shared.js: always, on-demand, or off.
+	ExtractOperations string `mapstructure:"extract_operations"`
+
 	// Browser contains browser settings.
 	Browser BrowserConfig `mapstructure:"browser"`
 	// Capture contains failure context capture settings.
@@ -386,6 +403,7 @@ func setDefaults(v *viper.Viper) {
 	// least one would mean writing to disk after a user said not to, which is
 	// a small betrayal a developer tool does not recover from — and it buys
 	// nothing, since a local tool cannot phone home regardless.
+	v.SetDefault("behavior.extract_operations", ExtractAlways)
 	v.SetDefault("history.enabled", true)
 	v.SetDefault("history.keep_days", 90)
 	v.SetDefault("telemetry.enabled", true)

@@ -91,6 +91,7 @@ func init() {
 	rootCmd.AddCommand(newComputerCmd())
 	rootCmd.AddCommand(newTestCmd())
 	rootCmd.AddCommand(newHistoryCmd())
+	rootCmd.AddCommand(newRefactorOpsCmd())
 	rootCmd.AddCommand(newUpdateCmd())
 	rootCmd.AddCommand(newTestCmdEnvCmd())
 	rootCmd.AddCommand(newMCPCmd())

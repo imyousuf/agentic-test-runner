@@ -316,3 +316,105 @@ func TestOneScriptHasNothingToShare(t *testing.T) {
 		t.Errorf("a lone script overlapped with itself: %+v", found)
 	}
 }
+
+// A hoisted function replaces a contiguous block inside one step. Operations
+// either side of an assertion cannot be gathered into one without carrying the
+// assertion along, which extraction may never do — so proposing them buys a
+// refusal, one model call at a time.
+func TestAnAssertionBreaksARun(t *testing.T) {
+	scripts := map[string]string{
+		"a.test.js": `atr.step(1, "x", () => {
+  atr.navigate("/tags/");
+  atr.expectExists("a.tag");
+  atr.click("a.tag");
+});`,
+		"b.test.js": `atr.step(1, "x", () => {
+  atr.navigate("/tags/");
+  atr.expectExists("a.tag");
+  atr.click("a.tag");
+});`,
+	}
+
+	found, err := FindOverlaps(scripts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(found) != 0 {
+		t.Errorf("operations split by an assertion were offered as one hoistable run: %+v", found)
+	}
+}
+
+// A step boundary breaks a run for the same reason.
+func TestAStepBoundaryBreaksARun(t *testing.T) {
+	scripts := map[string]string{
+		"a.test.js": `atr.step(1, "x", () => { atr.navigate("/tags/"); });
+atr.step(2, "y", () => { atr.click("a.tag"); atr.expectExists("#list"); });`,
+		"b.test.js": `atr.step(1, "x", () => { atr.navigate("/tags/"); });
+atr.step(2, "y", () => { atr.click("a.tag"); atr.expectExists("#list"); });`,
+	}
+
+	found, err := FindOverlaps(scripts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(found) != 0 {
+		t.Errorf("operations in different steps were offered as one hoistable run: %+v", found)
+	}
+}
+
+// Two compiles of the same journey never produce identical operations — one
+// scopes a selector to the main region and the other does not — and they
+// interleave it differently. Requiring identical text, or adjacency, finds
+// nothing on exactly the scripts this exists to serve.
+func TestTheSameJourneyWrittenTwoWaysStillMatches(t *testing.T) {
+	scripts := map[string]string{
+		"a.test.js": `atr.step(1, "Open the tag", () => {
+  atr.navigate(TAGS_PATH);
+  atr.click('a[href$="/tags/' + TAG_SLUG + '"]');
+  atr.waitFor(POST_LINKS, {timeout: 10000});
+  atr.expectExists(POST_LINKS);
+});`,
+		"b.test.js": `atr.step(1, "Open the tag", () => {
+  atr.navigate(TAGS_PATH);
+  atr.click('div[role="main"] a[href$="/tags/' + TAG_SLUG + '"]');
+  atr.waitFor('div[role="main"] ul li a', {timeout: 5000});
+  atr.expectExists("#list");
+});`,
+	}
+
+	found, err := FindOverlaps(scripts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(found) != 1 {
+		t.Fatalf("the same journey written two ways was not matched: %+v", found)
+	}
+	if len(found[0].Steps) != 3 {
+		t.Errorf("matched %d operations, want all three: %v", len(found[0].Steps), found[0].Steps)
+	}
+}
+
+// Sharing a call name is not sharing an operation. Two scripts that both click
+// something, with nothing in common about what, are not duplicating anything.
+func TestTheSameCallOnDifferentThingsIsNotAnOverlap(t *testing.T) {
+	scripts := map[string]string{
+		"a.test.js": `atr.step(1, "x", () => {
+  atr.click("#accept-cookies");
+  atr.fill("#search", "widgets");
+  atr.expectExists("#results");
+});`,
+		"b.test.js": `atr.step(1, "x", () => {
+  atr.click("#open-menu");
+  atr.fill("#email", "someone@example.com");
+  atr.expectExists("#sent");
+});`,
+	}
+
+	found, err := FindOverlaps(scripts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(found) != 0 {
+		t.Errorf("two unrelated journeys were reported as shared: %+v", found)
+	}
+}
