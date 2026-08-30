@@ -577,3 +577,29 @@ func TestAFailureIsCorrelatedWithTheAttemptThatProducedIt(t *testing.T) {
 		}
 	}
 }
+
+// A sink that crashes the run it was only meant to observe is the one outcome
+// this package must never have. NewTelemetry returns an error rather than a
+// half-built value, so this is not reachable today — but every line of Record
+// would nil-deref on one, which is a crash a single refactor away.
+func TestAPartiallyBuiltTelemetryNeitherCrashesNorComplains(t *testing.T) {
+	empty := &Telemetry{shutdown: time.Second}
+
+	if err := empty.Record(context.Background(), Run{ID: "x", Spec: "s"}); err != nil {
+		t.Errorf("Record: %v", err)
+	}
+	if err := empty.Close(context.Background()); err != nil {
+		t.Errorf("Close: %v", err)
+	}
+}
+
+func TestClosingTelemetryTwiceIsQuiet(t *testing.T) {
+	h := newHarness(t)
+
+	if err := h.t.Close(context.Background()); err != nil {
+		t.Fatalf("first close: %v", err)
+	}
+	if err := h.t.Close(context.Background()); err != nil {
+		t.Errorf("second close reported a failure that did not happen: %v", err)
+	}
+}

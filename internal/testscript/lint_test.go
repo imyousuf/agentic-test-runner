@@ -212,7 +212,11 @@ func TestLintFindings(t *testing.T) {
 			want: nil,
 		},
 		{
-			// Mutual recursion must not hang the lint.
+			// Mutual recursion must not hang the lint. It is not blocked:
+			// following the calls runs out of new names, and at the point the
+			// check stops being able to tell what happens, "this step can
+			// fail" is the safe answer for a finding that refuses a run. It
+			// is also true — the recursion ends in a stack overflow.
 			name: "recursive helpers terminate",
 			source: `
 				function a() { b(); }
@@ -221,7 +225,7 @@ func TestLintFindings(t *testing.T) {
 				atr.step(2, "Check", () => {
 					expect(atr.text("#heading")).toBe("Welcome");
 				});`,
-			want: []string{CodeStepCannotFail},
+			want: nil,
 		},
 		{
 			// A call to something declared outside the script — a shared
@@ -491,5 +495,33 @@ func TestATryWithoutACatchIsFine(t *testing.T) {
 		if f.Code == CodeSwallowed || f.Code == CodeNoAssertions {
 			t.Errorf("a try/finally was treated as swallowing: %v", codes(findings))
 		}
+	}
+}
+
+// A call whose callee has no name to read — `new K().m()`, `handlers[0]()` —
+// used to count as harmless, which blocked a step that asserted through a
+// class method. This finding refuses a run: when the check cannot tell what a
+// call does, the safe answer is that the step can fail, not that it cannot.
+func TestAnUnreadableCalleeDoesNotBlockAStep(t *testing.T) {
+	sources := map[string]string{
+		"a method on a new expression": `
+			class Checks { heading() { expect(atr.text("#heading")).toBe("Welcome"); } }
+			atr.step(1, "Check", () => { new Checks().heading(); });`,
+		"an indexed callee": `
+			const checks = [() => { expect(atr.text("#heading")).toBe("Welcome"); }];
+			atr.step(1, "Check", () => { checks[0](); });`,
+		"a method on a call result": `
+			function checks() { return { heading() { atr.expectExists("#heading"); } }; }
+			atr.step(1, "Check", () => { checks().heading(); });`,
+	}
+
+	for name, source := range sources {
+		t.Run(name, func(t *testing.T) {
+			for _, f := range lint(t, source) {
+				if f.Code == CodeStepCannotFail {
+					t.Errorf("a step whose callee could not be read was blocked: %s", f)
+				}
+			}
+		})
 	}
 }

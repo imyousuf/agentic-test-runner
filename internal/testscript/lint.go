@@ -268,10 +268,15 @@ func stepCapabilities(body ast.Node, locals map[string]ast.Node, seen map[string
 				throws = throws || t
 				return true
 			}
-			// values.get on a key this checkout does not define throws, and a
-			// call to something declared elsewhere — a shared library — is not
-			// visible here, so it is taken at its word.
-			if _, known := locals[name]; name != "" && !known && !strings.HasPrefix(name, "console.") {
+			// Everything else can throw: values.get on a key this checkout does
+			// not define, a shared library's operation, a method on an object.
+			//
+			// Including the calls whose callee has no name to read —
+			// `new K().m()`, `handlers[0]()`. Treating those as harmless
+			// blocked a step that asserted through a class method, and this
+			// finding refuses a run: when the check cannot tell, the safe
+			// answer is that the step can fail, not that it cannot.
+			if !strings.HasPrefix(name, "console.") {
 				throws = true
 			}
 		}
