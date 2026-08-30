@@ -155,6 +155,21 @@ func (o *RunOutcome) Passed() bool {
 	return o.Result != nil && o.Result.Passed
 }
 
+// reclassifyLastAttempt records a verdict against the attempt that produced
+// it, so the stored history agrees with the failure the run reports.
+//
+// The caller reaches this a long way below the append that guarantees an
+// attempt exists, which is exactly the distance over which an index like this
+// stops being obviously safe.
+func (o *RunOutcome) reclassifyLastAttempt(kind testscript.FailureKind, message string) {
+	if len(o.Attempts) == 0 {
+		return
+	}
+	last := &o.Attempts[len(o.Attempts)-1]
+	last.Kind = kind
+	last.Message = message
+}
+
 // RunBehavior compiles a spec if needed, replays it, and recovers from
 // failures according to their kind.
 //
@@ -338,8 +353,7 @@ func (a *Agent) RunBehavior(ctx context.Context, req RunRequest) (*RunOutcome, e
 			// reached.
 			result.Failure.Kind = testscript.KindAssertion
 			result.Failure.Message = fmt.Sprintf("%s (triage: %s)", result.Failure.Message, triage.Reason)
-			outcome.Attempts[len(outcome.Attempts)-1].Kind = testscript.KindAssertion
-			outcome.Attempts[len(outcome.Attempts)-1].Message = result.Failure.Message
+			outcome.reclassifyLastAttempt(testscript.KindAssertion, result.Failure.Message)
 			return outcome, nil
 
 		case VerdictRepaired:
