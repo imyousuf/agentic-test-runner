@@ -524,7 +524,7 @@ A script therefore has three states, and they mean different things:
 
 | Header | State | What the next run does |
 |--------|-------|------------------------|
-| hash matches the spec | verified | replays it, no model calls |
+| hash matches the spec | verified | replays it; no model calls unless it fails |
 | hash plus `// atr-unverified` | compiled, never completed a run | compiles again |
 | no hash line | hand-written | leaves it alone; refuses under `--no-compile` |
 

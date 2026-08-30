@@ -103,6 +103,7 @@ var assertions = map[string]bool{
 	"atr.fail":          true,
 	"atr.expectExists":  true,
 	"atr.expectMissing": true,
+	"atr.expectText":    true,
 }
 
 // isAssertion reports whether a call states something about the application.
@@ -396,23 +397,39 @@ func waitThenAssert(steps []lintStep) []Finding {
 	var findings []Finding
 
 	for _, s := range steps {
-		wanted := textWaitedFor(s.body)
+		if f, ok := waitedForPresence(s); ok {
+			findings = append(findings, f)
+			continue
+		}
+
+		// A compiled script usually hoists an input into a local before using
+		// it on both sides, so the two arguments are one identifier rather
+		// than two literals.
+		bound := boundValues(s.body)
+
+		wanted := textWaitedFor(s.body, bound)
 		if len(wanted) == 0 {
 			continue
 		}
-		for _, text := range assertedText(s.body) {
-			if !wanted[text] {
+		for _, a := range assertedText(s.body, bound) {
+			// Only when the wait comes first. Asserting and then waiting is
+			// a different shape — odd, but not this mistake, and reporting
+			// it under this name would send the reader looking for a split
+			// that is not there.
+			at, ok := wanted[a.text]
+			if !ok || at > a.at {
 				continue
 			}
+			text := a.text
 			findings = append(findings, Finding{
 				Code:     CodeWaitThenAssert,
 				Severity: SeverityWarn,
 				Step:     s.number,
 				StepDesc: s.desc,
-				Message: fmt.Sprintf("waits for %q and then asserts it: the wait fails first, "+
+				Message: fmt.Sprintf("waits for %s and then asserts it: the wait fails first, "+
 					"so a page that never reaches this state is reported as a timeout rather "+
 					"than as the application being wrong. atr.expectText does both in one call",
-					text),
+					describeWaited(text)),
 			})
 			break
 		}
@@ -421,17 +438,92 @@ func waitThenAssert(steps []lintStep) []Finding {
 	return findings
 }
 
-// textWaitedFor collects the literals a step waits for.
-func textWaitedFor(body ast.Node) map[string]bool {
-	out := map[string]bool{}
+// waitedForPresence reports the presence half of the same mistake:
+//
+//	atr.waitFor("#msg");
+//	expect(atr.exists("#msg")).toBeTruthy();
+//
+// The wait fails first, exactly as it does for text, so an element that never
+// appears is reported as a timeout rather than as the application being wrong.
+// atr.expectExists is the one call that does both.
+func waitedForPresence(s lintStep) (Finding, bool) {
+	waited := map[string]int{}
+	walk(s.body, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpression)
+		if !ok || calleeName(call.Callee) != "atr.waitFor" || len(call.ArgumentList) == 0 {
+			return true
+		}
+		if target := stringLiteral(call.ArgumentList[0]); target != "" {
+			at := int(call.Idx0())
+			if first, seen := waited[target]; !seen || at < first {
+				waited[target] = at
+			}
+		}
+		return true
+	})
+	if len(waited) == 0 {
+		return Finding{}, false
+	}
+
+	var found string
+	walk(s.body, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpression)
+		if !ok || found != "" {
+			return true
+		}
+		matcher, subject, ok := matcherCall(call)
+		if !ok || (matcher != "toBeTruthy" && matcher != "toBe" && matcher != "toEqual") {
+			return true
+		}
+		inner, ok := subject.(*ast.CallExpression)
+		if !ok || calleeName(inner.Callee) != "atr.exists" || len(inner.ArgumentList) == 0 {
+			return true
+		}
+		target := stringLiteral(inner.ArgumentList[0])
+		if at, waitedFor := waited[target]; waitedFor && at < int(call.Idx0()) {
+			found = target
+		}
+		return true
+	})
+	if found == "" {
+		return Finding{}, false
+	}
+
+	return Finding{
+		Code:     CodeWaitThenAssert,
+		Severity: SeverityWarn,
+		Step:     s.number,
+		StepDesc: s.desc,
+		Message: fmt.Sprintf("waits for %q and then asserts it exists: the wait fails first, so an "+
+			"element that never appears is reported as a timeout rather than as the application "+
+			"being wrong. atr.expectExists does both in one call", found),
+	}, true
+}
+
+// describeWaited renders what a step waited for, so a values key reads as one.
+func describeWaited(text string) string {
+	if key, ok := strings.CutPrefix(text, "values:"); ok {
+		return fmt.Sprintf("values.get(%q)", key)
+	}
+	return fmt.Sprintf("%q", text)
+}
+
+// textWaitedFor collects the literals a step waits for, and where.
+func textWaitedFor(body ast.Node, bound map[string]ast.Expression) map[string]int {
+	out := map[string]int{}
 
 	walk(body, func(n ast.Node) bool {
 		call, ok := n.(*ast.CallExpression)
 		if !ok || calleeName(call.Callee) != "atr.waitForText" || len(call.ArgumentList) == 0 {
 			return true
 		}
-		if text := stringLiteral(call.ArgumentList[0]); text != "" {
-			out[text] = true
+		text := literalOrValueKey(call.ArgumentList[0], bound)
+		if text == "" {
+			return true
+		}
+		at := int(call.Idx0())
+		if first, seen := out[text]; !seen || at < first {
+			out[text] = at
 		}
 		return true
 	})
@@ -439,23 +531,108 @@ func textWaitedFor(body ast.Node) map[string]bool {
 	return out
 }
 
+// readsPageText reports whether an expression reads text off the page, as
+// opposed to the URL, the title, or anything else a literal might match.
+func readsPageText(e ast.Expression) bool {
+	call, ok := e.(*ast.CallExpression)
+	if !ok {
+		return false
+	}
+	switch calleeName(call.Callee) {
+	case "atr.text", "atr.html":
+		return true
+	default:
+		return false
+	}
+}
+
+// literalOrValueKey names what a call is waiting for or asserting.
+//
+// A string literal names itself. values.get("k") is named by its key, because
+// a compiled script that externalises its expectations writes the same
+// values.get on both sides of the split — and that is the shape the compiler
+// produces once a spec has any inputs at all, so a rule that only sees
+// literals misses the scripts most likely to have the problem.
+func literalOrValueKey(e ast.Expression, bound map[string]ast.Expression) string {
+	if text := stringLiteral(e); text != "" {
+		return text
+	}
+
+	// One hop through a local, which is how a script that hoists an input
+	// writes the same thing twice. One hop only: a chain of aliases is not a
+	// shape worth chasing, and following it forever is a way to hang.
+	if id, ok := e.(*ast.Identifier); ok {
+		init, bound2 := bound[string(id.Name)]
+		if !bound2 {
+			return ""
+		}
+		if _, again := init.(*ast.Identifier); again {
+			return ""
+		}
+		return literalOrValueKey(init, bound)
+	}
+
+	call, ok := e.(*ast.CallExpression)
+	if !ok || len(call.ArgumentList) == 0 {
+		return ""
+	}
+	switch calleeName(call.Callee) {
+	case "values.get", "values.int", "values.bool":
+		if key := stringLiteral(call.ArgumentList[0]); key != "" {
+			return "values:" + key
+		}
+	}
+	return ""
+}
+
+// boundValues maps a step's local names to what they were assigned.
+func boundValues(body ast.Node) map[string]ast.Expression {
+	out := map[string]ast.Expression{}
+
+	walk(body, func(n ast.Node) bool {
+		b, ok := n.(*ast.Binding)
+		if !ok || b.Initializer == nil {
+			return true
+		}
+		if id, ok := b.Target.(*ast.Identifier); ok {
+			out[string(id.Name)] = b.Initializer
+		}
+		return true
+	})
+
+	return out
+}
+
+// textAssertion is a literal a step asserts a target reads, and where.
+type textAssertion struct {
+	text string
+	at   int
+}
+
 // assertedText collects the literals a step asserts a target reads.
-func assertedText(body ast.Node) []string {
-	var out []string
+func assertedText(body ast.Node, bound map[string]ast.Expression) []textAssertion {
+	var out []textAssertion
 
 	walk(body, func(n ast.Node) bool {
 		call, ok := n.(*ast.CallExpression)
 		if !ok {
 			return true
 		}
-		matcher, _, ok := matcherCall(call)
+		matcher, subject, ok := matcherCall(call)
 		if !ok || len(call.ArgumentList) != 1 {
+			return true
+		}
+		// About the page's text, not about anything that happens to contain
+		// the same word: waiting for "Dashboard" to appear and asserting the
+		// URL contains "Dashboard" are two different checks that share a
+		// literal.
+		if !readsPageText(subject) {
 			return true
 		}
 		switch matcher {
 		case "toBe", "toEqual", "toContain":
-			if text := stringLiteral(call.ArgumentList[0]); text != "" {
-				out = append(out, text)
+			if text := literalOrValueKey(call.ArgumentList[0], bound); text != "" {
+				out = append(out, textAssertion{text: text, at: int(call.Idx0())})
 			}
 		}
 		return true
@@ -517,18 +694,9 @@ func weakMatches(prg *ast.Program, steps []lintStep) []Finding {
 		if !ok {
 			return true
 		}
-		matcher, subject, ok := matcherCall(call)
-		if !ok || (matcher != "toContain" && matcher != "toMatch") {
-			return true
-		}
-		if !isWholePageRead(subject) {
-			return true
-		}
-		if len(call.ArgumentList) != 1 {
-			return true
-		}
-		needle := stringLiteral(call.ArgumentList[0])
-		if needle == "" || len([]rune(needle)) >= weakNeedle {
+
+		needle, ok := weakNeedleIn(call)
+		if !ok {
 			return true
 		}
 
@@ -547,6 +715,78 @@ func weakMatches(prg *ast.Program, steps []lintStep) []Finding {
 	})
 
 	return findings
+}
+
+// weakNeedleIn reports a short substring matched against the whole page,
+// whichever way the script phrased it.
+//
+// Both forms have to be covered or the rule is bypassed by the one the
+// compile prompt prescribes:
+//
+//	expect(atr.text()).toContain("archiv")
+//	atr.expectText("body", "archiv", {contains: true})
+func weakNeedleIn(call *ast.CallExpression) (string, bool) {
+	if matcher, subject, ok := matcherCall(call); ok {
+		if matcher != "toContain" && matcher != "toMatch" {
+			return "", false
+		}
+		if !isWholePageRead(subject) || len(call.ArgumentList) != 1 {
+			return "", false
+		}
+		return shortNeedle(stringLiteral(call.ArgumentList[0]))
+	}
+
+	if calleeName(call.Callee) != "atr.expectText" || len(call.ArgumentList) < 2 {
+		return "", false
+	}
+	if !wholePageSelector(stringLiteral(call.ArgumentList[0])) {
+		return "", false
+	}
+	// An exact match against the whole page is not weak — it is impossible,
+	// and a different mistake. Only the substring form matches loosely.
+	if len(call.ArgumentList) < 3 || !hasContains(call.ArgumentList[2]) {
+		return "", false
+	}
+	return shortNeedle(stringLiteral(call.ArgumentList[1]))
+}
+
+func shortNeedle(needle string) (string, bool) {
+	if needle == "" || len([]rune(needle)) >= weakNeedle {
+		return "", false
+	}
+	return needle, true
+}
+
+// wholePageSelector reports whether a target names the page rather than
+// something on it.
+func wholePageSelector(sel string) bool {
+	switch strings.TrimSpace(sel) {
+	case "", "body", "html", ":root":
+		return true
+	default:
+		return false
+	}
+}
+
+// hasContains reports whether an options object asks for a substring match.
+func hasContains(opts ast.Expression) bool {
+	obj, ok := opts.(*ast.ObjectLiteral)
+	if !ok {
+		return false
+	}
+	for _, prop := range obj.Value {
+		keyed, ok := prop.(*ast.PropertyKeyed)
+		if !ok {
+			continue
+		}
+		if id, ok := keyed.Key.(*ast.StringLiteral); ok && string(id.Value) == "contains" {
+			return true
+		}
+		if id, ok := keyed.Key.(*ast.Identifier); ok && string(id.Name) == "contains" {
+			return true
+		}
+	}
+	return false
 }
 
 // isWholePageRead reports whether an expression reads the entire page's text

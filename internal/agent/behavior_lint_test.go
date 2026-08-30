@@ -311,3 +311,50 @@ atr.step(2, "Verify", () => { expect(atr.text("#status")).toBe("signed in"); });
 		t.Error("the diagnosis was not kept, so nobody learns what the agent found")
 	}
 }
+
+// The repair budget bounds rewrites, and it used to be checked only for
+// repairable kinds — which left it applying to almost nothing. A timeout is
+// not repairable, so a triage that kept answering "repaired" rewrote the
+// committed script and asked again: twelve rewrites and thirteen model calls
+// against a budget of one, on a run nobody was watching.
+func TestTheRepairBudgetHoldsWhateverTheFailureKind(t *testing.T) {
+	b, url := sharedRunBrowser(t)
+	specPath := writeSpec(t, sampleSpec)
+
+	// A timeout: not repairable, and so previously outside the budget.
+	waiting := `atr.step(1, "Wait for something that never arrives", () => {
+	atr.waitForText("nope-nope-nope", {timeout: 200});
+});
+atr.step(2, "Check", () => { expect(atr.text("#status")).toBe("idle"); });`
+	if _, err := testscript.Save(specPath, sampleSpec, waiting, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	// The agent answers "repaired" every time it is asked. Nothing about the
+	// verdict bounds the loop; only the budget can.
+	replies := make([]string, 12)
+	for i := range replies {
+		replies[i] = verdictBlock("repaired", "try again") + jsBlock(waiting)
+	}
+	client := &scriptedClient{replies: replies}
+	a := newRunAgent(t, client)
+
+	out, err := a.RunBehavior(context.Background(), RunRequest{
+		SpecPath:      specPath,
+		Spec:          sampleSpec,
+		BaseURL:       url,
+		MaxRepairs:    1,
+		ScriptTimeout: 30 * time.Second,
+		Reset:         func(ctx context.Context) error { return b.Navigate(ctx, url) },
+	})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	if client.callCount() > 2 {
+		t.Errorf("the agent was asked %d times against a budget of 1", client.callCount())
+	}
+	if out.ModelCalls > 2 {
+		t.Errorf("the run recorded %d model calls against a budget of 1", out.ModelCalls)
+	}
+}

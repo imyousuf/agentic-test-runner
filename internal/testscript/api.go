@@ -459,6 +459,8 @@ func (r *runtime) jsExpectExists(target string, opts map[string]any) {
 		r.throw(fatal, target, "looking for %q: %v", target, err)
 	}
 	if !present {
+		// The run running out of time is not the application being wrong.
+		r.checkCtx()
 		r.throw(KindAssertion, target,
 			"expected %q to be on the page; it was not there after %s", target, timeout)
 	}
@@ -490,6 +492,8 @@ func (r *runtime) jsExpectMissing(target string, opts map[string]any) {
 			return
 		}
 		if !time.Now().Before(deadline) {
+			// The run running out of time is not the application being wrong.
+			r.checkCtx()
 			r.throw(KindAssertion, target,
 				"expected %q to be gone from the page; it was still there after %s", target, timeout)
 		}
@@ -522,28 +526,60 @@ func (r *runtime) jsExpectText(target, expected string, opts map[string]any) {
 	r.checkCtx()
 	r.curTarget = target
 
+	// An empty expectation is satisfied by anything at all — trivially so
+	// under contains, where strings.Contains(x, "") is always true. That is
+	// an assertion that cannot fail, which is the one thing this whole
+	// design exists to keep out of a suite.
+	if expected == "" {
+		r.throw(KindScript, target,
+			"atr.expectText(%q) was given an empty expected value, which any page satisfies; "+
+				"use atr.expectExists to assert the target is merely present", target)
+	}
+
 	timeout := durationOf(opts["timeout"], defaultWaitTimeout)
 	contains, _ := opts["contains"].(bool)
-	deadline := time.Now().Add(timeout)
+	started := time.Now()
+	deadline := started.Add(timeout)
+
+	// Whether this call's budget reaches past the run's own. If it does, the
+	// two deadlines expire within microseconds of each other, and which one
+	// is observed first is a coin flip — so the same broken page was reported
+	// as a timeout on one run and as the application being wrong on the next.
+	//
+	// Recorded up front rather than compared at the end, where the answer
+	// depends on which side of the race we landed.
+	capped := false
+	if runDeadline, ok := r.ctx.Deadline(); ok && !deadline.Before(runDeadline) {
+		capped = true
+	}
 
 	var last string
 	var everFound bool
 
 	for {
-		text, err := r.readText(target)
-		switch {
-		case err == nil:
-			everFound, last = true, text
-			if textMatches(text, expected, contains) {
-				return
+		// Presence first, with a budget this call controls. Reading the text
+		// of an element that is not there carries the element lookup's own
+		// floor, so going straight to the read made a 100ms budget spend
+		// three seconds — and then report that it had waited 100ms.
+		present, fatal := existsOutcome(
+			r.browser.WaitForElement(r.ctx, target, until(deadline)))
+		if fatal != "" {
+			r.throw(fatal, target, "looking for %q", target)
+		}
+
+		if present {
+			text, err := r.readText(target)
+			if err != nil && !errors.Is(err, ErrElementNotFound) {
+				// A selector that does not parse, a renderer that stopped
+				// answering: faults, not answers, and not worth waiting out.
+				r.throwErr(err, target, fmt.Sprintf("reading text of %q", target))
 			}
-		case errors.Is(err, ErrElementNotFound):
-			// Not there yet. That is what the waiting is for, and only the
-			// deadline turns it into a verdict.
-		default:
-			// A selector that does not parse, a renderer that stopped
-			// answering: faults, not answers, and not worth waiting out.
-			r.throwErr(err, target, fmt.Sprintf("reading text of %q", target))
+			if err == nil {
+				everFound, last = true, text
+				if textMatches(text, expected, contains) {
+					return
+				}
+			}
 		}
 
 		if !time.Now().Before(deadline) {
@@ -553,16 +589,47 @@ func (r *runtime) jsExpectText(target, expected string, opts map[string]any) {
 		time.Sleep(expectTextPoll)
 	}
 
+	// Running out of time is not the application being wrong. checkCtx throws
+	// the run's own kind — timeout, or environment when it was cancelled — so
+	// a suite that blew its budget or was interrupted is never reported as a
+	// regression, which is terminal and never retried.
+	r.checkCtx()
+
+	// And when this call could never have outlived the run, giving up is not
+	// evidence about the application either. Erring towards a timeout is the
+	// recoverable direction: a timeout is retried and then triaged, while an
+	// assertion is terminal and exits 1 on what may have been a slow box.
+	if capped {
+		r.throw(KindTimeout, target,
+			"gave up waiting for %q at the end of the run's own budget, so nothing can be "+
+				"concluded about the application; give the run more time, or this call less",
+			target)
+	}
+
+	// How long it actually waited, not how long it was told to: a failure
+	// that misreports its own patience is one nobody can reason about.
+	waited := time.Since(started).Round(time.Millisecond)
+
 	if !everFound {
 		r.throw(KindAssertion, target,
-			"expected %q to read %q; it was not on the page after %s", target, expected, timeout)
+			"expected %q to read %q; it was not on the page after %s", target, expected, waited)
 	}
 	verb := "read"
 	if contains {
 		verb = "contain"
 	}
 	r.throw(KindAssertion, target,
-		"expected %q to %s %q, got %q after %s", target, verb, expected, last, timeout)
+		"expected %q to %s %q, got %q after %s", target, verb, expected, last, waited)
+}
+
+// until is how much of a budget is left, floored so a lookup always gets
+// enough to answer at all.
+func until(deadline time.Time) time.Duration {
+	remaining := time.Until(deadline)
+	if remaining < existsBranchTimeout {
+		return existsBranchTimeout
+	}
+	return remaining
 }
 
 // textMatches compares what a target reads against what the spec asked for.
