@@ -314,6 +314,8 @@ func FindOverlaps(scripts map[string]string) ([]Overlap, error) {
 		}
 	}
 
+	out = groupByRun(out)
+
 	sort.Slice(out, func(i, j int) bool {
 		if len(out[i].Steps) != len(out[j].Steps) {
 			return len(out[i].Steps) > len(out[j].Steps)
@@ -322,6 +324,54 @@ func FindOverlaps(scripts map[string]string) ([]Overlap, error) {
 	})
 
 	return out, nil
+}
+
+// groupByRun collapses the pairs that found the same sequence into one entry.
+//
+// Comparing scripts two at a time is what finds a shared run, but it is not
+// how one should be reported: a journey that twelve specs perform comes back as
+// sixty-six pairs, each describing the same thing and naming two of the twelve.
+// A directory of sixty specs produced two hundred and seventy of them, which is
+// a wall of output for a person and about nineteen thousand tokens for the
+// model — to say a handful of things.
+//
+// One entry per sequence, naming every script that performs it, is also the
+// more useful request: "these twelve scripts all do this" is something an
+// extraction can act on once, where sixty-six pairs invite it to answer the
+// same question sixty-six times.
+func groupByRun(overlaps []Overlap) []Overlap {
+	type group struct {
+		steps   []string
+		scripts map[string]bool
+	}
+
+	order := make([]string, 0, len(overlaps))
+	groups := map[string]*group{}
+
+	for _, o := range overlaps {
+		key := strings.Join(o.Steps, "\n")
+		g, seen := groups[key]
+		if !seen {
+			g = &group{steps: o.Steps, scripts: map[string]bool{}}
+			groups[key] = g
+			order = append(order, key)
+		}
+		for _, path := range o.Scripts {
+			g.scripts[path] = true
+		}
+	}
+
+	out := make([]Overlap, 0, len(order))
+	for _, key := range order {
+		g := groups[key]
+		scripts := make([]string, 0, len(g.scripts))
+		for path := range g.scripts {
+			scripts = append(scripts, path)
+		}
+		sort.Strings(scripts)
+		out = append(out, Overlap{Steps: g.steps, Scripts: scripts})
+	}
+	return out
 }
 
 // bestSharedRun finds the longest sequence shared by any run of one script and

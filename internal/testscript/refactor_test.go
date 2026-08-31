@@ -1,6 +1,7 @@
 package testscript
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -577,5 +578,73 @@ func TestAValueInsideAnOptionsBagStillCounts(t *testing.T) {
 	}
 	if len(overlaps) == 0 {
 		t.Error("two sign-ins using the same credential were not seen as shared")
+	}
+}
+
+// Comparing scripts two at a time is how a shared run is found, but it is not
+// how one should be reported. A journey that six specs perform comes back as
+// fifteen pairs, each describing the same thing and naming two of the six — a
+// wall of output for a person, and for the model the same question asked
+// fifteen times.
+func TestOnePairPerSequenceNotPerPairOfScripts(t *testing.T) {
+	journey := `atr.step(1, "Sign in", () => {
+  atr.navigate(LOGIN_PATH);
+  atr.fill("#user", USERNAME);
+  atr.click("#submit");
+});
+atr.step(2, "Check %d", () => {
+  atr.expectExists("#dash%d");
+});`
+
+	scripts := map[string]string{}
+	for i := range 6 {
+		scripts[fmt.Sprintf("s%d.test.js", i)] = fmt.Sprintf(journey, i, i)
+	}
+
+	overlaps, err := FindOverlaps(scripts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(overlaps) != 1 {
+		t.Fatalf("six scripts sharing one journey produced %d overlaps, want 1", len(overlaps))
+	}
+	if len(overlaps[0].Scripts) != 6 {
+		t.Errorf("the overlap names %d scripts, want all six that perform it: %v",
+			len(overlaps[0].Scripts), overlaps[0].Scripts)
+	}
+}
+
+// Grouping must not merge sequences that differ.
+func TestDifferentSequencesStayApart(t *testing.T) {
+	scripts := map[string]string{
+		"a.test.js": `atr.step(1, "Sign in", () => {
+  atr.navigate(LOGIN_PATH);
+  atr.click("#submit");
+});`,
+		"b.test.js": `atr.step(1, "Sign in", () => {
+  atr.navigate(LOGIN_PATH);
+  atr.click("#submit");
+});`,
+		"c.test.js": `atr.step(1, "Search", () => {
+  atr.fill("#q", QUERY);
+  atr.click("#find");
+});`,
+		"d.test.js": `atr.step(1, "Search", () => {
+  atr.fill("#q", QUERY);
+  atr.click("#find");
+});`,
+	}
+
+	overlaps, err := FindOverlaps(scripts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(overlaps) != 2 {
+		t.Fatalf("two distinct journeys produced %d overlaps, want 2: %+v", len(overlaps), overlaps)
+	}
+	for _, o := range overlaps {
+		if len(o.Scripts) != 2 {
+			t.Errorf("a journey performed by two scripts names %d: %v", len(o.Scripts), o.Scripts)
+		}
 	}
 }
