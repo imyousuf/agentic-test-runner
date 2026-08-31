@@ -190,7 +190,7 @@ atr remote [flags]
 |---|---|---|
 | `--port` | `7788` | The HTTP port. |
 | `--bind` | `127.0.0.1` | The listen address. |
-| `--token` | from `ATR_RDP_TOKEN` | The access token. One is generated when empty. |
+| `--token` | from `ATR_REMOTE_TOKEN` | The access token. One is generated when empty. |
 | `--attach` | discovered | A CDP endpoint. |
 | `--start` | `false` | Launch a browser when none runs. |
 | `--view-only` | `false` | Drop all input on the server. |
