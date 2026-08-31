@@ -298,6 +298,15 @@ executor:
 behavior:
   base_url: ""  # Default base URL for tests
 
+  # When a run hoists the operations its specs keep repeating into _shared.js:
+  #   always     hoist as soon as a repeated sequence appears (default)
+  #   on-demand  report what could be hoisted and change nothing
+  #   off        do not look
+  # Anything else is refused at startup rather than defaulted: the only reason
+  # to set this key is to restrain something, so a typo must not quietly mean
+  # "always". Under --no-compile a run only ever reports, whatever this says.
+  extract_operations: "always"
+
   browser:
     executable: "auto"       # "auto" to download, or path to browser
     version: "latest"        # Browser version: "latest", "stable", "beta", "dev", "canary"

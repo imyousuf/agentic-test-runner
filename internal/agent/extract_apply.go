@@ -136,7 +136,7 @@ func (a *Agent) RefactorOperations(ctx context.Context, req RefactorRequest) (*R
 		return out, nil
 	}
 
-	if err := ValidateExtraction(scripts, ex); err != nil {
+	if err := ValidateExtraction(scripts, library, ex); err != nil {
 		// Once more, saying what was wrong. Nothing records that a directory's
 		// proposal was refused, so without this the next run finds the same
 		// repetition, asks the same question and is refused again — a model
@@ -166,7 +166,7 @@ func (a *Agent) RefactorOperations(ctx context.Context, req RefactorRequest) (*R
 			logf("the agent found nothing worth hoisting — %s", ex.Reason)
 			return out, nil
 		}
-		if err := ValidateExtraction(scripts, ex); err != nil {
+		if err := ValidateExtraction(scripts, library, ex); err != nil {
 			// Twice is enough. The scripts on disk are untouched and still
 			// correct; the extraction simply does not happen.
 			logf("refusing the second proposal too: %v", err)

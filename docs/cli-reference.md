@@ -87,6 +87,7 @@ Run browser-based behavior tests using AI-driven automation.
 | `--prune-values` | Remove inputs neither the compiled script nor `_shared.js` reads |
 | `--lint <mode>` | What to do about a script that cannot fail: `error` (default), `warn`, `off` |
 | `--no-triage` | Never ask the model why a failure happened, even to classify it |
+| `--no-extract` | Never hoist repeated operations into `_shared.js` |
 | `--otel-endpoint <url>` | OTLP collector for run telemetry, e.g. `http://localhost:4318` |
 | `--interpret` | Skip compilation and let the agent drive every step (slower, costs tokens per run) |
 | `--viewport <WxH>` | Viewport size, e.g., `1920x1080` |
@@ -113,6 +114,65 @@ atr run --behavior tests/mobile.test.txt --viewport 375x667
 # Connect to existing browser
 atr run --behavior tests/debug.test.txt --cdp-endpoint ws://localhost:9222
 ```
+
+---
+
+## atr refactor-ops
+
+```bash
+atr refactor-ops <directory> [flags]
+```
+
+Hoist the operations a directory's specs keep repeating into `_shared.js`.
+
+Compiling a spec re-derives whatever the application makes it re-derive, so
+several specs end up carrying their own copy of the same sign-in. This finds
+those sequences, names them once, rewrites the scripts to call them, and proves
+the rewrites before keeping them.
+
+Nothing is kept unless all of it holds:
+
+- the library declares operations only, and runs nothing at load time
+- the library still declares every operation it declared before — other specs
+  in the directory call them, and they are not replayed
+- every rewritten script still lints
+- every rewritten script claims exactly what it claimed before, character for
+  character, and gained no branch, loop or early return around an assertion
+- every rewritten script still passes against the live application
+
+Fail any of those and every file goes back exactly as it was.
+
+A run does this on its own, so this command is for when it has been turned off
+— or for seeing what it would do first.
+
+| Flag | Description |
+|------|-------------|
+| `--dry-run` | Report what could be hoisted; change nothing, open no browser, call no model |
+| `--browser-url <url>` | Base URL for the verification replays |
+| `--headless` | Run the browser headless |
+
+```bash
+# What is repeated here?
+atr refactor-ops tests/ --dry-run
+
+# Hoist it, and prove the rewrites before keeping them
+atr refactor-ops tests/ --headless
+```
+
+**A run hoists on its own.** `behavior.extract_operations` decides when:
+
+| Value | Meaning |
+|-------|---------|
+| `always` | Default. Hoist as soon as a repeated sequence appears |
+| `on-demand` | Report what could be hoisted and change nothing |
+| `off` | Do not look |
+
+An unrecognised value is refused rather than defaulted, because the only reason
+to set this key is to restrain something.
+
+Under `--no-compile` a run only ever reports, whatever this is set to:
+applying would call the model and rewrite the scripts, and that flag permits
+neither — so a CI replay never leaves a modified working tree.
 
 ---
 
