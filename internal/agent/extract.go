@@ -111,13 +111,17 @@ indentation. A rewrite that changes what a test claims is rejected
 automatically, so there is nothing to gain by tidying one.
 
 The library:
-- Declares functions and constants. Nothing runs at the top level — no calls
-  outside a function body, not even to build a constant.
+- Declares functions, and literal constants if they help. Nothing runs at the
+  top level: no call outside a function body, and that includes one used to
+  build a constant. Everything at the top level runs before step 1 of every
+  spec in the directory.
+- Needs nothing from values, anywhere — not inside an operation and not at the
+  top of the file. Every input an operation uses arrives as a parameter,
+  because the caller has already read it. If you find yourself wanting the
+  path or the name at load time, that is the parameter you have not added yet.
 - Contains no assertions at all. They are refused at runtime from a library
   frame, so a library that asserts fails every test in the directory.
 - Declares no atr.step or atr.setup. Steps belong to a spec.
-- Takes what varies as a parameter. Do not read values.get inside a library
-  operation; the caller passes what it needs.
 - Says what each operation leaves on screen, in a comment. The next compile
   reads this file to decide whether to call the operation, and a signature
   alone does not say where the page ends up.
