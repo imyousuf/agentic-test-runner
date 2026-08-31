@@ -1,4 +1,4 @@
-package rdp
+package remote
 
 import (
 	"context"
@@ -34,25 +34,28 @@ type PageInfo struct {
 // The streamed page is therefore always brought to the front, and a watchdog
 // notices when something else takes the foreground.
 type Streamer struct {
-	hub  *Hub
+	hub  *Hub // the viewer hub, when one is attached; nil for a headless recording
 	opts Options
 
 	mu       sync.Mutex
+	sinks    []Sink
 	browser  *rod.Browser
 	page     *rod.Page
 	targetID proto.TargetTargetID
 	cancel   context.CancelFunc
 	seq      int
 	lastAt   time.Time
+	lastBeat time.Time
 	live     bool
-	policy   string // "follow" or "hold"
+	policy   string // "follow", "pin", or "hold"
 
 	// last holds the most recent frame. A static page produces one frame and
 	// then nothing, so a viewer that connects later needs this to see anything.
 	last *Frame
 }
 
-func NewStreamer(hub *Hub, opts Options) *Streamer {
+// NewStreamer builds a streamer with no sinks. Attach them with AddSink.
+func NewStreamer(opts Options) *Streamer {
 	if opts.Quality <= 0 {
 		opts.Quality = 60
 	}
@@ -62,7 +65,73 @@ func NewStreamer(hub *Hub, opts Options) *Streamer {
 	if opts.FPS <= 0 {
 		opts.FPS = 20
 	}
-	return &Streamer{hub: hub, opts: opts, policy: "follow"}
+	return &Streamer{opts: opts, policy: "follow"}
+}
+
+// AddSink attaches a consumer. Frames go to every sink that is attached when
+// the frame arrives.
+//
+// A Hub is remembered separately so that a status message can report the
+// viewer count. A streamer with no hub reports zero viewers, which is correct
+// for "atr record" running on its own.
+func (s *Streamer) AddSink(k Sink) {
+	if k == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.sinks = append(s.sinks, k)
+	if h, ok := k.(*Hub); ok && s.hub == nil {
+		s.hub = h
+	}
+}
+
+// RemoveSink detaches a consumer. Stopping a recording must not stop the
+// stream for the viewers who are still watching.
+func (s *Streamer) RemoveSink(k Sink) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := s.sinks[:0]
+	for _, existing := range s.sinks {
+		if existing != k {
+			out = append(out, existing)
+		}
+	}
+	s.sinks = out
+}
+
+// emit fans one frame out. The caller must not hold s.mu.
+func (s *Streamer) emit(f *Frame) {
+	s.mu.Lock()
+	sinks := make([]Sink, len(s.sinks))
+	copy(sinks, s.sinks)
+	s.mu.Unlock()
+	for _, k := range sinks {
+		k.Frame(f)
+	}
+}
+
+// emitText fans one control message out. The caller must not hold s.mu.
+func (s *Streamer) emitText(msg []byte) {
+	s.mu.Lock()
+	sinks := make([]Sink, len(s.sinks))
+	copy(sinks, s.sinks)
+	s.mu.Unlock()
+	for _, k := range sinks {
+		k.Text(msg)
+	}
+}
+
+// viewers reports how many people are watching, or zero when no hub is
+// attached.
+func (s *Streamer) viewers() int {
+	s.mu.Lock()
+	hub := s.hub
+	s.mu.Unlock()
+	if hub == nil {
+		return 0
+	}
+	return hub.Count()
 }
 
 // Attach connects to the browser at the given CDP endpoint.
@@ -218,7 +287,7 @@ func (s *Streamer) stream(page *rod.Page) error {
 		s.mu.Lock()
 		s.last = frame
 		s.mu.Unlock()
-		s.hub.Broadcast(frame)
+		s.emit(frame)
 	})()
 
 	everyNth := int(math.Max(1, math.Round(60/float64(s.opts.FPS))))
@@ -240,7 +309,7 @@ func (s *Streamer) stream(page *rod.Page) error {
 	// no frame, so without this the viewer would keep the stall banner and an
 	// empty canvas after every tab switch.
 	if frame, err := s.Snapshot(); err == nil {
-		s.hub.Broadcast(frame)
+		s.emit(frame)
 	}
 	s.mu.Lock()
 	s.live = true
@@ -315,6 +384,9 @@ func (s *Streamer) Watch(ctx context.Context) {
 			switch policy {
 			case "hold":
 				_ = (proto.PageBringToFront{}).Call(page)
+			case "pin":
+				// Stay on this tab and never fight for the foreground. The
+				// heartbeat keeps supplying frames while the tab is hidden.
 			case "follow":
 				s.mu.Lock()
 				browser := s.browser
@@ -336,13 +408,71 @@ func (s *Streamer) Watch(ctx context.Context) {
 }
 
 // SetPolicy chooses what happens when another tab takes the foreground.
+//
+// "follow" streams whichever tab is in front. "pin" stays on the selected tab
+// and lets the heartbeat supply its frames. "hold" pulls the selected tab back
+// to the front, which interrupts whoever is driving the browser.
 func (s *Streamer) SetPolicy(p string) {
-	if p != "hold" && p != "follow" {
+	switch p {
+	case "hold", "follow", "pin":
+	default:
 		return
 	}
 	s.mu.Lock()
 	s.policy = p
 	s.mu.Unlock()
+}
+
+// Policy reports the current foreground policy.
+func (s *Streamer) Policy() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.policy
+}
+
+// Heartbeat captures a frame whenever the screencast has been silent for
+// longer than every.
+//
+// This is not a safety net, it is the frame source for two ordinary cases. A
+// page that does not move emits nothing at all, and a page in a background tab
+// emits nothing either, because Chrome does not composite one. The spike in
+// docs/session-recording.md measured Page.captureScreenshot on a hidden tab:
+// it returns in about 65 ms, it needs no Page.bringToFront, and the image is
+// current, not a stale composite. So a recording of a pinned tab keeps
+// advancing without ever taking the foreground away from the agent.
+//
+// The heartbeat tracks its own clock. It must not touch lastAt, because Watch
+// reads lastAt to detect a stall and to follow the foreground.
+func (s *Streamer) Heartbeat(ctx context.Context, every time.Duration) {
+	if every <= 0 {
+		return
+	}
+	ticker := time.NewTicker(every / 2)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case now := <-ticker.C:
+			s.mu.Lock()
+			quiet := now.Sub(s.lastAt) >= every && now.Sub(s.lastBeat) >= every
+			ready := s.page != nil
+			s.mu.Unlock()
+
+			if !ready || !quiet {
+				continue
+			}
+			frame, err := s.Snapshot()
+			if err != nil {
+				continue
+			}
+			s.mu.Lock()
+			s.lastBeat = time.Now()
+			s.mu.Unlock()
+			s.emit(frame)
+		}
+	}
 }
 
 // Navigate loads a URL in the streamed tab.
@@ -364,12 +494,12 @@ func (s *Streamer) publishStatus(live bool) {
 	msg, err := json.Marshal(map[string]any{
 		"t":         "status",
 		"streaming": live,
-		"viewers":   s.hub.Count(),
+		"viewers":   s.viewers(),
 	})
 	if err != nil {
 		return
 	}
-	s.hub.BroadcastText(msg)
+	s.emitText(msg)
 }
 
 func (s *Streamer) publishPages() {
@@ -381,7 +511,7 @@ func (s *Streamer) publishPages() {
 	if err != nil {
 		return
 	}
-	s.hub.BroadcastText(msg)
+	s.emitText(msg)
 }
 
 // LastFrame returns the most recent frame, so a viewer that connects to a

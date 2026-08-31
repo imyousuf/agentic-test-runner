@@ -1,14 +1,38 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { decodeFrame, type FrameHeader, type PageInfo, type ServerMsg } from './protocol';
 
+export interface RecordState {
+  recording: boolean;
+  id: string;
+  title: string;
+  elapsedMs: number;
+  frames: number;
+  bytes: number;
+  dropped: number;
+  note: string;
+}
+
+export const idleRecord: RecordState = {
+  recording: false,
+  id: '',
+  title: '',
+  elapsedMs: 0,
+  frames: 0,
+  bytes: 0,
+  dropped: 0,
+  note: '',
+};
+
 export interface LiveState {
   connected: boolean;
   streaming: boolean;
   viewers: number;
   viewOnly: boolean;
+  canRecord: boolean;
   pages: PageInfo[];
   fps: number;
   error: string;
+  record: RecordState;
 }
 
 /**
@@ -22,9 +46,11 @@ export function useLiveView() {
     streaming: false,
     viewers: 0,
     viewOnly: false,
+    canRecord: false,
     pages: [],
     fps: 0,
     error: '',
+    record: idleRecord,
   });
 
   const socket = useRef<WebSocket | null>(null);
@@ -59,6 +85,22 @@ export function useLiveView() {
             streaming: msg.streaming,
             viewers: msg.viewers,
             viewOnly: msg.viewOnly ?? s.viewOnly,
+            canRecord: msg.canRecord ?? s.canRecord,
+          }));
+        }
+        if (msg.t === 'record') {
+          setState((s) => ({
+            ...s,
+            record: {
+              recording: msg.recording,
+              id: msg.id,
+              title: msg.title,
+              elapsedMs: msg.elapsedMs,
+              frames: msg.frames,
+              bytes: msg.bytes,
+              dropped: msg.dropped,
+              note: msg.note ?? '',
+            },
           }));
         }
         if (msg.t === 'error') setState((s) => ({ ...s, error: msg.message }));
@@ -102,5 +144,13 @@ export function useLiveView() {
     return bitmap;
   }, []);
 
-  return { state, send, takeFrame, header };
+  /**
+   * setRecord lets the button show the new state at once. The server confirms
+   * it within a second, so this only removes the wait, it never invents state.
+   */
+  const setRecord = useCallback((record: RecordState) => {
+    setState((s) => ({ ...s, record }));
+  }, []);
+
+  return { state, send, takeFrame, header, setRecord };
 }

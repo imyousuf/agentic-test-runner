@@ -1,4 +1,5 @@
-import { useEffect, useRef } from 'react';
+import { useRef } from 'react';
+import { FrameCanvas } from './FrameCanvas';
 import { modifiers, type FrameHeader } from './protocol';
 
 interface Props {
@@ -13,30 +14,6 @@ const BUTTONS = ['left', 'middle', 'right'] as const;
 export function Viewport({ takeFrame, header, send, disabled }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const moveQueued = useRef(false);
-
-  // Draw the newest frame once per animation frame. Older frames are skipped.
-  useEffect(() => {
-    let running = true;
-    const draw = () => {
-      if (!running) return;
-      const canvas = canvasRef.current;
-      const bitmap = takeFrame();
-      if (canvas && bitmap) {
-        if (canvas.width !== bitmap.width || canvas.height !== bitmap.height) {
-          canvas.width = bitmap.width;
-          canvas.height = bitmap.height;
-        }
-        const ctx = canvas.getContext('2d');
-        ctx?.drawImage(bitmap, 0, 0);
-        bitmap.close();
-      }
-      requestAnimationFrame(draw);
-    };
-    requestAnimationFrame(draw);
-    return () => {
-      running = false;
-    };
-  }, [takeFrame]);
 
   /**
    * Convert a position on the canvas to a page coordinate. The canvas is
@@ -140,18 +117,21 @@ export function Viewport({ takeFrame, header, send, disabled }: Props) {
   };
 
   return (
-    <canvas
-      ref={canvasRef}
+    <FrameCanvas
+      next={takeFrame}
+      canvasRef={canvasRef}
       className="viewport"
       tabIndex={0}
-      onPointerDown={onPointerDown}
-      onPointerUp={onPointerUp}
-      onPointerMove={onPointerMove}
-      onWheel={onWheel}
-      onKeyDown={onKeyDown}
-      onKeyUp={onKeyUp}
-      onPaste={onPaste}
-      onContextMenu={(e) => e.preventDefault()}
+      handlers={{
+        onPointerDown,
+        onPointerUp,
+        onPointerMove,
+        onWheel,
+        onKeyDown,
+        onKeyUp,
+        onPaste,
+        onContextMenu: (e) => e.preventDefault(),
+      }}
     />
   );
 }

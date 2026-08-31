@@ -1,4 +1,4 @@
-package rdp
+package remote
 
 import (
 	"sync"
@@ -110,8 +110,8 @@ func (h *Hub) Count() int {
 	return len(h.viewers)
 }
 
-// Broadcast hands a frame to every viewer.
-func (h *Hub) Broadcast(f *Frame) {
+// Frame hands an image to every viewer. It satisfies Sink.
+func (h *Hub) Frame(f *Frame) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	for v := range h.viewers {
@@ -119,8 +119,8 @@ func (h *Hub) Broadcast(f *Frame) {
 	}
 }
 
-// BroadcastText hands a control message to every viewer.
-func (h *Hub) BroadcastText(msg []byte) {
+// Text hands a control message to every viewer. It satisfies Sink.
+func (h *Hub) Text(msg []byte) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	for v := range h.viewers {

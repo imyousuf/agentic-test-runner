@@ -95,7 +95,8 @@ func init() {
 	rootCmd.AddCommand(newUpdateCmd())
 	rootCmd.AddCommand(newTestCmdEnvCmd())
 	rootCmd.AddCommand(newMCPCmd())
-	rootCmd.AddCommand(newRDPCmd())
+	rootCmd.AddCommand(newRemoteCmd())
+	rootCmd.AddCommand(newRecordCmd())
 	rootCmd.AddCommand(newInstallCompletionCmd())
 }
 

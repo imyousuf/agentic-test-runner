@@ -114,3 +114,183 @@ body {
 .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
 .dot.ok { background: #4ac26b; }
 .dot.bad { background: #d95c5c; }
+
+/* Recording */
+
+.rec { display: flex; gap: 6px; align-items: center; }
+
+.rec input {
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #111;
+  color: var(--text);
+  font: inherit;
+}
+
+.rec button,
+.rec-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #262626;
+  color: var(--text);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.rec-btn.on { border-color: #d95c5c; color: #ff9b9b; }
+
+.rec-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #d95c5c;
+  display: inline-block;
+}
+
+.rec-btn.on .rec-dot { animation: pulse 1.2s ease-in-out infinite; }
+
+@keyframes pulse { 50% { opacity: 0.25; } }
+
+.rec-meta { color: var(--dim); font-variant-numeric: tabular-nums; }
+
+.status .rec-live { color: #ff9b9b; }
+
+/* Library */
+
+.library { padding: 16px 20px; overflow: auto; }
+.library-head { display: flex; align-items: center; gap: 12px; }
+.library-head h1 { font-size: 18px; margin: 0 0 12px; flex: 1; }
+.library-head button {
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #262626;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.dim { color: var(--dim); }
+.small { font-size: 12px; }
+.warn { color: #ffd479; }
+
+.rec-list { list-style: none; margin: 0; padding: 0; }
+
+.rec-list li {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.rec-list li.busy { opacity: 0.5; pointer-events: none; }
+.rec-main { flex: 1; min-width: 0; }
+.rec-main form { display: flex; gap: 6px; }
+.rec-main input {
+  flex: 1;
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #111;
+  color: var(--text);
+  font: inherit;
+}
+
+.link {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--text);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+}
+.link:hover { color: var(--accent); }
+
+.rec-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.rec-actions button,
+.rec-actions a {
+  padding: 5px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #262626;
+  color: var(--text);
+  cursor: pointer;
+  text-decoration: none;
+  font: inherit;
+}
+.rec-actions .danger { color: #ff9b9b; }
+
+/* Player */
+
+.player { display: flex; flex-direction: column; height: 100vh; }
+
+.player-head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 10px 14px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+}
+.player-head h1 { font-size: 15px; margin: 0; }
+.player-head button {
+  padding: 5px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #262626;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.timeline { position: relative; padding: 0 14px; }
+.timeline input[type='range'] { width: 100%; margin: 0; }
+
+.ticks {
+  position: relative;
+  height: 8px;
+  margin: 0 8px;
+}
+
+.tick {
+  position: absolute;
+  top: 0;
+  width: 2px;
+  height: 8px;
+  background: var(--accent);
+  transform: translateX(-1px);
+}
+.tick.stall { background: #ffd479; }
+.tick.resume { background: #4ac26b; }
+
+.controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 14px 12px;
+  background: var(--panel);
+  border-top: 1px solid var(--line);
+  flex-wrap: wrap;
+}
+.controls button,
+.controls a {
+  padding: 5px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #262626;
+  color: var(--text);
+  cursor: pointer;
+  text-decoration: none;
+  font: inherit;
+}
+.controls button.primary { min-width: 84px; }
+.controls button.on { border-color: var(--accent); color: var(--accent); }
+.controls label { display: flex; gap: 5px; align-items: center; color: var(--dim); }
+.controls label.on { color: var(--accent); }
+.controls .grow { flex: 1; }

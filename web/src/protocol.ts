@@ -1,4 +1,4 @@
-// Wire types shared with internal/rdp.
+// Wire types shared with internal/remote.
 
 export interface FrameHeader {
   seq: number;
@@ -22,6 +22,8 @@ export interface StatusMsg {
   streaming: boolean;
   viewers: number;
   viewOnly?: boolean;
+  /** False when the server was started without a recordings directory. */
+  canRecord?: boolean;
 }
 
 export interface PagesMsg {
@@ -34,7 +36,65 @@ export interface ErrorMsg {
   message: string;
 }
 
-export type ServerMsg = StatusMsg | PagesMsg | ErrorMsg;
+/** RecordMsg arrives once a second while a recording runs. */
+export interface RecordMsg {
+  t: 'record';
+  recording: boolean;
+  id: string;
+  title: string;
+  elapsedMs: number;
+  frames: number;
+  bytes: number;
+  dropped: number;
+  note?: string;
+}
+
+export type ServerMsg = StatusMsg | PagesMsg | ErrorMsg | RecordMsg;
+
+// Recording types, shared with internal/record.
+
+export interface FrameRecord {
+  seq: number;
+  file: string;
+  atMs: number;
+  w: number;
+  h: number;
+  targetId?: string;
+}
+
+export interface RecEvent {
+  atMs: number;
+  t: 'tab' | 'stall' | 'resume' | 'note';
+  targetId?: string;
+  url?: string;
+  reason?: string;
+}
+
+export interface Manifest {
+  version: number;
+  id: string;
+  title: string;
+  startedAt: string;
+  stoppedAt: string;
+  durationMs: number;
+  browser: string;
+  options: { quality: number; maxWidth: number; fps: number; policy: string };
+  droppedFrames: number;
+  bytes: number;
+  frames: FrameRecord[];
+  events: RecEvent[];
+}
+
+export interface RecordingSummary {
+  id: string;
+  title: string;
+  startedAt: string;
+  durationMs: number;
+  frames: number;
+  bytes: number;
+  hasMp4: boolean;
+  partial: boolean;
+}
 
 /** Modifier bits, as CDP defines them. */
 export function modifiers(ev: {

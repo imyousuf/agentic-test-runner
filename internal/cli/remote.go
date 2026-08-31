@@ -13,11 +13,12 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/imyousuf/agentic-test-runner/internal/rdp"
+	"github.com/imyousuf/agentic-test-runner/internal/record"
+	"github.com/imyousuf/agentic-test-runner/internal/remote"
 	"github.com/imyousuf/agentic-test-runner/web"
 )
 
-func newRDPCmd() *cobra.Command {
+func newRemoteCmd() *cobra.Command {
 	var (
 		port     int
 		bind     string
@@ -27,47 +28,50 @@ func newRDPCmd() *cobra.Command {
 		quality  int
 		maxWidth int
 		fps      int
+		output   string
 	)
 
 	cmd := &cobra.Command{
-		Use:     "rdp",
-		Aliases: []string{"view"},
+		Use:     "remote",
+		Aliases: []string{"view", "rdp"},
 		Short:   "Serve a live view of the browser in a web page",
 		Long: `Serve a live view of the browser that ATR drives.
 
 The command attaches to the running browser as a second DevTools session and
 streams the active page to a web application. You can watch the agent and take
-over for a step that needs a person, such as a login.
+over for a step that needs a person, such as a login. The page also records the
+session and plays back what you recorded.
 
 Examples:
   # Watch the browser that "atr browser start" launched
-  atr rdp
+  atr remote
 
   # Use another port, and attach to a browser by endpoint
-  atr rdp --port 9000 --attach cdp://127.0.0.1:9222
+  atr remote --port 9000 --attach cdp://127.0.0.1:9222
 
   # Watch without the ability to click
-  atr rdp --view-only`,
+  atr remote --view-only`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if token == "" {
-				token = os.Getenv("ATR_RDP_TOKEN")
+				token = os.Getenv("ATR_REMOTE_TOKEN")
 			}
 			if token == "" {
-				token = rdp.NewToken()
+				token = remote.NewToken()
 			}
 			if !isLoopback(bind) && token == "" {
 				return fmt.Errorf("a token is required to bind %s", bind)
 			}
 
-			cdpURL, err := rdp.Discover(attach)
+			cdpURL, err := remote.Discover(attach)
 			if err != nil {
 				return err
 			}
 
-			hub := rdp.NewHub()
-			streamer := rdp.NewStreamer(hub, rdp.Options{
+			hub := remote.NewHub()
+			streamer := remote.NewStreamer(remote.Options{
 				Quality: quality, MaxWidth: maxWidth, FPS: fps, ViewOnly: viewOnly,
 			})
+			streamer.AddSink(hub)
 			if err := streamer.Attach(cdpURL); err != nil {
 				return err
 			}
@@ -85,8 +89,22 @@ Examples:
 			ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
 			go streamer.Watch(ctx)
+			go streamer.Heartbeat(ctx, 5*time.Second)
 
-			server := rdp.NewServer(hub, streamer, assets, token, viewOnly)
+			server := remote.NewServer(hub, streamer, assets, token, viewOnly)
+
+			// Recording is off. The session only gives the page the ability to
+			// start one, and to browse what was recorded before.
+			var session *remote.Session
+			store, storeErr := record.NewStore(output)
+			if storeErr != nil {
+				fmt.Fprintf(os.Stderr, "Recording is unavailable: %v\n", storeErr)
+			} else {
+				session = remote.NewSession(store, streamer, record.Limits{}, false)
+				server = server.WithSession(session)
+				go session.Publish(ctx)
+			}
+
 			addr := net.JoinHostPort(bind, fmt.Sprint(port))
 			httpServer := &http.Server{
 				Addr:              addr,
@@ -101,6 +119,14 @@ Examples:
 			fmt.Printf("  Pages:   %d\n", len(pages))
 			if viewOnly {
 				fmt.Println("  Input:   disabled")
+			}
+			switch {
+			case session == nil:
+				fmt.Println("  Record:  unavailable")
+			case viewOnly:
+				fmt.Println("  Record:  disabled by --view-only")
+			default:
+				fmt.Printf("  Record:  off, press ● in the page  (%s)\n", store.Root())
 			}
 
 			errCh := make(chan error, 1)
@@ -126,12 +152,14 @@ Examples:
 
 	cmd.Flags().IntVar(&port, "port", 7788, "HTTP port")
 	cmd.Flags().StringVar(&bind, "bind", "127.0.0.1", "Listen address")
-	cmd.Flags().StringVar(&token, "token", "", "Access token (or set ATR_RDP_TOKEN)")
+	cmd.Flags().StringVar(&token, "token", "", "Access token (or set ATR_REMOTE_TOKEN)")
 	cmd.Flags().StringVar(&attach, "attach", "", "CDP endpoint, such as cdp://127.0.0.1:9222")
 	cmd.Flags().BoolVar(&viewOnly, "view-only", false, "Refuse input from viewers")
 	cmd.Flags().IntVar(&quality, "quality", 60, "JPEG quality, 1 to 100")
 	cmd.Flags().IntVar(&maxWidth, "max-width", 1600, "Largest frame width")
 	cmd.Flags().IntVar(&fps, "fps", 20, "Target frame rate")
+	cmd.Flags().StringVarP(&output, "output", "o", "",
+		"Recordings directory (default: ~/.atr/recordings)")
 
 	return cmd
 }

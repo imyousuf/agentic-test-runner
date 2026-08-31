@@ -1,4 +1,4 @@
-package rdp
+package remote
 
 import (
 	"encoding/binary"
@@ -66,7 +66,7 @@ func TestHubBroadcastsToEveryViewer(t *testing.T) {
 		t.Fatalf("expected 2 viewers, got %d", hub.Count())
 	}
 
-	hub.Broadcast(&Frame{Seq: 7})
+	hub.Frame(&Frame{Seq: 7})
 	for name, v := range map[string]*viewer{"a": a, "b": b} {
 		frame, _ := v.take()
 		if frame == nil || frame.Seq != 7 {

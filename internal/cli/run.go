@@ -48,6 +48,8 @@ var (
 	sandboxFlag      bool // opt-in to enable sandbox (default: disabled for compatibility)
 	viewportFlag     string
 	cdpEndpointFlag  string
+	recordFlag       bool
+	recordTitleFlag  string
 
 	// Environment flags
 	pythonVenvFlag string
@@ -133,6 +135,8 @@ a CI job can retry rather than escalate.`,
 	runCmd.Flags().BoolVar(&sandboxFlag, "sandbox", false, "Enable Chrome sandbox (disabled by default for Ubuntu 23.10+ compatibility)")
 	runCmd.Flags().StringVar(&viewportFlag, "viewport", "", "Viewport size (e.g., 1920x1080)")
 	runCmd.Flags().StringVar(&cdpEndpointFlag, "cdp-endpoint", "", "Connect to existing browser via CDP endpoint")
+	runCmd.Flags().BoolVar(&recordFlag, "record", false, "Record each behavior test to ~/.atr/recordings")
+	runCmd.Flags().StringVar(&recordTitleFlag, "record-title", "", "Title for the recording (default: the test file name)")
 
 	// Environment flags (for --cmd mode)
 	runCmd.Flags().StringVar(&pythonVenvFlag, "python-venv", "", "Path to Python virtual environment to activate")
@@ -419,6 +423,18 @@ func runBehaviorTest(ctx context.Context, cfg *config.Config, cwd string) error 
 		}
 	}
 
+	// Recording is off unless --record asks for it. Preflight runs here, before
+	// the first test, so a missing dependency is reported before the run
+	// spends any time.
+	var sessionRec *sessionRecorder
+	if recordFlag {
+		sessionRec, err = newSessionRecorder(b.CDPEndpoint())
+		if err != nil {
+			return err
+		}
+		defer sessionRec.Close()
+	}
+
 	// Create LLM client
 	llmCfg := cfg.GetLLMConfig()
 	llmCfg.Verbose = verbose
@@ -518,6 +534,29 @@ func runBehaviorTest(ctx context.Context, cfg *config.Config, cwd string) error 
 				fmt.Printf("✗ Failed to open page: %v\n", err)
 				return infra(rec, "opening a page: %v", err)
 			}
+		}
+
+		// Recording wraps whichever path runs below, so a compiled replay and a
+		// legacy interpretation are both captured. Stopping is deferred because
+		// the legacy path returns from inside this closure.
+		if sessionRec != nil {
+			title := recordTitleFlag
+			if title == "" {
+				title = strings.TrimSuffix(filepath.Base(testFile), ".test.txt")
+			}
+			if id, rerr := sessionRec.start(title); rerr != nil {
+				fmt.Fprintf(os.Stderr, "Warning: the recording did not start: %v\n", rerr)
+			} else {
+				fmt.Printf("Recording %s\n", id)
+			}
+			defer func() {
+				m, rerr := sessionRec.stop()
+				if rerr != nil {
+					fmt.Fprintf(os.Stderr, "Warning: the recording did not finish: %v\n", rerr)
+					return
+				}
+				fmt.Printf("Recorded %d frames into %s\n", len(m.Frames), sessionRec.dir(m.ID))
+			}()
 		}
 
 		if interpretFlag {

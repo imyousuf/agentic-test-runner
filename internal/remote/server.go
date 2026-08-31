@@ -1,4 +1,4 @@
-package rdp
+package remote
 
 import (
 	"context"
@@ -27,6 +27,7 @@ const (
 type Server struct {
 	hub      *Hub
 	streamer *Streamer
+	session  *Session // nil when this server cannot record or browse recordings
 	assets   fs.FS
 	token    string
 	viewOnly bool
@@ -58,6 +59,13 @@ func NewServer(hub *Hub, streamer *Streamer, assets fs.FS, token string, viewOnl
 	return s
 }
 
+// WithSession gives the server the ability to record and to browse
+// recordings.
+func (s *Server) WithSession(session *Session) *Server {
+	s.session = session
+	return s
+}
+
 // checkOrigin rejects a page from another site that tries to drive the browser.
 func (s *Server) checkOrigin(r *http.Request) bool {
 	origin := r.Header.Get("Origin")
@@ -75,7 +83,7 @@ func (s *Server) checkOrigin(r *http.Request) bool {
 	return host == "127.0.0.1" || host == "localhost" || host == "[::1]" || host == "::1"
 }
 
-const cookieName = "atr_rdp"
+const cookieName = "atr_remote"
 
 func (s *Server) matches(value string) bool {
 	return subtle.ConstantTimeCompare([]byte(value), []byte(s.token)) == 1
@@ -110,6 +118,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/pages", s.handlePages)
 	mux.HandleFunc("/api/select", s.handleSelect)
 	mux.HandleFunc("/api/navigate", s.handleNavigate)
+	s.registerRecording(mux)
 	mux.HandleFunc("/ws", s.handleWS)
 	mux.Handle("/", http.FileServer(http.FS(s.assets)))
 
@@ -222,8 +231,21 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	}
 	if msg, err := json.Marshal(map[string]any{
 		"t": "status", "streaming": true, "viewers": s.hub.Count(), "viewOnly": s.viewOnly,
+		"canRecord": s.session != nil && !s.viewOnly,
 	}); err == nil {
 		v.send(msg)
+	}
+	// Tell a viewer that joins mid-recording that one is running, so the
+	// button shows the right state at once.
+	if s.session != nil {
+		st := s.session.Status()
+		if msg, err := json.Marshal(map[string]any{
+			"t": "record", "recording": st.Recording, "id": st.ID, "title": st.Title,
+			"elapsedMs": st.ElapsedMs, "frames": st.Frames, "bytes": st.Bytes,
+			"dropped": st.Dropped,
+		}); err == nil {
+			v.send(msg)
+		}
 	}
 	// A still page emits no frame at all. Capture one on demand so the viewer
 	// sees the page immediately instead of a blank canvas.
