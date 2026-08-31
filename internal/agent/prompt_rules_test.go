@@ -48,3 +48,27 @@ func TestPromptMarksExistsAsBranchingOnly(t *testing.T) {
 		t.Errorf("exists() is not marked as branching-only: %q", line)
 	}
 }
+
+// A spec that asks for an operation by name — "using openFirstPost() from the
+// shared library" — does not fail when no library declares it. The compiler
+// writes a local function of that name, calls it, and the script passes,
+// reading as though it shares code when it does not.
+//
+// The lint reports it afterwards; this is the half that stops it happening.
+func TestPromptRefusesToInventALocalOperation(t *testing.T) {
+	if !strings.Contains(scriptAPIReference, "Do not declare functions of your own") {
+		t.Error("nothing tells the model to write the steps out rather than name an operation")
+	}
+	if !strings.Contains(scriptAPIReference, "that operation does not exist") {
+		t.Error("the prompt does not say what to do when the spec names an operation no library declares")
+	}
+}
+
+// The journey rule exists so that two specs making the same journey can ever
+// share it: a defensive assertion between two operations means they sit either
+// side of something that never moves, and no hoist can gather them.
+func TestPromptKeepsAJourneyStepFreeOfItsOwnAssertions(t *testing.T) {
+	if !strings.Contains(scriptAPIReference, "carries no assertions of its own") {
+		t.Error("the prompt no longer says a journey step asserts nothing of its own")
+	}
+}

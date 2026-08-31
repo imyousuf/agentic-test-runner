@@ -196,6 +196,15 @@ A compile is also shown what its neighbours wrote, so two specs reaching the
 same page use the same selector and the same constant name rather than
 inventing their own. That is what makes the repetition findable at all.
 
+**Do not name a library function in a spec.** A step that reads *"open the
+front page using `openFirstPost()` from the shared library"* does not fail when
+no such operation exists — the compiler writes a local function of that name
+and calls it, and the test passes. It reads as though the script shares code
+when it does not: the next spec making the same journey writes it again, and if
+a real library operation of that name ever appears, the local one silently wins
+over it. The lint reports this as `local-helper`. Describe what the reader
+does; deciding what deserves a name is ATR's job.
+
 You can still write `_shared.js` by hand, and reading it is worth it either
 way — it is loaded into the same scope before every script in the directory,
 so its top-level functions are simply in scope:

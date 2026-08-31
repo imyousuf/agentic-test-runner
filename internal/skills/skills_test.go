@@ -95,6 +95,7 @@ func TestSkillsDocumentCurrentCapabilities(t *testing.T) {
 		{"the library freshness header", "atr-lib-sha256"},
 		{"assertions that wait for a value", "atr.expectText"},
 		{"hoisting repeated operations", "refactor-ops"},
+		{"a script that names its own operation", "local-helper"},
 		{"triage separated from compilation", "--no-triage"},
 	}
 
