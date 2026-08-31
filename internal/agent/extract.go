@@ -80,6 +80,9 @@ type ExtractRequest struct {
 	Scripts map[string]string
 	// Overlaps are the sequences worth hoisting, already found statically.
 	Overlaps []testscript.Overlap
+	// Refused, when set, is why the previous proposal for these same overlaps
+	// was rejected. Asking again without it would produce the same answer.
+	Refused string
 	// Progress receives a line per model iteration.
 	Progress func(string)
 }
@@ -187,6 +190,13 @@ func buildExtractPrompt(req ExtractRequest) string {
 	// already carries every sequence worth hoisting.
 	for _, path := range involved(req) {
 		fmt.Fprintf(&b, "=== %s\n```javascript\n%s\n```\n\n", path, strings.TrimSpace(req.Scripts[path]))
+	}
+
+	if req.Refused != "" {
+		fmt.Fprintf(&b, "You have already answered this once and the answer was rejected:\n\n    %s\n\n"+
+			"Fix that and send the whole thing again. If it cannot be fixed — the\noperations do not belong in a "+
+			"library, or naming them would need the assertions\nto move — then hoist nothing and say so after REASON:.\n",
+			req.Refused)
 	}
 
 	return b.String()

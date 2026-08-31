@@ -493,3 +493,36 @@ func TestOnlyTheScriptsAnOverlapNamesAreSent(t *testing.T) {
 		t.Error("a script no overlap names was sent anyway")
 	}
 }
+
+// A refusal is not recorded anywhere, so without a second attempt the next run
+// finds the same repetition, asks the same question and is refused again — a
+// model call spent on every run from then on, and the duplication never
+// removed. The refusal is mechanical and specific, which is exactly the kind
+// of thing worth handing back.
+func TestASecondAttemptIsToldWhatWasWrong(t *testing.T) {
+	req := ExtractRequest{
+		Scripts: map[string]string{"a.test.js": "// a"},
+		Overlaps: []testscript.Overlap{{
+			Steps:   []string{"atr.navigate(P)"},
+			Scripts: []string{"a.test.js"},
+		}},
+		Refused: "_shared.js runs code at the top level",
+	}
+
+	prompt := buildExtractPrompt(req)
+	if !strings.Contains(prompt, "runs code at the top level") {
+		t.Error("the second attempt is not told why the first was rejected")
+	}
+	if !strings.Contains(prompt, "already answered this once") {
+		t.Error("the second attempt is not told it is a second attempt")
+	}
+	if !strings.Contains(prompt, "hoist nothing and say so") {
+		t.Error("the second attempt is not allowed to decline, so it will invent something")
+	}
+
+	// A first attempt says none of that.
+	req.Refused = ""
+	if first := buildExtractPrompt(req); strings.Contains(first, "already answered") {
+		t.Error("a first attempt is told it is a retry")
+	}
+}

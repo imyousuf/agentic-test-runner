@@ -137,10 +137,41 @@ func (a *Agent) RefactorOperations(ctx context.Context, req RefactorRequest) (*R
 	}
 
 	if err := ValidateExtraction(scripts, ex); err != nil {
-		// Not an error for the run: the scripts on disk are untouched and
-		// still correct. The extraction simply does not happen.
+		// Once more, saying what was wrong. Nothing records that a directory's
+		// proposal was refused, so without this the next run finds the same
+		// repetition, asks the same question and is refused again — a model
+		// call spent on every run from here on, and the duplication never
+		// removed. A refusal is mechanical and specific ("it runs code at the
+		// top level"), which is the kind of thing worth handing back.
 		logf("refusing the proposed extraction: %v", err)
-		return out, nil
+		logf("asking once more, saying what was wrong")
+
+		out.ModelCalls++
+		ex, err = a.ProposeExtraction(ctx, ExtractRequest{
+			Library:  library,
+			Scripts:  scripts,
+			Overlaps: take,
+			Refused:  err.Error(),
+			Progress: req.Progress,
+		})
+		if err != nil {
+			return out, err
+		}
+		if err := ex.ResolveAgainst(scripts); err != nil {
+			logf("refusing the second proposal: %v", err)
+			return out, nil
+		}
+		out.Reason = ex.Reason
+		if ex.Empty() {
+			logf("the agent found nothing worth hoisting — %s", ex.Reason)
+			return out, nil
+		}
+		if err := ValidateExtraction(scripts, ex); err != nil {
+			// Twice is enough. The scripts on disk are untouched and still
+			// correct; the extraction simply does not happen.
+			logf("refusing the second proposal too: %v", err)
+			return out, nil
+		}
 	}
 
 	// From here files change, so everything is undoable.
