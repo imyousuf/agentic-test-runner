@@ -337,3 +337,45 @@ func TestALibraryOfPlainDeclarationsIsAccepted(t *testing.T) {
 		t.Errorf("a library of declarations was rejected: %v", err)
 	}
 }
+
+// Compiling each spec in isolation is why extraction had nothing to find: two
+// specs that make the same journey derived it independently and wrote it
+// differently — the same link as `TAGS_PATH` in one script and `tagsPath` in
+// the other — and no matcher can undo that after the fact. Showing a compile
+// what its neighbours already settled on is what makes the repetition
+// detectable at all.
+func TestSiblingScriptsAreOfferedToTheCompiler(t *testing.T) {
+	dir := t.TempDir()
+
+	write := func(name, body string) string {
+		spec := filepath.Join(dir, name+".test.txt")
+		if err := os.WriteFile(spec, []byte("Steps:\n1. Go\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if body != "" {
+			if err := os.WriteFile(ScriptPath(spec), []byte(body), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return spec
+	}
+
+	mine := write("mine", "atr.step(1, \"mine\", () => {});")
+	write("neighbour", "atr.step(1, \"neighbour\", () => {});")
+	write("uncompiled", "")
+
+	siblings, err := SiblingScripts(mine)
+	if err != nil {
+		t.Fatalf("reading siblings: %v", err)
+	}
+
+	if _, ok := siblings["mine.test.js"]; ok {
+		t.Error("a spec was shown its own script, which teaches it nothing")
+	}
+	if _, ok := siblings["neighbour.test.js"]; !ok {
+		t.Errorf("the compiled neighbour was not offered, got %d sibling(s)", len(siblings))
+	}
+	if len(siblings) != 1 {
+		t.Errorf("got %d siblings, want only the one that is compiled", len(siblings))
+	}
+}

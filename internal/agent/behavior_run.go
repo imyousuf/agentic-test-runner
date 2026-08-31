@@ -546,6 +546,17 @@ func (a *Agent) loadOrCompile(ctx context.Context, req RunRequest, outcome *RunO
 		return "", fmt.Errorf("%s is stale (the spec changed) and --no-compile is set", stored.Path)
 	}
 
+	// What the neighbours wrote, so this compile drives a shared journey the
+	// way they already drive it. Duplication that comes out identical can be
+	// hoisted later; duplication written two ways cannot be found at all.
+	siblings, err := testscript.SiblingScripts(req.SpecPath)
+	if err != nil {
+		return "", err
+	}
+	if len(siblings) > 0 {
+		logf("showing the compiler %d already-compiled sibling(s)", len(siblings))
+	}
+
 	outcome.ModelCalls++
 	compileStart := time.Now()
 	source, properties, err := a.CompileBehavior(ctx, CompileRequest{
@@ -554,6 +565,7 @@ func (a *Agent) loadOrCompile(ctx context.Context, req RunRequest, outcome *RunO
 		Spec:     req.Spec,
 		BaseURL:  req.BaseURL,
 		Library:  librarySource(library),
+		Siblings: siblings,
 	})
 	outcome.CompileDuration = time.Since(compileStart)
 	if err != nil {

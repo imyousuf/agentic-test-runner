@@ -1,0 +1,29 @@
+Test: A second tag lists its own posts, not everything
+
+Why this matters:
+A tag page that quietly ignores its tag and lists the whole archive looks
+right at a glance — posts are there, the page loads — and makes the archive
+unsearchable. Checking a second tag is what distinguishes "tags work" from
+"this one tag happens to work".
+
+Prerequisites:
+- The blog is published and at least one post carries the "linux" tag
+
+Steps:
+1. Open the tags page at /tags/ and follow the link for the "linux" tag
+2. Confirm this tag's page is showing its own posts
+
+Expected Results:
+- The URL is the linux tag's page
+- The page names the tag it is showing
+- At least one post is listed
+- Fewer posts are listed here than the tags page offers tags, which is what
+  tells us this is a filtered view rather than the whole archive
+
+Notes for the compiler:
+- Tag links are ordinary anchors whose href ends with the tag slug.
+- Do not hardcode how many posts carry this tag; the author can publish
+  another about Linux at any time.
+- Reaching the tag page is one step, not two, for the same reason as the
+  other tag spec: a check between the navigate and the click stops the pair
+  ever becoming one shared operation.

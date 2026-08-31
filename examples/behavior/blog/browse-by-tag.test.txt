@@ -8,9 +8,8 @@ Prerequisites:
 - The blog is published and at least one post carries the "rest" tag
 
 Steps:
-1. Open the tags page at /tags/
-2. Follow the link for the "rest" tag
-3. Confirm the reader is looking at that tag's posts
+1. Open the tags page at /tags/ and follow the link for the "rest" tag
+2. Confirm the reader is looking at that tag's posts
 
 Expected Results:
 - The URL is the rest tag's page
@@ -23,3 +22,6 @@ Notes for the compiler:
 - Tag links are ordinary anchors whose href contains /tags/.
 - Count the post headings rather than asserting an exact number: the author
   can publish another post about REST at any time.
+- Reaching the tag page is one step, not two. Splitting it puts a check
+  between the navigate and the click, and two operations either side of an
+  assertion can never be named as one shared operation.

@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -198,5 +200,91 @@ func TestTheReplyIsParsed(t *testing.T) {
 	}
 	if ex.Reason != "hoisted the three sign-in operations" {
 		t.Errorf("reason = %q", ex.Reason)
+	}
+}
+
+// The agent is shown paths as it was given them and answers with whatever
+// reads naturally. Matching the reply's file names literally rejected a sound
+// extraction — every rewrite present and correct — because the agent had
+// written "tests/_shared.js" where the parser wanted "_shared.js".
+func TestFileNamesAreMatchedByBaseName(t *testing.T) {
+	reply := "=== FILE: tests/_shared.js\n```javascript\nfunction openHome() { atr.navigate(\"/\"); }\n```\n\n" +
+		"=== FILE: ./tests/a.test.js\n```javascript\natr.step(1, \"go\", () => { openHome(); expect(1).toBe(1); });\n```\n\n" +
+		"REASON: hoisted the home navigation"
+
+	ex, err := parseExtraction(reply)
+	if err != nil {
+		t.Fatalf("parsing a reply that used directory prefixes: %v", err)
+	}
+	if ex.Library == "" {
+		t.Fatal("the library was not recognised through its directory prefix")
+	}
+
+	known := map[string]string{
+		"/repo/tests/a.test.js": "atr.step(1, \"go\", () => { atr.navigate(\"/\"); expect(1).toBe(1); });",
+	}
+	if err := ex.ResolveAgainst(known); err != nil {
+		t.Fatalf("resolving against the real paths: %v", err)
+	}
+	if _, ok := ex.Scripts["/repo/tests/a.test.js"]; !ok {
+		t.Fatalf("the rewrite was not mapped onto its real path, got %v", ex.Paths())
+	}
+}
+
+// A rewrite of something that is not in this directory is still refused; the
+// base-name match must not turn into "accept anything".
+func TestAnUnknownScriptIsStillRefused(t *testing.T) {
+	ex := &Extraction{
+		Library: "function f() {}",
+		Scripts: map[string]string{"elsewhere.test.js": "atr.step(1, \"x\", () => {});"},
+	}
+	if err := ex.ResolveAgainst(map[string]string{"/repo/tests/a.test.js": "..."}); err == nil {
+		t.Fatal("a script from another directory was accepted")
+	}
+}
+
+// An extraction replays every rewritten script against the library it just
+// wrote, which is exactly what the lib hash attests. Leaving the stamp off
+// threw that proof away: the next run saw a directory whose library had
+// changed and replayed all of it to rediscover what had already been shown.
+//
+// Every spec, not only the rewritten ones — a library now exists where none
+// did, and each spec in the directory loads it whether or not it calls it.
+func TestStampingRecordsTheVerifiedLibraryOnEverySpec(t *testing.T) {
+	dir := t.TempDir()
+
+	var specs []string
+	for _, name := range []string{"a", "b"} {
+		spec := filepath.Join(dir, name+".test.txt")
+		if err := os.WriteFile(spec, []byte("Steps:\n1. Go\n\nExpected Results:\n- It worked\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		script := "// atr-spec-sha256: " + testscript.SpecHash("x") +
+			"\natr.step(1, \"Go\", () => { expect(1).toBe(1); });\n"
+		if err := os.WriteFile(testscript.ScriptPath(spec), []byte(script), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		specs = append(specs, spec)
+	}
+
+	library := "function openHome() { atr.navigate(\"/\"); }\n"
+	if err := os.WriteFile(testscript.LibraryPath(specs[0]), []byte(library), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := stampDirectory(specs); err != nil {
+		t.Fatalf("stamping: %v", err)
+	}
+
+	want := (&testscript.Library{Source: library}).Hash()
+	for _, spec := range specs {
+		stored, err := testscript.Load(spec)
+		if err != nil {
+			t.Fatalf("loading %s: %v", filepath.Base(spec), err)
+		}
+		if stored.LibraryChanged(want) {
+			t.Errorf("%s was not stamped with the library it was verified against",
+				filepath.Base(spec))
+		}
 	}
 }

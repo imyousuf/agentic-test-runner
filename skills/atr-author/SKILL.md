@@ -157,10 +157,48 @@ value — the compiler emits `atr.fillSecret`, which fetches and types inside on
 call so the value never enters the script, the transcript, or a later repair
 prompt.
 
-## Rule 10: share operations, never assertions
+## Rule 10: a step is one journey, not one instruction
 
-A `_shared.js` beside your specs is loaded into the same scope before every
-script in that directory, so its top-level functions are simply in scope:
+How you break a spec into steps decides what can ever be shared between specs.
+
+A hoisted operation replaces a run of consecutive statements inside a single
+step. So if you write:
+
+```
+1. Open the tags page
+2. Follow the "rest" tag
+```
+
+the compiler puts a check at the end of step 1 — it arrived, after all — and
+now the navigate and the click sit either side of an assertion *and* either
+side of a step boundary. They can never become one shared `openTag()`, because
+gathering them would mean moving the assertion, and an assertion never moves.
+
+Write the journey as one step and the checks as the next:
+
+```
+1. Open the tags page and follow the "rest" tag
+2. Confirm the reader is looking at that tag's posts
+```
+
+This is also just better spec writing: a step is a thing the reader *does*, and
+Expected Results is what must then be true. The sharing falls out of that.
+
+## Rule 11: share operations, never assertions
+
+You do not have to write the shared library. Compile two specs that drive the
+same journey and ATR hoists it for you: it finds the repetition, names it,
+rewrites both scripts to call it, and replays them before keeping the change.
+Nothing is kept unless every rewritten script still claims exactly what it
+claimed before, character for character.
+
+A compile is also shown what its neighbours wrote, so two specs reaching the
+same page use the same selector and the same constant name rather than
+inventing their own. That is what makes the repetition findable at all.
+
+You can still write `_shared.js` by hand, and reading it is worth it either
+way — it is loaded into the same scope before every script in the directory,
+so its top-level functions are simply in scope:
 
 ```js
 // tests/e2e/_shared.js
@@ -191,6 +229,10 @@ Three rules, and the first is enforced rather than requested:
 
 A defect in the library is `config`: never repaired, never retried, never sent
 to the model. A person fixes shared code.
+
+`atr refactor-ops tests/ --dry-run` says what could be hoisted without
+changing anything or opening a browser. Turn the automatic pass off with
+`behavior.extract_operations: on-demand` or `--no-extract`.
 
 Editing the library does **not** force a recompile. Scripts carry a second
 header, `// atr-lib-sha256:`, and a change to it means the script is *unproven*

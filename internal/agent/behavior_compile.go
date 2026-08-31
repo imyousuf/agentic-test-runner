@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -153,6 +154,15 @@ failure it raised, and the wrong call produces the wrong diagnosis:
 - Use atr.waitFor and atr.waitForText only to reach a state on the way to
   something else — a page you must load before you can click — never as the
   check that the state arrived.
+- A step whose purpose is to GET somewhere carries no assertions of its own.
+  Assert what the spec asks you to assert, in the step that asks. Do not add
+  a defensive check in the middle of a journey: the spec's own checks come
+  next, they will catch a journey that failed, and an assertion sitting
+  between two operations stops those operations ever being named as one
+  shared operation — which is how another spec making the same journey gets
+  to reuse it instead of re-deriving it.
+  Use atr.waitFor to reach an intermediate state; use an assertion when the
+  spec says something must be true.
 
 TEST INPUTS MUST NOT BE HARDCODED. Anything the test types, searches for,
 navigates to, or expects as data is an input, and belongs in the properties
@@ -222,6 +232,14 @@ type CompileRequest struct {
 	// verbatim. A library the model cannot see is a shelf nobody reaches for:
 	// the agent re-derives login anyway and we have added a file.
 	Library string
+	// Siblings are the compiled scripts of the other specs in the directory.
+	//
+	// A compile is otherwise blind to what its neighbours did, so two specs
+	// driving the same journey invent their own selectors, their own constant
+	// names and their own order for it — and nothing can hoist that
+	// afterwards, because independently compiled scripts have nothing in
+	// common to match on.
+	Siblings map[string]string
 }
 
 // libraryNote renders the shared library for a prompt.
@@ -241,6 +259,45 @@ func libraryNote(library string) string {
 		"bodies into the script. They amend the \"nothing else is available\" rule\n" +
 		"above: these are available too.\n\nDo NOT rewrite this file. Other tests in the same directory depend on it.\n\n" +
 		"```javascript\n" + strings.TrimSpace(library) + "\n```\n"
+}
+
+// siblingNote shows a compile what its neighbours wrote.
+//
+// Not so it copies them — each spec asserts its own thing — but so that the
+// parts which are genuinely the same come out the same. Two specs that both
+// reach a tag page should name the path the same way and click the same
+// selector; when they do not, the duplication is invisible to everything that
+// might have removed it.
+//
+// This is cheaper than removing the duplication afterwards, and it is the
+// only version that works: hoisting can only find what two scripts have in
+// common, and independently compiled scripts have nothing in common to find.
+func siblingNote(siblings map[string]string) string {
+	if len(siblings) == 0 {
+		return ""
+	}
+
+	names := make([]string, 0, len(siblings))
+	for name := range siblings {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	var b strings.Builder
+	b.WriteString("\n\nOther specs in this directory have already been compiled. Where you do\n" +
+		"something they also do — reaching the same page, signing in the same way,\n" +
+		"waiting for the same thing — write it the way they wrote it: the same\n" +
+		"selector, the same constant name, the same order. Two scripts that drive\n" +
+		"one journey two different ways can never share it.\n\n" +
+		"Do NOT copy their assertions. What this spec claims comes from this spec,\n" +
+		"and only from it. These are here for how they drive the application, not\n" +
+		"for what they check.\n\n")
+
+	for _, name := range names {
+		fmt.Fprintf(&b, "=== %s\n```javascript\n%s\n```\n\n", name, strings.TrimSpace(siblings[name]))
+	}
+
+	return b.String()
 }
 
 // CompileBehavior drives the browser through the spec once and returns the
@@ -290,7 +347,7 @@ selectors that actually worked. It has to run unattended with no model
 involved, so anything you worked out by looking at the page must be baked in —
 except the inputs, which go in the properties block.
 
-` + scriptAPIReference + libraryNote(req.Library)
+` + scriptAPIReference + libraryNote(req.Library) + siblingNote(req.Siblings)
 
 	user := fmt.Sprintf(`Application base URL: %s
 

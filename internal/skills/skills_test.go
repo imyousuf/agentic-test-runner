@@ -94,6 +94,7 @@ func TestSkillsDocumentCurrentCapabilities(t *testing.T) {
 		{"the shared operations library", "_shared.js"},
 		{"the library freshness header", "atr-lib-sha256"},
 		{"assertions that wait for a value", "atr.expectText"},
+		{"hoisting repeated operations", "refactor-ops"},
 		{"triage separated from compilation", "--no-triage"},
 	}
 
