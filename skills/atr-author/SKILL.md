@@ -243,6 +243,10 @@ to the model. A person fixes shared code.
 changing anything or opening a browser. Turn the automatic pass off with
 `behavior.extract_operations: on-demand` or `--no-extract`.
 
+Under `--no-compile` — which is what CI runs — hoisting only ever reports.
+Applying it would call the model and rewrite the scripts, and that flag permits
+neither, so a replay job never comes back with a modified working tree.
+
 Editing the library does **not** force a recompile. Scripts carry a second
 header, `// atr-lib-sha256:`, and a change to it means the script is *unproven*
 against the new library, not wrong — so it replays and the header catches up.
