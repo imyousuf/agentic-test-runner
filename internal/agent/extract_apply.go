@@ -182,12 +182,28 @@ func stampDirectory(specs []string) error {
 	}
 	hash := lib.Hash()
 
+	// Every spec that has a script, and not one abandoned because an earlier
+	// one had none. A directory can hold a spec that has never compiled — one
+	// just added, or one skipped as stale — and giving up at it would leave
+	// the specs after it unstamped, which costs the next run a replay of the
+	// whole directory to rediscover what was just proved.
+	var firstErr error
 	for _, spec := range specs {
-		if err := testscript.Stamp(spec, hash); err != nil {
-			return err
+		stored, err := testscript.Load(spec)
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		if stored == nil {
+			continue
+		}
+		if err := testscript.Stamp(spec, hash); err != nil && firstErr == nil {
+			firstErr = err
 		}
 	}
-	return nil
+	return firstErr
 }
 
 // verifyRewrites replays every script the extraction touched.

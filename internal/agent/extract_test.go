@@ -404,3 +404,53 @@ func TestAFailedWriteLeavesTheDirectoryAsItWas(t *testing.T) {
 		}
 	}
 }
+
+// A directory can hold a spec that has never compiled — one just added, or one
+// skipped as stale. Stamping must not give up at it and leave every spec after
+// it unstamped, because the cost of a missing stamp is the next run replaying
+// the whole directory to rediscover what was just proved.
+func TestStampingSkipsAnUncompiledSpecAndCarriesOn(t *testing.T) {
+	dir := t.TempDir()
+
+	spec := func(name string, compiled bool) string {
+		p := filepath.Join(dir, name+".test.txt")
+		if err := os.WriteFile(p, []byte("Steps:\n1. Go\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if compiled {
+			body := "// atr-spec-sha256: " + testscript.SpecHash("x") +
+				"\natr.step(1, \"Go\", () => { expect(1).toBe(1); });\n"
+			if err := os.WriteFile(testscript.ScriptPath(p), []byte(body), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return p
+	}
+
+	// The uncompiled one sorts first, so a loop that gives up never reaches
+	// the others.
+	a := spec("a-never-compiled", false)
+	b := spec("b-compiled", true)
+	c := spec("c-compiled", true)
+
+	library := "function openHome() { atr.navigate(\"/\"); }\n"
+	if err := os.WriteFile(testscript.LibraryPath(a), []byte(library), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := stampDirectory([]string{a, b, c}); err != nil {
+		t.Fatalf("stamping: %v", err)
+	}
+
+	want := (&testscript.Library{Source: library}).Hash()
+	for _, s := range []string{b, c} {
+		stored, err := testscript.Load(s)
+		if err != nil {
+			t.Fatalf("loading %s: %v", filepath.Base(s), err)
+		}
+		if stored == nil || stored.LibraryChanged(want) {
+			t.Errorf("%s was left unstamped because an earlier spec had no script",
+				filepath.Base(s))
+		}
+	}
+}

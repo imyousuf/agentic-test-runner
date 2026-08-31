@@ -133,6 +133,12 @@ current library rather than stale — so it replays and the header is updated
 when it passes. Under `--no-compile` the update is reported instead of written,
 so CI does not leave a dirty tree.
 
+Hoisting follows the same rule. A run normally hoists the operations its specs
+keep repeating into `_shared.js`; under `--no-compile` it reports what could be
+hoisted and changes nothing, because applying it would call the model and
+rewrite the scripts — neither of which that flag permits. Run
+`atr refactor-ops <dir>` to act on it.
+
 A defect in the library is a `config` failure: never repaired, never retried,
 never sent to the model.
 

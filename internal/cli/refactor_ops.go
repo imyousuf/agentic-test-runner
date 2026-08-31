@@ -260,6 +260,33 @@ func browserAndModel(ctx context.Context, cfg *config.Config) (*browser.Browser,
 	}, nil
 }
 
+// extractionMode settles what a run may do about repetition it finds.
+//
+// --no-compile is the one that is easy to miss. It means replay what is
+// committed: spend no model calls and write nothing into the checkout.
+// Hoisting does all three — it asks the model for a proposal, rewrites the
+// scripts and adds a library. Under that flag it therefore only reports, which
+// is the same rule a restamp already follows and is what makes the flag safe
+// for CI: a job that replays a suite must not come back with a modified
+// working tree. Reporting still happens, so the duplication is not hidden;
+// `atr refactor-ops` is where it gets acted on.
+func extractionMode(configured string, noExtract, noCompile bool) agent.ExtractionMode {
+	mode := agent.ExtractionMode(configured)
+	switch mode {
+	case agent.ExtractAlways, agent.ExtractOnDemand, agent.ExtractOff:
+	default:
+		mode = agent.ExtractAlways
+	}
+
+	if noExtract {
+		return agent.ExtractOff
+	}
+	if noCompile && mode == agent.ExtractAlways {
+		return agent.ExtractOnDemand
+	}
+	return mode
+}
+
 // runExtraction hoists what a run's compiles kept re-deriving.
 //
 // Returns nil when there is nothing to say — no repetition, extraction turned
@@ -278,15 +305,7 @@ func runExtraction(
 	baseURL string,
 	b *browser.Browser,
 ) *agent.RefactorOutcome {
-	mode := agent.ExtractionMode(cfg.Behavior.ExtractOperations)
-	switch mode {
-	case agent.ExtractAlways, agent.ExtractOnDemand, agent.ExtractOff:
-	default:
-		mode = agent.ExtractAlways
-	}
-	if noExtractFlag {
-		mode = agent.ExtractOff
-	}
+	mode := extractionMode(cfg.Behavior.ExtractOperations, noExtractFlag, noCompileFlag)
 	if mode == agent.ExtractOff || len(specs) < 2 {
 		return nil
 	}
