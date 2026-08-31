@@ -392,8 +392,19 @@ func TestTheSameJourneyWrittenTwoWaysStillMatches(t *testing.T) {
 	if len(found) != 1 {
 		t.Fatalf("the same journey written two ways was not matched: %+v", found)
 	}
-	if len(found[0].Steps) != 3 {
-		t.Errorf("matched %d operations, want all three: %v", len(found[0].Steps), found[0].Steps)
+	// Two: the navigate and the click. Both are written differently in the two
+	// scripts and both still match, because each shares something real — the
+	// path constant, the tag slug.
+	//
+	// Not the wait. One waits for POST_LINKS and the other for
+	// 'div[role="main"] ul li a', which have no token in common and are not
+	// visibly the same element; matching them would be a guess. This asserted
+	// three until the options bag stopped counting as something in common —
+	// the two waits shared the key "timeout" and nothing else, which is the
+	// same accident that had unrelated scripts naming each other.
+	if len(found[0].Steps) != 2 {
+		t.Errorf("matched %d operations, want the navigate and the click: %v",
+			len(found[0].Steps), found[0].Steps)
 	}
 }
 
@@ -516,5 +527,55 @@ func TestAHoistMayTakeABranchWithIt(t *testing.T) {
 	}
 	if !ok {
 		t.Fatalf("a hoist that carried its branch into the library was refused: %s", why)
+	}
+}
+
+// Every wait in every script carries the same options. Counting the keys of an
+// options bag made any two waits share a token, so two scripts waiting for
+// entirely different things were reported as performing the same operation —
+// each naming a script that did not contain the operations printed under it,
+// and each costing a model call to have the proposal declined.
+func TestAnOptionsBagIsNotSomethingInCommon(t *testing.T) {
+	scripts := map[string]string{
+		"tags.test.js": `atr.step(1, "Open a tag", () => {
+  atr.waitFor('a[href$="/tags/rest"]', { timeout: 15000, visible: true });
+  atr.click('a[href$="/tags/rest"]');
+});`,
+		"post.test.js": `atr.step(1, "Open a post", () => {
+  atr.waitFor(".post-link", { timeout: 15000, visible: true });
+  atr.click(".post-link");
+});`,
+	}
+
+	overlaps, err := FindOverlaps(scripts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(overlaps) != 0 {
+		t.Errorf("two scripts waiting for different things were called the same operation: %v",
+			overlaps[0].Steps)
+	}
+}
+
+// The values inside an options bag are still worth matching on: which secret a
+// fill uses is exactly the kind of thing two scripts genuinely share.
+func TestAValueInsideAnOptionsBagStillCounts(t *testing.T) {
+	scripts := map[string]string{
+		"a.test.js": `atr.step(1, "Sign in", () => {
+  atr.fill("#user", "bob");
+  atr.fillSecret("#pass", { ref: "app_password" });
+});`,
+		"b.test.js": `atr.step(1, "Sign in again", () => {
+  atr.fill("#user", "bob");
+  atr.fillSecret("#password", { ref: "app_password" });
+});`,
+	}
+
+	overlaps, err := FindOverlaps(scripts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(overlaps) == 0 {
+		t.Error("two sign-ins using the same credential were not seen as shared")
 	}
 }

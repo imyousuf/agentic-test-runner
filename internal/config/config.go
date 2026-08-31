@@ -474,6 +474,19 @@ func setDefaults(v *viper.Viper) {
 
 // Validate checks that the configuration is valid and complete.
 func (c *Config) Validate() error {
+	// Silence here is the wrong answer. An unrecognised value falls back to
+	// the default, which is "always" — so somebody who meant to switch
+	// hoisting off, and wrote "none" or "disabled" or "on demand", would get
+	// the most eager setting instead and find their scripts rewritten. The
+	// only value of that config key is to restrain something, so refusing to
+	// guess is the whole point.
+	switch c.Behavior.ExtractOperations {
+	case "", "always", "on-demand", "off":
+	default:
+		return fmt.Errorf("invalid behavior.extract_operations: %q (must be 'always', 'on-demand', or 'off')",
+			c.Behavior.ExtractOperations)
+	}
+
 	switch c.Backend {
 	case "gemini-api":
 		if c.Gemini.APIKey == "" {

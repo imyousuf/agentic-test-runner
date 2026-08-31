@@ -477,19 +477,42 @@ func operationSequence(source string) ([][]operation, error) {
 func tokensIn(call *ast.CallExpression) map[string]bool {
 	out := map[string]bool{}
 	for _, arg := range call.ArgumentList {
-		walk(arg, func(n ast.Node) bool {
-			switch v := n.(type) {
-			case *ast.Identifier:
-				out[string(v.Name)] = true
-			case *ast.StringLiteral:
-				if lit := strings.TrimSpace(string(v.Value)); lit != "" {
-					out[lit] = true
-				}
-			}
-			return true
-		})
+		collectTokens(arg, out)
 	}
 	return out
+}
+
+// collectTokens gathers what a call acts on, ignoring the keys of an options
+// bag.
+//
+// The keys say how an operation behaves, not what it acts on, and they are the
+// same on every call that takes them: every wait in every script carries
+// {timeout, visible}. Counting them made any two waits share a token, so two
+// scripts waiting for entirely different things were reported as performing
+// the same operation — naming each other in a report neither of them matched,
+// and costing a model call to have the proposal declined.
+//
+// The values are kept. {ref: "app_password"} says which secret, and that is
+// exactly the kind of thing two scripts genuinely have in common.
+func collectTokens(root any, out map[string]bool) {
+	walk(root, func(n ast.Node) bool {
+		switch v := n.(type) {
+		case *ast.ObjectLiteral:
+			for _, p := range v.Value {
+				if kv, ok := p.(*ast.PropertyKeyed); ok {
+					collectTokens(kv.Value, out)
+				}
+			}
+			return false
+		case *ast.Identifier:
+			out[string(v.Name)] = true
+		case *ast.StringLiteral:
+			if lit := strings.TrimSpace(string(v.Value)); lit != "" {
+				out[lit] = true
+			}
+		}
+		return true
+	})
 }
 
 // sameOperation reports whether two calls are plausibly the same step of the
