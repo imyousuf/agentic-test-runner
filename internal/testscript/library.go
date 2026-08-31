@@ -306,3 +306,39 @@ func (r *runtime) refuseFromLibrary(call string) {
 			"in the directory. Move the assertion into the spec that cares about it.",
 		call, filepath.Base(r.libraryName))
 }
+
+// SiblingScripts returns the compiled scripts of the other specs in a spec's
+// directory.
+//
+// A compile is otherwise blind to what its neighbours did, so two specs that
+// drive the same journey invent their own selectors, their own constant names
+// and their own order for it — and then nothing can hoist the duplication,
+// because independently compiled scripts have nothing in common to match on.
+// Showing the compiler what its neighbours wrote is what makes them converge.
+func SiblingScripts(specPath string) (map[string]string, error) {
+	dir := filepath.Dir(specPath)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, fmt.Errorf("reading %s: %w", dir, err)
+	}
+
+	mine := ScriptPath(specPath)
+	out := map[string]string{}
+
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".test.js") {
+			continue
+		}
+		path := filepath.Join(dir, e.Name())
+		if path == mine {
+			continue
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		out[e.Name()] = string(data)
+	}
+
+	return out, nil
+}

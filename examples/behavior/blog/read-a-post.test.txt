@@ -9,8 +9,7 @@ Prerequisites:
 - The blog is published and the front page lists at least one post
 
 Steps:
-1. Open the front page using openFirstPost() from the shared library, which
-   follows the first post link
+1. Open the front page and follow the link for the first post listed
 2. Confirm the reader has landed on the post itself
 
 Expected Results:

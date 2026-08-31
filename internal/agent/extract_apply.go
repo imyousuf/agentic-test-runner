@@ -106,6 +106,11 @@ func (a *Agent) RefactorOperations(ctx context.Context, req RefactorRequest) (*R
 		return out, err
 	}
 
+	if err := ex.ResolveAgainst(scripts); err != nil {
+		logf("refusing the proposed extraction: %v", err)
+		return out, nil
+	}
+
 	out.Reason = ex.Reason
 	if ex.Empty() {
 		logf("the agent found nothing worth hoisting — %s", ex.Reason)
@@ -137,10 +142,44 @@ func (a *Agent) RefactorOperations(ctx context.Context, req RefactorRequest) (*R
 		return out, nil
 	}
 
+	// Record what was just proved. The replays above ran every rewritten
+	// script against this exact library, which is precisely what the lib hash
+	// attests — leaving it off would throw away the expensive half of the work
+	// and make the next run replay the whole directory to rediscover it.
+	//
+	// Every spec, not only the rewritten ones: a library now exists where none
+	// did, and each spec in the directory loads it whether or not it calls
+	// anything in it.
+	if err := stampDirectory(req.Specs); err != nil {
+		// The extraction itself holds — the files are written and verified. A
+		// missing stamp costs a replay next run, so it is not worth undoing
+		// proven work over.
+		logf("hoisted, but could not record the library hash: %v", err)
+	}
+
 	out.Applied = true
 	out.Changed = ex.Paths()
 	logf("hoisted into %s and verified: %s", testscript.LibraryName, ex.Reason)
 	return out, nil
+}
+
+// stampDirectory records the hash of the library that every script in the
+// directory was just verified against.
+func stampDirectory(specs []string) error {
+	// From disk, not from the proposal in memory: this must be the hash the
+	// next run's freshness check computes, and that one reads the file.
+	lib, err := testscript.LoadLibrary(specs[0])
+	if err != nil {
+		return err
+	}
+	hash := lib.Hash()
+
+	for _, spec := range specs {
+		if err := testscript.Stamp(spec, hash); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // verifyRewrites replays every script the extraction touched.
@@ -174,11 +213,21 @@ func (a *Agent) verifyRewrites(ctx context.Context, req RefactorRequest, ex *Ext
 			return err
 		}
 
+		// Per spec, exactly as the run resolves it. A directory shares a
+		// library, not an address: its specs can point at different hosts, and
+		// the one the refactor happened to be started with is not necessarily
+		// any of them. Replaying a relative navigate against an empty base
+		// fails as environment, which reads as a rewrite that broke the test.
+		baseURL := req.BaseURL
+		if base, ok, err := values.Resolve(ctx, "base_url"); err == nil && ok && base != "" {
+			baseURL = base
+		}
+
 		result, err := testscript.Run(ctx, testscript.Options{
 			Browser:      a.browser,
 			Source:       ex.Scripts[path],
 			Name:         path,
-			BaseURL:      req.BaseURL,
+			BaseURL:      baseURL,
 			Timeout:      req.ScriptTimeout,
 			SecretFiller: req.SecretFiller,
 			Values:       values,

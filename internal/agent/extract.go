@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -205,11 +206,15 @@ func parseExtraction(reply string) (*Extraction, error) {
 
 	for _, m := range fileBlock.FindAllStringSubmatch(reply, -1) {
 		path, body := strings.TrimSpace(m[1]), m[2]
-		if path == testscript.LibraryName {
+		// By base name. The agent is shown paths as it was given them and
+		// answers with whatever reads naturally — "tests/_shared.js",
+		// "./_shared.js" — and rejecting a sound extraction over a directory
+		// prefix would be an expensive way to be pedantic.
+		if filepath.Base(path) == testscript.LibraryName {
 			ex.Library = body
 			continue
 		}
-		ex.Scripts[path] = body
+		ex.Scripts[filepath.Base(path)] = body
 	}
 
 	for _, line := range strings.Split(reply, "\n") {
@@ -230,6 +235,34 @@ func parseExtraction(reply string) (*Extraction, error) {
 		return nil, fmt.Errorf("the agent proposed a library that nothing calls")
 	}
 	return ex, nil
+}
+
+// ResolveAgainst maps the names the agent answered with onto the real paths.
+//
+// It answers with base names because that is how the files were shown to it;
+// everything downstream — reading the original to compare against, writing the
+// rewrite, replaying it — needs the path on disk.
+func (e *Extraction) ResolveAgainst(known map[string]string) error {
+	if e.Empty() {
+		return nil
+	}
+
+	byBase := make(map[string]string, len(known))
+	for path := range known {
+		byBase[filepath.Base(path)] = path
+	}
+
+	resolved := make(map[string]string, len(e.Scripts))
+	for name, body := range e.Scripts {
+		path, ok := byBase[filepath.Base(name)]
+		if !ok {
+			return fmt.Errorf("the agent rewrote %s, which is not a script in this directory", name)
+		}
+		resolved[path] = body
+	}
+	e.Scripts = resolved
+
+	return nil
 }
 
 // Empty reports whether the agent decided there was nothing worth hoisting.
