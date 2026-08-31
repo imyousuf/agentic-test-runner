@@ -342,3 +342,75 @@ func SiblingScripts(specPath string) (map[string]string, error) {
 
 	return out, nil
 }
+
+// LibraryOperations lists the operations a library declares, by name and
+// number of parameters.
+//
+// Used to hold an extraction to the one promise the rest of the directory
+// depends on: a library may gain operations and must never lose one. Only the
+// scripts an extraction rewrites are replayed afterwards, and they are exactly
+// the scripts that cannot notice a missing operation, because they were
+// rewritten to call the new ones.
+func LibraryOperations(source string) (map[string]int, error) {
+	if strings.TrimSpace(source) == "" {
+		return map[string]int{}, nil
+	}
+
+	prg, err := parser.ParseFile(nil, LibraryName, source, 0)
+	if err != nil {
+		return nil, fmt.Errorf("parsing %s: %w", LibraryName, err)
+	}
+
+	out := map[string]int{}
+	arity := func(fn *ast.FunctionLiteral) int {
+		if fn == nil || fn.ParameterList == nil {
+			return 0
+		}
+		return len(fn.ParameterList.List)
+	}
+
+	for _, stmt := range prg.Body {
+		switch v := stmt.(type) {
+		case *ast.FunctionDeclaration:
+			if v.Function != nil && v.Function.Name != nil {
+				out[string(v.Function.Name.Name)] = arity(v.Function)
+			}
+		case *ast.VariableStatement:
+			for _, b := range v.List {
+				id, ok := b.Target.(*ast.Identifier)
+				if !ok {
+					continue
+				}
+				switch fn := b.Initializer.(type) {
+				case *ast.FunctionLiteral:
+					out[string(id.Name)] = arity(fn)
+				case *ast.ArrowFunctionLiteral:
+					n := 0
+					if fn.ParameterList != nil {
+						n = len(fn.ParameterList.List)
+					}
+					out[string(id.Name)] = n
+				}
+			}
+		case *ast.LexicalDeclaration:
+			for _, b := range v.List {
+				id, ok := b.Target.(*ast.Identifier)
+				if !ok {
+					continue
+				}
+				switch fn := b.Initializer.(type) {
+				case *ast.FunctionLiteral:
+					out[string(id.Name)] = arity(fn)
+				case *ast.ArrowFunctionLiteral:
+					n := 0
+					if fn.ParameterList != nil {
+						n = len(fn.ParameterList.List)
+					}
+					out[string(id.Name)] = n
+				}
+			}
+		}
+	}
+
+	return out, nil
+}

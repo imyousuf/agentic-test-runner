@@ -314,19 +314,78 @@ func (e *Extraction) Empty() bool {
 	return e == nil || (e.Library == "" && len(e.Scripts) == 0)
 }
 
+// libraryKeepsItsOperations holds an extraction to the one promise the rest of
+// the directory depends on.
+//
+// The library is replaced whole, and it is shared by every spec beside it —
+// but only the scripts the extraction rewrites are replayed afterwards, and
+// those are precisely the ones that cannot notice a missing operation, because
+// they were rewritten to call the new ones. A proposal that hoists a journey
+// out of two specs and quietly drops the login() the other eight call is
+// therefore verified green and kept.
+//
+// What happens next is the part worth preventing: those eight fail on the next
+// run with a name that is not defined, which is a script fault, which is
+// repairable — so the model is asked to fix eight scripts that call a function
+// that no longer exists, and the obvious repair is to inline it into each of
+// them. The library dissolves, and every hash along the way is valid.
+//
+// May gain operations, never lose one. An arity change counts as losing it:
+// the callers that were not rewritten still pass what they always passed.
+func libraryKeepsItsOperations(before, after string) error {
+	was, err := testscript.LibraryOperations(before)
+	if err != nil {
+		// An unreadable existing library is not this proposal's fault, and
+		// refusing every extraction in the directory until somebody fixes it
+		// helps nobody.
+		return nil
+	}
+	if len(was) == 0 {
+		return nil
+	}
+
+	now, err := testscript.LibraryOperations(after)
+	if err != nil {
+		return fmt.Errorf("the proposed library does not parse: %w", err)
+	}
+
+	missing := make([]string, 0, len(was))
+	for name, arity := range was {
+		got, still := now[name]
+		switch {
+		case !still:
+			missing = append(missing, fmt.Sprintf("%s() is gone", name))
+		case got != arity:
+			missing = append(missing, fmt.Sprintf("%s() took %d parameter(s) and now takes %d",
+				name, arity, got))
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	sort.Strings(missing)
+
+	return fmt.Errorf("the proposed library drops operations other specs in this directory call: %s",
+		strings.Join(missing, "; "))
+}
+
 // ValidateExtraction refuses a proposal on the syntax tree, before anything is
 // written and before anything is run.
 //
 // This is the half that holds whatever the model did. Running the rewritten
 // scripts afterwards proves the operations still work; it cannot prove the
 // tests still test anything, because a weakened assertion passes.
-func ValidateExtraction(before map[string]string, ex *Extraction) error {
+func ValidateExtraction(before map[string]string, oldLibrary string, ex *Extraction) error {
 	if ex.Empty() {
 		return nil
 	}
 
 	if err := testscript.ValidateLibrary(ex.Library, testscript.LibraryName); err != nil {
 		return fmt.Errorf("the proposed library is not one: %w", err)
+	}
+
+	if err := libraryKeepsItsOperations(oldLibrary, ex.Library); err != nil {
+		return err
 	}
 
 	for _, path := range ex.Paths() {

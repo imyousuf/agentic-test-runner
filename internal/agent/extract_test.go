@@ -64,7 +64,7 @@ atr.step(2, "Check out", () => {
 		Reason: "hoisted signIn",
 	}
 
-	if err := ValidateExtraction(original(), ex); err != nil {
+	if err := ValidateExtraction(original(), "", ex); err != nil {
 		t.Errorf("a sound extraction was refused: %v", err)
 	}
 }
@@ -138,7 +138,7 @@ function signIn(u) { atr.navigate("/login"); atr.fill("#username", u); atr.click
 
 	for name, tt := range tests {
 		t.Run(name, func(t *testing.T) {
-			err := ValidateExtraction(original(), &Extraction{Library: tt.library, Scripts: tt.scripts})
+			err := ValidateExtraction(original(), "", &Extraction{Library: tt.library, Scripts: tt.scripts})
 			if err == nil {
 				t.Fatal("an unsound extraction was accepted")
 			}
@@ -163,7 +163,7 @@ func TestADeclinedExtractionIsNotAnError(t *testing.T) {
 	if ex.Reason == "" {
 		t.Error("the refusal carries no reason")
 	}
-	if err := ValidateExtraction(original(), ex); err != nil {
+	if err := ValidateExtraction(original(), "", ex); err != nil {
 		t.Errorf("validating a refusal failed: %v", err)
 	}
 }
@@ -524,5 +524,81 @@ func TestASecondAttemptIsToldWhatWasWrong(t *testing.T) {
 	req.Refused = ""
 	if first := buildExtractPrompt(req); strings.Contains(first, "already answered") {
 		t.Error("a first attempt is told it is a retry")
+	}
+}
+
+// The library is replaced whole and is shared by every spec beside it, but
+// only the scripts an extraction rewrites are replayed — and those are exactly
+// the ones that cannot notice a missing operation, because they were rewritten
+// to call the new ones. So a proposal that hoists a journey out of two specs
+// and drops the login() the other eight call verifies green and is kept.
+//
+// The next run is where it shows: eight specs fail on a name that is not
+// defined, which is a script fault, which is repairable — so the model is
+// asked to fix eight scripts calling a function that no longer exists, and the
+// obvious repair is to inline it into each. The library dissolves with every
+// hash along the way still valid.
+func TestALibraryMayGainOperationsButNotLoseThem(t *testing.T) {
+	const existing = `function login(user) {
+  atr.navigate("/login");
+  atr.fill("#u", user);
+}
+function openHome() { atr.navigate("/"); }
+`
+	before := map[string]string{"a.test.js": `atr.step(1, "Tags", () => {
+  atr.navigate(TAGS);
+  atr.expectExists("#list");
+});`}
+	rewritten := map[string]string{"a.test.js": `atr.step(1, "Tags", () => {
+  openTags(TAGS);
+  atr.expectExists("#list");
+});`}
+
+	tests := []struct {
+		name    string
+		library string
+		wantErr string
+	}{
+		{
+			name: "gaining one is fine",
+			library: existing + `function openTags(p) { atr.navigate(p); }
+`,
+		},
+		{
+			name: "dropping one is refused",
+			library: `function openHome() { atr.navigate("/"); }
+function openTags(p) { atr.navigate(p); }
+`,
+			wantErr: "login() is gone",
+		},
+		{
+			name: "changing what one takes is refused",
+			library: `function login(user, password) { atr.navigate("/login"); }
+function openHome() { atr.navigate("/"); }
+function openTags(p) { atr.navigate(p); }
+`,
+			wantErr: "now takes 2",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateExtraction(before, existing, &Extraction{
+				Library: tt.library,
+				Scripts: rewritten,
+			})
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("a library that only gained an operation was refused: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("a library that other specs depend on was silently replaced")
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("the refusal does not name what went missing: %v", err)
+			}
+		})
 	}
 }

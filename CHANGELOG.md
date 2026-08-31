@@ -31,6 +31,53 @@ CLI need no changes.
   function, and format the same result. Adding a new primitive is one struct
   + one function instead of four-place edits.
 
+- **Shared operations, hoisted automatically.** A run finds the sequences its
+  specs keep repeating, names them in `_shared.js`, rewrites the scripts to
+  call them, and proves the rewrites before keeping them. Nothing is kept
+  unless the library declares operations only, still declares everything it
+  declared before, and every rewritten script claims exactly what it claimed
+  before and still passes against the live application — otherwise every file
+  goes back as it was. `atr refactor-ops <dir>` runs it on demand,
+  `--dry-run` reports without a browser or a model, `--no-extract` and
+  `behavior.extract_operations: always|on-demand|off` turn it down. Under
+  `--no-compile` it only ever reports, so a CI replay never leaves a modified
+  working tree.
+
+- A compile is shown the directory's already-compiled scripts, so two specs
+  that reach the same page use the same selector and the same constant name
+  instead of each inventing their own.
+
+- **Execution history.** Every run is recorded to `~/.atr/history.db`;
+  `atr history` reports pass rate, test-failure rate against infrastructure
+  rate, repairs and median replay duration, per spec. `--json` for machines.
+  `history.enabled`, `history.path`, `history.keep_days` (default 90).
+
+- **OpenTelemetry export**, when `OTEL_EXPORTER_OTLP_ENDPOINT` or
+  `--otel-endpoint` is set: metrics with bounded dimensions, a span tree of
+  run → compile → attempt → step, and failure messages as logs correlated by
+  span. Inert without an endpoint.
+
+- **A lint over compiled scripts**, for the ways one can pass without testing
+  anything: a step that cannot fail, a script that asserts nothing, an
+  assertion swallowed by a catch, a short match against whole-page text, a
+  fixed sleep, and a script that declares an operation of its own instead of
+  sharing it. Blocking findings exit 2 — the application was never tested.
+  `--lint error|warn|off`. The lint never calls the model.
+
+- `atr.expectExists` and `atr.expectMissing`: assertions that wait, replacing
+  `expect(atr.exists(x)).toBeTruthy()`, which gave the lookup a 500ms budget
+  and then reported a slow render as a broken application — and, in the
+  absence direction, passed when the element was merely late.
+
+- `_shared.js` beside the specs, evaluated into the same VM before the script
+  and shown verbatim to the compile and triage prompts. `expect` and
+  `atr.fail` are refused from a library frame. Editing it does not force a
+  recompile: scripts carry a second `atr-lib-sha256` header and replay to
+  catch up.
+
+- `skills/atr-author`: how to write a spec that cannot pass while the
+  application is broken. `skills/atr-behavior` narrowed to operating.
+
 ### Fixed
 
 - Computer click/move/drag/hover responses no longer leak the internal

@@ -344,6 +344,19 @@ script, so its top-level functions are in scope. The compile and triage prompts
 are shown the file **verbatim**, which is the point: a library the model cannot
 see is a shelf nobody reaches for, and the agent re-derives login anyway.
 
+**You do not have to write it.** A run finds the sequences its specs keep
+repeating, names them, rewrites the scripts to call them, and proves the
+rewrites before keeping them — see [`atr refactor-ops`](cli-reference.md#atr-refactor-ops)
+for the guarantees and for how to turn it off. Writing one by hand still works,
+and the two mix: a hoist may add operations to an existing library, and is
+refused if it drops or changes one, because the specs that call those are not
+the specs it rewrote.
+
+A compile is also shown the directory's already-compiled scripts. Two specs
+that reach the same page independently will otherwise name the path two ways
+and click two different selectors, and nothing can find repetition that was
+never written the same way twice.
+
 ```javascript
 // tests/e2e/_shared.js
 function signIn(username) {
