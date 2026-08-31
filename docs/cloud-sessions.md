@@ -1,7 +1,7 @@
 # ATR Cloud Sessions — hosted browser sessions for Opal
 
 Status: ideation, for review
-Builds on: [`docs/rdp-live-view.md`](./rdp-live-view.md)
+Builds on: [`docs/remote-live-view.md`](./remote-live-view.md)
 
 ## 1. Summary
 
@@ -31,7 +31,7 @@ Three things make this more than "ATR in a container":
 
 ## 2. Why
 
-`atr rdp` today assumes the agent and the browser are on the same host, and binds to
+`atr remote` today assumes the agent and the browser are on the same host, and binds to
 loopback. That works for a developer running ATR locally. It does not work for Opal, where
 the agent runs in the platform, the user is in a browser tab, and neither is on the machine
 that owns Chrome.
@@ -197,7 +197,7 @@ identity", and the two modes share almost all their code.
   │   │                                                             │    │
   │   │   atr sessiond                                              │    │
   │   │     ├── REST daemon      (internal/api)   ops.* primitives  │    │
-  │   │     ├── live view        (internal/rdp)   /ws, frames+input │    │
+  │   │     ├── live view        (internal/remote)   /ws, frames+input │    │
   │   │     ├── idle watchdog    self-terminate at 20 min           │    │
   │   │     └── checkpointer     periodic + on SIGTERM              │    │
   │   │                    │                                        │    │
@@ -530,7 +530,7 @@ takeover flips it per-session.
 
 Both are small, both will otherwise fail on first contact with an Opal iframe.
 
-**Origin check.** `internal/rdp/server.go:checkOrigin` accepts only loopback origins:
+**Origin check.** `internal/remote/server.go:checkOrigin` accepts only loopback origins:
 
 ```go
 return host == "127.0.0.1" || host == "localhost" || host == "[::1]" || host == "::1"
@@ -604,14 +604,14 @@ R10 says the agent must start a new session after expiry. Make that unmissable:
 
 | # | Change | Package | Size |
 |---|---|---|---|
-| 1 | Configurable WebSocket origin allowlist | `internal/rdp` | S |
-| 2 | `SameSite=None; Secure; Partitioned` in embedded mode | `internal/rdp` | S |
+| 1 | Configurable WebSocket origin allowlist | `internal/remote` | S |
+| 2 | `SameSite=None; Secure; Partitioned` in embedded mode | `internal/remote` | S |
 | 3 | `atr sessiond` — one process: REST daemon + live view + watchdog + checkpointer | `internal/cli`, new `internal/session` | L |
 | 4 | Profile store abstraction — GCS and S3 backends, tar+zstd, KMS envelope encryption | new `internal/profile` | L |
 | 5 | `atr profile export` — client-side CDP cookie/storage extraction, domain-scoped | new `internal/profile` | M |
 | 6 | `atr profile import` — inject a bundle into a fresh profile over CDP | new `internal/profile` | M |
 | 7 | Opal tool provider — discovery, tools, resources, interactions, reflected from `internal/ops` | new `internal/opal` | M |
-| 8 | Per-session takeover — flip `view-only` at runtime, gate agent input while held | `internal/rdp` | M |
+| 8 | Per-session takeover — flip `view-only` at runtime, gate agent input while held | `internal/remote` | M |
 | 9 | Health and readiness endpoints for k8s probes | `internal/api` | S |
 | 10 | Container image — Chrome, fonts, optional Xvfb, non-root | `Dockerfile` | M |
 

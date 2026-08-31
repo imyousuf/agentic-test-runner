@@ -1,14 +1,14 @@
-# `atr rdp` — Browser Live View
+# `atr remote` — Browser Live View
 
 Status: draft for review
-Command: `atr rdp --port 7788`
+Command: `atr remote --port 7788`
 
 ## 1. Summary
 
 Add a command that serves a live view of the browser that ATR drives.
 
 ```
-atr rdp --port 7788
+atr remote --port 7788
 ```
 
 The command starts a small web server. The server attaches to ATR's browser as a second CDP
@@ -46,18 +46,18 @@ and the JPEG encoding.
                        └──────────────────────────────────────────┘  │
                                                                      ▼
                                                             ┌────────────────┐
-  atr rdp  (new) ──────┐                                    │    Chrome      │
+  atr remote  (new) ──────┐                                    │    Chrome      │
                        │  attach as a second CDP session ──▶│                │
                        │  screencast out, input in          └────────────────┘
                        └──────────────────────────────────────────
 ```
 
-`atr rdp` adds no code to the existing paths. It observes and drives the same browser.
+`atr remote` adds no code to the existing paths. It observes and drives the same browser.
 
 ### 3.2 Startup and discovery
 
 ```
-  atr rdp --port 7788
+  atr remote --port 7788
         │
         ├─▶ --attach flag set?            ── yes ─▶ use it
         │        no
@@ -88,7 +88,7 @@ and the JPEG encoding.
 ### 3.3 The frame path
 
 ```
-  Chrome            atr rdp                         browser tab (React)
+  Chrome            atr remote                         browser tab (React)
     │                  │                                  │
     │ screencastFrame  │                                  │
     ├─────────────────▶│                                  │
@@ -107,7 +107,7 @@ and the JPEG encoding.
 ### 3.4 The input path
 
 ```
-  React                       atr rdp                     Chrome
+  React                       atr remote                     Chrome
     │ pointerdown                 │                          │
     ├────────────────────────────▶│                          │
     │  {x,y in canvas pixels}     │ convert to page pixels   │
@@ -183,7 +183,7 @@ waits for a person costs no bandwidth.
 ## 5. Command
 
 ```
-atr rdp [flags]
+atr remote [flags]
 ```
 
 | Flag | Default | Purpose |
@@ -198,6 +198,7 @@ atr rdp [flags]
 | `--max-width` | `1600` | The largest frame width. |
 | `--fps` | `20` | The target frame rate. It sets `everyNthFrame`. |
 | `--open` | `false` | Open the page in the local browser. |
+| `--output` | `~/.atr/recordings` | Where the page reads and writes recordings. |
 
 Output:
 
@@ -206,7 +207,12 @@ ATR live view
   URL:     http://127.0.0.1:7788/?t=8f2c...
   Browser: Chrome/151.0.7922.170  (attached, not owned)
   Pages:   2
+  Record:  off, press ● in the page (~/.atr/recordings)
 ```
+
+The command never records on its own. It only gives the page the ability to
+start a recording, and to browse the recordings that already exist. See
+[`docs/session-recording.md`](./session-recording.md).
 
 ## 6. Protocol
 
@@ -228,9 +234,14 @@ Header fields: `seq`, `width`, `height`, `deviceWidth`, `deviceHeight`, `scrollX
 
 ```json
 {"t":"pages","pages":[{"id":"A1","title":"Login","url":"https://…","active":true}]}
-{"t":"status","viewers":1,"streaming":true,"fps":18}
+{"t":"status","viewers":1,"streaming":true,"fps":18,"canRecord":true}
 {"t":"error","message":"the page closed"}
+{"t":"record","recording":true,"id":"20260831-142530-login","elapsedMs":8100,"frames":42,"bytes":918273,"dropped":0}
 ```
+
+`canRecord` is false when the command runs with `--view-only`, or when the
+recordings directory cannot be opened. The `record` message repeats once a
+second while a recording runs, and once when it starts or stops.
 
 ### Client to server, text
 
@@ -316,14 +327,21 @@ A viewer gets full control of a browser and its cookies.
 ## 11. Package layout
 
 ```
-internal/cli/rdp.go         the cobra command
-internal/rdp/server.go      HTTP, the WebSocket, and the static files
-internal/rdp/screencast.go  the CDP screencast and the acknowledgement loop
-internal/rdp/input.go       the event mapping
-internal/rdp/hub.go         viewers and the frame fan-out
-internal/rdp/discover.go    the endpoint discovery order
-web/                        the React source and the build output
+internal/cli/remote.go            the cobra command
+internal/remote/server.go         HTTP, the WebSocket, and the static files
+internal/remote/screencast.go     the CDP screencast and the acknowledgement loop
+internal/remote/input.go          the event mapping
+internal/remote/hub.go            viewers and the frame fan-out
+internal/remote/sink.go           the interface every frame consumer implements
+internal/remote/discover.go       the endpoint discovery order
+internal/remote/recording.go      the recorder sink and the record session
+internal/remote/recordings_api.go the recording and library routes
+web/                              the React source and the build output
 ```
+
+The streamer fans a frame out to every sink. `Hub` is the sink that feeds the
+viewers. `RecorderSink` is the sink that feeds the disk. Neither knows about
+the other.
 
 No change is needed in `internal/mcp`, `internal/agent`, `internal/api`, or
 `internal/browser`.
@@ -334,11 +352,15 @@ Stack: Vite, React 19, and TypeScript. No user interface framework.
 
 | Component | Purpose |
 |---|---|
-| `App` | The socket, the state, and the reconnection. |
+| `App` | The socket, the state, the route, and the reconnection. |
 | `Viewport` | The canvas. It draws frames and captures input. |
+| `FrameCanvas` | The draw loop. Both the viewport and the player use it. |
 | `TabBar` | The page list. |
 | `UrlBar` | The current URL and navigation. |
 | `StatusBar` | Frame rate, latency, viewers, and the streaming state. |
+| `RecordButton` | Start and stop a recording. It is hidden when `canRecord` is false. |
+| `Library` | The list of recordings. |
+| `Player` | Playback of one recording. |
 
 Rules:
 
@@ -397,10 +419,11 @@ The spike replaced estimates with measurements.
 
 ## 16. Open questions
 
-1. Should `atr rdp` start a browser when none runs? The spec keeps `--start` off by default.
+1. Should `atr remote` start a browser when none runs? The spec keeps `--start` off by default.
 2. Should phase 1 include "Pause the agent"? The foreground conflict makes it more useful
    than it first appeared.
-3. Do you want `atr view` as an alias? RDP is the name of a Microsoft protocol, and this
+3. ~~Do you want `atr view` as an alias?~~ Answered. The command is `atr remote`, and it
+   keeps `view` and `rdp` as aliases. RDP is the name of a Microsoft protocol, and this
    command uses CDP and shows a page, not a desktop.
 4. Should input force the foreground? A click reaches a background tab, but you cannot see
    the result.

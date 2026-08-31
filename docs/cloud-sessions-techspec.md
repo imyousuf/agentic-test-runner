@@ -2,7 +2,7 @@
 
 Status: draft for review
 Ideation: [`docs/cloud-sessions.md`](./cloud-sessions.md)
-Depends on: [`docs/rdp-live-view.md`](./rdp-live-view.md) (`feat/rdp-live-view`)
+Depends on: [`docs/remote-live-view.md`](./remote-live-view.md) (`feat/rdp-live-view`)
 
 ## 1. Scope
 
@@ -11,7 +11,7 @@ The ideation document decided *what* to build and *where it runs*. This document
 test plan.
 
 **In scope.** `atr sessiond`, the session broker, the profile store, the Opal tool provider,
-the container image, and the changes to `internal/rdp` that let the live view be embedded
+the container image, and the changes to `internal/remote` that let the live view be embedded
 cross-origin.
 
 **Out of scope.** `atr computer` (desktop control) in hosted sessions — it needs Xvfb in the
@@ -38,7 +38,7 @@ behind a `ProfileStore` interface; Proteus `Bridge` rather than `Federated`.
   └── (atr sessiond)          a subcommand of the existing cmd/atr binary
 
   CHANGED packages
-  ├── internal/rdp/           origin allowlist, cookie mode, runtime view-only toggle
+  ├── internal/remote/        origin allowlist, cookie mode, runtime view-only toggle
   ├── internal/api/           readiness probe, activity hook
   ├── internal/cli/           sessiond, profile export/import subcommands
   └── internal/config/        SessionConfig, ProfileConfig
@@ -90,14 +90,14 @@ Flags mirror `internal/cli/browser.go` conventions and every one is also readabl
      │
      ├─ 3. api.NewServer(...) + browser.Launch()   Chrome on --user-data-dir=/profile
      │
-     ├─ 4. rdp: Discover(cdp) → NewHub → NewStreamer → Attach → Select("")
+     ├─ 4. remote: Discover(cdp) → NewHub → NewStreamer → Attach → Select("")
      │
      ├─ 5. profile bundle import (if the bundle carries cookies/storage)
      │      Network.setCookies, Storage.setLocalStorage… over CDP
      │
      ├─ 6. mount one mux on :8080
      │      /api/v1/*      → existing api.Server handlers
-     │      /live/*        → rdp.Server.Handler()
+     │      /live/*        → remote.Server.Handler()
      │      /healthz       → liveness   (process up)
      │      /readyz        → readiness  (Chrome up, profile restored, streamer attached)
      │      /internal/*    → broker-only: activity, takeover, checkpoint, drain
@@ -123,7 +123,7 @@ That is the whole reason the export-the-state approach works across operating sy
 // the profile are captured mid-write and the checkpoint is unusable.
 func (s *Session) Shutdown(ctx context.Context, reason Reason) error {
     s.setState(StateStopping, reason)
-    s.rdp.SetViewOnly(true)          // stop accepting human input
+    s.remote.SetViewOnly(true)          // stop accepting human input
     s.api.Drain()                    // reject new commands with 503
     s.streamer.Close()               // detach the second CDP session
     if err := s.browser.Close(); err != nil {
@@ -182,7 +182,7 @@ type Session struct {
 
     IdleTimeout time.Duration
     MaxLifetime time.Duration
-    // ...wired components: api, rdp, streamer, browser, store, broker
+    // ...wired components: api, remote, streamer, browser, store, broker
 }
 ```
 
@@ -206,7 +206,7 @@ func (s *Session) Touch(k ActivityKind) {
     s.lastActive.Store(time.Now().UnixNano())
     if s.State() == StateExpiring {
         s.setState(StateReady, "")
-        s.rdp.BroadcastControl(map[string]any{"t": "sessionRenewed"})
+        s.remote.BroadcastControl(map[string]any{"t": "sessionRenewed"})
     }
 }
 ```
@@ -216,7 +216,7 @@ Three call sites, all thin:
 | Signal | Hook |
 |---|---|
 | `ActivityToolCall` | middleware wrapping `api.Server.mux`, before dispatch |
-| `ActivityHumanInput` | `rdp.Server.dispatch`, on `mouse`/`wheel`/`key`/`text`/`navigate` |
+| `ActivityHumanInput` | `remote.Server.dispatch`, on `mouse`/`wheel`/`key`/`text`/`navigate` |
 | `ActivityViewerAttach` | ticker over `hub.Count() > 0` — attach alone is not enough, the viewer must still be connected on each tick |
 
 ### 4.3 Watchdog
@@ -245,7 +245,7 @@ func (w *Watchdog) Run(ctx context.Context) {
                 return
             case idle >= w.s.IdleTimeout-warnBefore && w.s.State() == StateReady:
                 w.s.setState(StateExpiring, ReasonIdle)
-                w.s.rdp.BroadcastControl(map[string]any{
+                w.s.remote.BroadcastControl(map[string]any{
                     "t": "sessionExpiring",
                     "expiresAt": time.Now().Add(w.s.IdleTimeout - idle).UTC(),
                 })
@@ -397,10 +397,10 @@ Reports per-origin success so a partial import is visible rather than mysterious
 
 ## 6. Changes to existing packages
 
-### 6.1 `internal/rdp` — origin allowlist
+### 6.1 `internal/remote` — origin allowlist
 
 `checkOrigin` currently accepts loopback only, so an Opal iframe's WebSocket upgrade is
-refused. See `internal/rdp/server.go:71`.
+refused. See `internal/remote/server.go:71`.
 
 ```go
 // NewServer gains an allowedOrigins parameter. Empty keeps today's behaviour.
@@ -431,11 +431,11 @@ func (s *Server) checkOrigin(r *http.Request) bool {
 }
 ```
 
-CLI: `--allow-origin` (repeatable) on `atr rdp`, `ATR_RDP_ALLOW_ORIGIN` as a comma list.
+CLI: `--allow-origin` (repeatable) on `atr remote`, `ATR_RDP_ALLOW_ORIGIN` as a comma list.
 
-### 6.2 `internal/rdp` — cookie mode
+### 6.2 `internal/remote` — cookie mode
 
-The auth cookie is `SameSite=Strict` (`internal/rdp/server.go:117`). Browsers do not send a
+The auth cookie is `SameSite=Strict` (`internal/remote/server.go:117`). Browsers do not send a
 `Strict` cookie from a cross-origin iframe, so the SPA would load and then every asset request
 and the WebSocket upgrade would 401.
 
@@ -466,7 +466,7 @@ func (s *Server) setAuthCookie(w http.ResponseWriter) {
 Embedded mode requires TLS. `sessiond` refuses `CookieEmbedded` without it rather than setting
 a `Secure` cookie that the browser will drop.
 
-### 6.3 `internal/rdp` — runtime view-only
+### 6.3 `internal/remote` — runtime view-only
 
 `viewOnly` is fixed at construction. Takeover needs it per-session and mutable:
 
@@ -879,8 +879,8 @@ Prometheus, `atr_session_*`:
 | `session_terminated_total{reason}` | counter | idle vs user vs evicted mix |
 | `profile_checkpoint_seconds`, `profile_bytes` | histogram | grace-period budget |
 | `profile_restore_failures_total{generation}` | counter | corruption rate |
-| `rdp_frames_sent_total`, `rdp_bytes_sent_total` | counter | the egress bill (ideation §12) |
-| `rdp_viewers` | gauge | drives stream-only-when-watched |
+| `remote_frames_sent_total`, `remote_bytes_sent_total` | counter | the egress bill (ideation §12) |
+| `remote_viewers` | gauge | drives stream-only-when-watched |
 | `reaper_lag_seconds` | histogram | how long past `expires_at` a session survives |
 
 Every log line in a session Pod carries `session_id`, `owner_id`, `tenant_id`. Command audit
@@ -949,8 +949,8 @@ Pin Chromium and assert at startup that its major version matches the profile ma
 | Unit | Watchdog with an injected clock: warn at 17 m, terminate at 20 m, max-lifetime wins over idle | `internal/session` |
 | Unit | Bundle round-trip: tar/zstd/encrypt/decrypt, checksum mismatch, generation fallback | `internal/profile` |
 | Unit | **Cookie domain matching** — `corp.example.net` must not match `evilcorp.example.net`; `.example.com` subdomain cookies must be included by `--domains example.com` | `internal/profile` |
-| Unit | `checkOrigin`: loopback default, allowlist hit, scheme mismatch rejected, absent Origin | `internal/rdp` |
-| Unit | Cookie mode: `Strict` for loopback, `None; Secure; Partitioned` for embedded, refusal without TLS | `internal/rdp` |
+| Unit | `checkOrigin`: loopback default, allowlist hit, scheme mismatch rejected, absent Origin | `internal/remote` |
+| Unit | Cookie mode: `Strict` for loopback, `None; Secure; Partitioned` for embedded, refusal without TLS | `internal/remote` |
 | Unit | Reflected Opal schema equals the MCP schema plus `session_id` | `internal/opal` |
 | Integration | Real Chrome: export cookies → fresh profile → import → assert logged in against a local fixture server | `internal/profile` |
 | Integration | Full session lifecycle against a fake scheduler and an in-memory store | `internal/broker` |
@@ -1013,7 +1013,7 @@ Roughly 6,200 lines of Go. Phase 3 being the smallest is the payoff from `intern
 
 | Part | Confidence | Why |
 |---|---|---|
-| `sessiond` composes the existing pieces | 90 | Each part is proven, but no process runs `api.Server` and `rdp.Streamer` together today — `atr rdp` attaches to the daemon's Chrome from a *second* process. Collapsing them into one is new wiring, not new mechanism |
+| `sessiond` composes the existing pieces | 90 | Each part is proven, but no process runs `api.Server` and `remote.Streamer` together today — `atr remote` attaches to the daemon's Chrome from a *second* process. Collapsing them into one is new wiring, not new mechanism |
 | Opal schema generation from `internal/ops` | 93 | The reflection exists and is in use; only `session_id` injection is new |
 | Origin and cookie changes unblock the embed | 90 | Mechanism is well understood; CHIPS behaviour across browser versions is the uncertainty |
 | Proteus `Bridge` renders the live view | 85 | Spec is clear; not yet tried against a real Opal frontend |
