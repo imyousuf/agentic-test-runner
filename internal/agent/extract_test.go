@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -285,6 +286,121 @@ func TestStampingRecordsTheVerifiedLibraryOnEverySpec(t *testing.T) {
 		if stored.LibraryChanged(want) {
 			t.Errorf("%s was not stamped with the library it was verified against",
 				filepath.Base(spec))
+		}
+	}
+}
+
+// A compile carries its neighbours so the parts that are genuinely the same
+// come out the same. Carrying all of them makes the cost of a directory
+// quadratic in its own size: sixty specs would put sixty scripts into each of
+// sixty compiles, and the sixtieth example teaches nothing the third did not.
+func TestTheSiblingPromptIsBounded(t *testing.T) {
+	script := strings.Repeat("atr.step(1, \"x\", () => { atr.click(\"#a\"); });\n", 40)
+
+	siblings := map[string]string{}
+	for i := range 60 {
+		siblings[fmt.Sprintf("s%02d.test.js", i)] = script
+	}
+
+	note := siblingNote(siblings)
+	if len(note) > 32*1024 {
+		t.Errorf("the note for 60 siblings is %d bytes; the whole directory is being sent", len(note))
+	}
+
+	shown, omitted := siblingsWithinBudget(siblings)
+	if len(shown) > maxSiblingsShown {
+		t.Errorf("showed %d siblings, want at most %d", len(shown), maxSiblingsShown)
+	}
+	if omitted != 60-len(shown) {
+		t.Errorf("omitted = %d, want %d — the count the prompt reports must be true", omitted, 60-len(shown))
+	}
+	if !strings.Contains(note, "not the whole of it") {
+		t.Error("the prompt does not say that what it shows is a sample")
+	}
+
+	// Same directory, same prompt: an unchanged compile must not be re-sent
+	// with a different sample.
+	again, _ := siblingsWithinBudget(siblings)
+	if strings.Join(shown, ",") != strings.Join(again, ",") {
+		t.Errorf("the sample is not deterministic: %v then %v", shown, again)
+	}
+}
+
+// A small directory is still shown in full — the bound is a ceiling, not a
+// sample size.
+func TestASmallDirectoryIsShownWhole(t *testing.T) {
+	siblings := map[string]string{
+		"a.test.js": "atr.step(1, \"a\", () => {});",
+		"b.test.js": "atr.step(1, \"b\", () => {});",
+	}
+	shown, omitted := siblingsWithinBudget(siblings)
+	if len(shown) != 2 || omitted != 0 {
+		t.Errorf("showed %v and omitted %d, want both siblings", shown, omitted)
+	}
+}
+
+// writeExtraction promises all of it or none of it. A write that fails part
+// way — a read-only checkout, a full disk — leaves a library that exists and
+// some of the scripts calling it, which nothing reports and the next compile
+// reasons from.
+func TestAFailedWriteLeavesTheDirectoryAsItWas(t *testing.T) {
+	dir := t.TempDir()
+
+	var specs []string
+	originals := map[string]string{}
+	for i, name := range []string{"a", "b"} {
+		spec := filepath.Join(dir, name+".test.txt")
+		if err := os.WriteFile(spec, []byte("Steps:\n1. Go\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		body := fmt.Sprintf("// original %d\n", i)
+		if err := os.WriteFile(testscript.ScriptPath(spec), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		originals[testscript.ScriptPath(spec)] = body
+		specs = append(specs, spec)
+	}
+
+	libPath := testscript.LibraryPath(specs[0])
+	if err := os.WriteFile(libPath, []byte("// original library\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	originals[libPath] = "// original library\n"
+
+	// One script cannot be written, so the extraction fails part way through.
+	unwritable := testscript.ScriptPath(specs[1])
+	if err := os.Chmod(unwritable, 0o444); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(unwritable, 0o644) })
+
+	ex := &Extraction{
+		Library: "// new library\n",
+		Scripts: map[string]string{
+			testscript.ScriptPath(specs[0]): "// new a\n",
+			unwritable:                      "// new b\n",
+		},
+	}
+
+	restore, err := writeExtraction(specs[0], ex)
+	if err == nil {
+		t.Skip("this filesystem let the unwritable file be written")
+	}
+	// Nothing needed undoing for the file that could not be written, so this
+	// must not report a failure to undo it — that alarm means a half-changed
+	// directory, and raising it wrongly is how a real one gets ignored.
+	if rerr := restore(); rerr != nil {
+		t.Errorf("restore reported a failure for files it never changed: %v", rerr)
+	}
+
+	for path, want := range originals {
+		got, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("reading %s: %v", filepath.Base(path), err)
+		}
+		if string(got) != want {
+			t.Errorf("%s was left changed after a failed write:\n  got  %q\n  want %q",
+				filepath.Base(path), got, want)
 		}
 	}
 }

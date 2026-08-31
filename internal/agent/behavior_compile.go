@@ -285,11 +285,7 @@ func siblingNote(siblings map[string]string) string {
 		return ""
 	}
 
-	names := make([]string, 0, len(siblings))
-	for name := range siblings {
-		names = append(names, name)
-	}
-	sort.Strings(names)
+	shown, omitted := siblingsWithinBudget(siblings)
 
 	var b strings.Builder
 	b.WriteString("\n\nOther specs in this directory have already been compiled. Where you do\n" +
@@ -301,11 +297,60 @@ func siblingNote(siblings map[string]string) string {
 		"and only from it. These are here for how they drive the application, not\n" +
 		"for what they check.\n\n")
 
-	for _, name := range names {
+	if omitted > 0 {
+		fmt.Fprintf(&b, "%d of them are shown; %d more are not. These are examples of the\n"+
+			"directory's idiom, not the whole of it.\n\n", len(shown), omitted)
+	}
+
+	for _, name := range shown {
 		fmt.Fprintf(&b, "=== %s\n```javascript\n%s\n```\n\n", name, strings.TrimSpace(siblings[name]))
 	}
 
 	return b.String()
+}
+
+// A compile carries its neighbours so the parts that are genuinely the same
+// come out the same. That needs a few examples of the directory's idiom, not
+// an inventory of it: a directory of sixty specs would otherwise put sixty
+// scripts into every one of sixty compiles, and the cost of showing the
+// sixtieth is nothing like the cost of showing the third.
+const (
+	maxSiblingsShown = 6
+	maxSiblingBytes  = 24 * 1024
+)
+
+// siblingsWithinBudget picks which neighbours to show, smallest first.
+//
+// Smallest first because the budget buys distinct examples, and more of them
+// beats a longer look at fewer: what has to travel is the selector and the
+// constant name, and a short script carries those as well as a long one.
+// Deterministic, so recompiling an unchanged directory sends an unchanged
+// prompt.
+func siblingsWithinBudget(siblings map[string]string) (shown []string, omitted int) {
+	names := make([]string, 0, len(siblings))
+	for name := range siblings {
+		names = append(names, name)
+	}
+	sort.Slice(names, func(i, j int) bool {
+		if len(siblings[names[i]]) != len(siblings[names[j]]) {
+			return len(siblings[names[i]]) < len(siblings[names[j]])
+		}
+		return names[i] < names[j]
+	})
+
+	budget := maxSiblingBytes
+	for _, name := range names {
+		size := len(siblings[name])
+		if len(shown) >= maxSiblingsShown || (len(shown) > 0 && size > budget) {
+			omitted++
+			continue
+		}
+		shown = append(shown, name)
+		budget -= size
+	}
+
+	sort.Strings(shown)
+	return shown, omitted
 }
 
 // CompileBehavior drives the browser through the spec once and returns the
