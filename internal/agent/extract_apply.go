@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -127,6 +128,13 @@ func (a *Agent) RefactorOperations(ctx context.Context, req RefactorRequest) (*R
 	// From here files change, so everything is undoable.
 	restore, err := writeExtraction(req.Specs[0], ex)
 	if err != nil {
+		// A write that failed part way is exactly the half-hoisted directory
+		// this is meant to prevent: a library that exists and some of the
+		// scripts calling it, with nothing to report it and the next compile
+		// reasoning from it. Put back whatever was written before giving up.
+		if rerr := restore(); rerr != nil {
+			return out, fmt.Errorf("writing the extraction failed (%v) and could not be undone: %w", err, rerr)
+		}
 		return out, err
 	}
 
@@ -253,10 +261,9 @@ func (a *Agent) verifyRewrites(ctx context.Context, req RefactorRequest, ex *Ext
 // because nothing reports it and the next compile reasons from it.
 func writeExtraction(anySpec string, ex *Extraction) (restore func() error, err error) {
 	type saved struct {
-		path     string
-		content  []byte
-		existed  bool
-		original bool
+		path    string
+		content []byte
+		existed bool
 	}
 	var backups []saved
 
@@ -276,6 +283,20 @@ func writeExtraction(anySpec string, ex *Extraction) (restore func() error, err 
 	restore = func() error {
 		var firstErr error
 		for _, b := range backups {
+			// A file is remembered before it is written, so some of these may
+			// never have changed — a write that failed at open leaves the
+			// original untouched. Putting one of those back can fail for the
+			// same reason the write did, and reporting that as "could not be
+			// undone" would raise an alarm about a file that is already as it
+			// was.
+			if current, err := os.ReadFile(b.path); err == nil {
+				if b.existed && bytes.Equal(current, b.content) {
+					continue
+				}
+			} else if !b.existed && os.IsNotExist(err) {
+				continue
+			}
+
 			var rerr error
 			if b.existed {
 				rerr = os.WriteFile(b.path, b.content, 0o644)

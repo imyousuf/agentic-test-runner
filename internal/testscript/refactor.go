@@ -78,7 +78,92 @@ func AssertionsUnchanged(before, after string) (bool, string, error) {
 			return false, fmt.Sprintf("%s\n  became %s", was[i], now[i]), nil
 		}
 	}
+
+	return guardsUnchanged(before, after)
+}
+
+// guardsUnchanged refuses a rewrite that puts an assertion out of reach.
+//
+// Matching the assertions by text and step is not enough on its own, because
+// neither of these changes a single character of one:
+//
+//	if (false) { atr.expectExists("#dashboard"); }
+//	return; atr.expectExists("#dashboard");
+//
+// The signature is identical, the rewritten script still passes, and it passes
+// for ever after — which is the false pass this whole path exists to prevent.
+// Running the script cannot catch it either: a test that stopped checking
+// passes by definition.
+//
+// Deciding reachability in general is not on the table, so this asks a much
+// narrower question that has a definite answer: did the rewrite add control
+// flow to a step? Hoisting takes a run of statements out of a step and gives it
+// a name. It never needs a new branch, loop, early return or short-circuit to
+// do that. Removing one is fine — that is a hoist carrying the branch into the
+// library — so only an increase is refused.
+//
+// The asymmetry is deliberate. A false refusal costs a hoist that does not
+// happen, on files nothing has touched. A false acceptance costs a test that
+// silently stopped testing.
+func guardsUnchanged(before, after string) (bool, string, error) {
+	was, err := guardsPerStep(before)
+	if err != nil {
+		return false, "", fmt.Errorf("reading the original: %w", err)
+	}
+	now, err := guardsPerStep(after)
+	if err != nil {
+		return false, "", fmt.Errorf("reading the rewrite: %w", err)
+	}
+
+	steps := make([]int, 0, len(now))
+	for n := range now {
+		steps = append(steps, n)
+	}
+	sort.Ints(steps)
+
+	for _, n := range steps {
+		if now[n] > was[n] {
+			return false, fmt.Sprintf(
+				"step %d gained control flow it did not have: %d branch(es) before and %d after — "+
+					"a hoist replaces statements with a call, it does not guard them",
+				n, was[n], now[n]), nil
+		}
+	}
 	return true, "", nil
+}
+
+// guardsPerStep counts the branching constructs inside each step.
+//
+// Everything that can stop a statement below it from running: a condition, a
+// loop, an early exit, and the short-circuit forms that read as none of those
+// but behave like all of them.
+func guardsPerStep(source string) (map[int]int, error) {
+	prg, err := parser.ParseFile(nil, "script.js", source, 0)
+	if err != nil {
+		return nil, fmt.Errorf("parsing the script: %w", err)
+	}
+
+	steps := stepsIn(prg)
+	counts := map[int]int{}
+
+	walk(prg, func(n ast.Node) bool {
+		switch v := n.(type) {
+		case *ast.IfStatement, *ast.ForStatement, *ast.ForInStatement,
+			*ast.ForOfStatement, *ast.WhileStatement, *ast.DoWhileStatement,
+			*ast.SwitchStatement, *ast.ReturnStatement, *ast.ThrowStatement,
+			*ast.ConditionalExpression:
+			counts[stepAt(steps, int(n.Idx0())).number]++
+		case *ast.BinaryExpression:
+			// && and || decide whether their right side runs at all, which is
+			// a guard wearing no branch's clothing.
+			if v.Operator.String() == "&&" || v.Operator.String() == "||" {
+				counts[stepAt(steps, int(n.Idx0())).number]++
+			}
+		}
+		return true
+	})
+
+	return counts, nil
 }
 
 // sourceOf returns the exact text a node was parsed from.

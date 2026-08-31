@@ -1,6 +1,9 @@
 package testscript
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 const beforeRefactor = `
 atr.step(1, "Sign in", () => {
@@ -416,5 +419,102 @@ func TestTheSameCallOnDifferentThingsIsNotAnOverlap(t *testing.T) {
 	}
 	if len(found) != 0 {
 		t.Errorf("two unrelated journeys were reported as shared: %+v", found)
+	}
+}
+
+// Matching assertions by text and step is not enough on its own. Neither of
+// these changes a character of the assertion, both leave the script passing,
+// and both mean it has stopped checking.
+func TestARewriteMayNotPutAnAssertionOutOfReach(t *testing.T) {
+	const orig = `atr.step(1, "Sign in", () => {
+  atr.navigate("/login");
+  atr.click("#go");
+  atr.expectExists("#dashboard");
+});`
+
+	tests := []struct {
+		name    string
+		rewrite string
+	}{
+		{"guarded by a condition", `atr.step(1, "Sign in", () => {
+  signIn();
+  if (false) { atr.expectExists("#dashboard"); }
+});`},
+		{"behind an early return", `atr.step(1, "Sign in", () => {
+  signIn();
+  return;
+  atr.expectExists("#dashboard");
+});`},
+		{"short-circuited away", `atr.step(1, "Sign in", () => {
+  signIn();
+  atr.exists("#x") && atr.expectExists("#dashboard");
+});`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ok, why, err := AssertionsUnchanged(orig, tt.rewrite)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if ok {
+				t.Fatal("a rewrite that put the assertion out of reach was accepted")
+			}
+			if !strings.Contains(why, "control flow") {
+				t.Errorf("the reason does not say what was added: %s", why)
+			}
+		})
+	}
+}
+
+// The guard check must not refuse the hoists it exists to allow. This is the
+// shape ATR actually produced against a live site: a run of operations
+// replaced by one call, and nothing else touched.
+func TestAnOrdinaryHoistIsNotMistakenForAGuard(t *testing.T) {
+	const orig = `const TAG = values.get("tag_name");
+atr.step(1, "Open the tags page and follow the tag", () => {
+  atr.navigate(values.get("tags_path", "/tags/"));
+  atr.waitFor('a[href$="/tags/' + TAG + '"]', { timeout: 15000, visible: true });
+  atr.click('a[href$="/tags/' + TAG + '"]');
+});
+atr.step(2, "Confirm", () => {
+  atr.expectExists('div[role="main"]');
+});`
+	const hoisted = `const TAG = values.get("tag_name");
+atr.step(1, "Open the tags page and follow the tag", () => {
+  openTagsPage(values.get("tags_path", "/tags/"), TAG);
+  openTagPage(TAG);
+});
+atr.step(2, "Confirm", () => {
+  atr.expectExists('div[role="main"]');
+});`
+
+	ok, why, err := AssertionsUnchanged(orig, hoisted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatalf("an ordinary hoist was refused: %s", why)
+	}
+}
+
+// Carrying a branch into the library is a hoist, not a weakening: the step has
+// fewer guards afterwards, and the assertion is where it was.
+func TestAHoistMayTakeABranchWithIt(t *testing.T) {
+	const orig = `atr.step(1, "Dismiss the banner if it is there", () => {
+  if (atr.exists("#banner")) { atr.click("#close"); }
+  atr.expectExists("#main");
+});`
+	const hoisted = `atr.step(1, "Dismiss the banner if it is there", () => {
+  dismissBanner();
+  atr.expectExists("#main");
+});`
+
+	ok, why, err := AssertionsUnchanged(orig, hoisted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatalf("a hoist that carried its branch into the library was refused: %s", why)
 	}
 }
