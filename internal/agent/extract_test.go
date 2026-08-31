@@ -454,3 +454,42 @@ func TestStampingSkipsAnUncompiledSpecAndCarriesOn(t *testing.T) {
 		}
 	}
 }
+
+// Two rewrites of one script is not something to resolve by picking one.
+// Whichever was taken would be validated and replayed and would look entirely
+// sound, and the other — possibly the one the stated reason describes — would
+// be dropped without a word.
+func TestTheSameScriptProposedTwiceIsRefused(t *testing.T) {
+	reply := "=== FILE: _shared.js\n```javascript\nfunction a(){}\n```\n\n" +
+		"=== FILE: x.test.js\n```javascript\n// one\n```\n\n" +
+		"=== FILE: x.test.js\n```javascript\n// two\n```\n\nREASON: r"
+
+	if _, err := parseExtraction(reply); err == nil {
+		t.Fatal("a reply proposing one script twice was accepted")
+	}
+}
+
+// The prompt carries every sequence worth hoisting and the whole text of every
+// script one names. Sending the rest of the directory as well buys nothing —
+// nothing was found repeated in them, so this proposal cannot rewrite them.
+func TestOnlyTheScriptsAnOverlapNamesAreSent(t *testing.T) {
+	req := ExtractRequest{
+		Scripts: map[string]string{
+			"a.test.js":         "// script a",
+			"b.test.js":         "// script b",
+			"untouched.test.js": "// NOT PART OF ANY OVERLAP",
+		},
+		Overlaps: []testscript.Overlap{{
+			Steps:   []string{"atr.navigate(P)", "atr.click(Q)"},
+			Scripts: []string{"a.test.js", "b.test.js"},
+		}},
+	}
+
+	prompt := buildExtractPrompt(req)
+	if !strings.Contains(prompt, "script a") || !strings.Contains(prompt, "script b") {
+		t.Error("a script the overlap names was left out of the prompt")
+	}
+	if strings.Contains(prompt, "NOT PART OF ANY OVERLAP") {
+		t.Error("a script no overlap names was sent anyway")
+	}
+}

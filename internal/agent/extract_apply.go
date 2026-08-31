@@ -13,6 +13,10 @@ import (
 	"github.com/imyousuf/agentic-test-runner/internal/testscript"
 )
 
+// maxOverlapsPerPass bounds how much one refactor takes on. Overlaps arrive
+// longest first, so this keeps the ones worth the most.
+const maxOverlapsPerPass = 5
+
 // RefactorRequest asks for a directory's repeated operations to be hoisted.
 type RefactorRequest struct {
 	// Specs are the .test.txt paths in the directory.
@@ -95,12 +99,26 @@ func (a *Agent) RefactorOperations(ctx context.Context, req RefactorRequest) (*R
 		return out, err
 	}
 
+	// One pass takes on a bounded amount of it. A large directory can repeat
+	// dozens of sequences, and hoisting all of them at once means a single
+	// proposal rewriting most of the suite, every one of those rewrites
+	// replayed before any is kept, and the whole lot discarded if one fails.
+	// Smaller is likelier to be right and cheaper to prove, and nothing is
+	// lost: what is left over is still repeated next run, and gets hoisted
+	// then.
+	take := overlaps
+	if len(take) > maxOverlapsPerPass {
+		take = take[:maxOverlapsPerPass]
+		logf("hoisting the %d longest of them this run; the rest are found again next run",
+			maxOverlapsPerPass)
+	}
+
 	logf("asking the agent to hoist them into %s", testscript.LibraryName)
 	out.ModelCalls++
 	ex, err := a.ProposeExtraction(ctx, ExtractRequest{
 		Library:  library,
 		Scripts:  scripts,
-		Overlaps: overlaps,
+		Overlaps: take,
 		Progress: req.Progress,
 	})
 	if err != nil {

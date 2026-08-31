@@ -181,11 +181,33 @@ func buildExtractPrompt(req ExtractRequest) string {
 		b.WriteString("The directory has no shared library yet.\n\n")
 	}
 
-	for _, path := range sortedKeys(req.Scripts) {
+	// Only the scripts an overlap named. The rest of the directory cannot be
+	// rewritten by this proposal — nothing was found repeated in them — so
+	// sending them buys nothing and costs their whole length, on a prompt that
+	// already carries every sequence worth hoisting.
+	for _, path := range involved(req) {
 		fmt.Fprintf(&b, "=== %s\n```javascript\n%s\n```\n\n", path, strings.TrimSpace(req.Scripts[path]))
 	}
 
 	return b.String()
+}
+
+// involved lists the scripts named by an overlap, in a stable order.
+func involved(req ExtractRequest) []string {
+	named := map[string]bool{}
+	for _, o := range req.Overlaps {
+		for _, path := range o.Scripts {
+			named[path] = true
+		}
+	}
+
+	out := make([]string, 0, len(named))
+	for _, path := range sortedKeys(req.Scripts) {
+		if named[path] {
+			out = append(out, path)
+		}
+	}
+	return out
 }
 
 func sortedKeys(m map[string]string) []string {
@@ -214,7 +236,15 @@ func parseExtraction(reply string) (*Extraction, error) {
 			ex.Library = body
 			continue
 		}
-		ex.Scripts[filepath.Base(path)] = body
+		name := filepath.Base(path)
+		if _, already := ex.Scripts[name]; already {
+			// Two rewrites of one script is not something to resolve by
+			// picking one. Whichever is taken would be validated and replayed
+			// and would look entirely sound, and the other — possibly the one
+			// the reason describes — would be dropped without a word.
+			return nil, fmt.Errorf("the agent proposed %s twice", name)
+		}
+		ex.Scripts[name] = body
 	}
 
 	for _, line := range strings.Split(reply, "\n") {
