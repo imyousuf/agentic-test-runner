@@ -72,6 +72,7 @@ const (
 	CodeSwallowed      = "swallowed-assertion"
 	CodeWaitThenAssert = "wait-then-assert"
 	CodeFixedSleep     = "fixed-sleep"
+	CodeLocalHelper    = "local-helper"
 )
 
 // weakNeedle is how short a substring has to be, matched against the whole
@@ -166,6 +167,7 @@ func Lint(source string) ([]Finding, error) {
 	findings = append(findings, swallowedAssertions(prg, steps)...)
 	findings = append(findings, weakMatches(prg, steps)...)
 	findings = append(findings, fixedSleeps(prg, steps, exempt)...)
+	findings = append(findings, localHelpers(locals)...)
 
 	sortFindings(findings)
 	return findings, nil
@@ -1012,4 +1014,47 @@ func walkValue(v reflect.Value, seen map[any]bool, visit func(ast.Node) bool) {
 			walkValue(v.Field(i), seen, visit)
 		}
 	}
+}
+
+// localHelpers reports a compiled script that names an operation of its own.
+//
+// A spec that says "using openFirstPost() from the shared library" does not
+// fail when no such library operation exists: the compiler writes a local
+// function of that name and calls it, and the script passes. It reads like
+// sharing and is not — the next spec making the same journey re-derives it,
+// and an edit to the real library does nothing.
+//
+// Naming an operation is ATR's job, not a script's. Repetition across specs is
+// hoisted into the library and proved; a helper used once inside one script is
+// indirection in a file whose whole purpose is to be read and checked against
+// the spec beside it. A local name that also exists in the library is worse
+// still, because the local one silently wins.
+//
+// A warning, not a blocker: this cannot make a script pass when the
+// application is broken, and scripts compiled before the library existed
+// factored things for themselves.
+func localHelpers(locals map[string]ast.Node) []Finding {
+	if len(locals) == 0 {
+		return nil
+	}
+
+	names := make([]string, 0, len(locals))
+	for name := range locals {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	findings := make([]Finding, 0, len(names))
+	for _, name := range names {
+		findings = append(findings, Finding{
+			Code:     CodeLocalHelper,
+			Severity: SeverityWarn,
+			Message: fmt.Sprintf("this script declares its own %s(): an operation worth a name "+
+				"belongs in %s, where every spec in the directory can call it and ATR "+
+				"hoists it for you — a local one of the same name silently wins over the "+
+				"shared one, and specs that repeat this journey will each write it again",
+				name, LibraryName),
+		})
+	}
+	return findings
 }

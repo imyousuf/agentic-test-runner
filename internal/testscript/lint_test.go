@@ -5,6 +5,15 @@ import (
 	"testing"
 )
 
+func contains(haystack []string, needle string) bool {
+	for _, s := range haystack {
+		if s == needle {
+			return true
+		}
+	}
+	return false
+}
+
 func codes(findings []Finding) []string {
 	out := make([]string, 0, len(findings))
 	for _, f := range findings {
@@ -170,7 +179,7 @@ func TestLintFindings(t *testing.T) {
 				atr.step(1, "Check the heading", () => {
 					checkHeading();
 				});`,
-			want: nil,
+			want: []string{CodeLocalHelper},
 		},
 		{
 			// Wrapping is not something a compiler does deliberately, but it
@@ -187,7 +196,7 @@ func TestLintFindings(t *testing.T) {
 				atr.step(2, "Check the heading", () => {
 					expect(atr.text("#heading")).toBe("Welcome");
 				});`,
-			want: []string{CodeStepCannotFail},
+			want: []string{CodeStepCannotFail, CodeLocalHelper},
 		},
 		{
 			name: "an arrow helper is followed too",
@@ -197,11 +206,13 @@ func TestLintFindings(t *testing.T) {
 				atr.step(2, "Check", () => {
 					expect(atr.text("#heading")).toBe("Welcome");
 				});`,
-			want: []string{CodeStepCannotFail},
+			want: []string{CodeStepCannotFail, CodeLocalHelper},
 		},
 		{
 			// A helper that acts is a step that can fail, so following the
-			// call must not turn every wrapper into a finding.
+			// call must not turn every wrapper into a *blocking* finding. It
+			// is still reported as a helper — that is a warning about where
+			// the operation lives, not a claim that the step is toothless.
 			name: "a helper that acts keeps its step",
 			source: `
 				function openMenu() { atr.click("#menu"); }
@@ -209,7 +220,7 @@ func TestLintFindings(t *testing.T) {
 				atr.step(2, "Check", () => {
 					expect(atr.text("#heading")).toBe("Welcome");
 				});`,
-			want: nil,
+			want: []string{CodeLocalHelper},
 		},
 		{
 			// Mutual recursion must not hang the lint. It is not blocked:
@@ -225,7 +236,7 @@ func TestLintFindings(t *testing.T) {
 				atr.step(2, "Check", () => {
 					expect(atr.text("#heading")).toBe("Welcome");
 				});`,
-			want: nil,
+			want: []string{CodeLocalHelper, CodeLocalHelper},
 		},
 		{
 			// A call to something declared outside the script — a shared
@@ -758,5 +769,81 @@ func TestWaitingForADifferentTargetIsNotTheSplit(t *testing.T) {
 		if f.Code == CodeWaitThenAssert {
 			t.Errorf("a wait for a different target was reported: %s", f)
 		}
+	}
+}
+
+// The case this comes from: a spec said "Open the front page using
+// openFirstPost() from the shared library", no library declared that, and the
+// compiler wrote a local function of that name and called it. The script
+// passed. Nothing reported that the sharing the spec described did not exist.
+func TestALocalHelperIsReported(t *testing.T) {
+	findings, err := Lint(`function openFirstPost() {
+  atr.navigate("/");
+  atr.click("article h2 a");
+}
+atr.step(1, "Open the front page using openFirstPost() from the shared library", () => {
+  openFirstPost();
+});
+atr.step(2, "Confirm the post opened", () => {
+  atr.expectExists("article h1");
+});`)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var found *Finding
+	for i := range findings {
+		if findings[i].Code == CodeLocalHelper {
+			found = &findings[i]
+		}
+	}
+	if found == nil {
+		t.Fatalf("a locally declared operation was not reported, got %v", codes(findings))
+	}
+	if !strings.Contains(found.Message, "openFirstPost") {
+		t.Errorf("the finding does not name the function: %s", found.Message)
+	}
+
+	// A warning, not a blocker. It cannot make a broken application pass, and
+	// scripts compiled before a library existed factored things for
+	// themselves; blocking those would be a migration nobody asked for.
+	if found.Severity != SeverityWarn {
+		t.Errorf("severity = %s, want %s", found.Severity, SeverityWarn)
+	}
+	if len(Blocking(findings)) > 0 {
+		t.Errorf("a local helper blocked the run: %v", Blocking(findings))
+	}
+}
+
+// A const holding an arrow function is the same thing written differently.
+func TestALocalHelperBoundToAConstIsReported(t *testing.T) {
+	findings, err := Lint(`const openHome = () => { atr.navigate("/"); };
+atr.step(1, "Open the home page", () => {
+  openHome();
+  atr.expectExists("main");
+});`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !contains(codes(findings), CodeLocalHelper) {
+		t.Errorf("an arrow function bound to a const was not reported, got %v", codes(findings))
+	}
+}
+
+// The callbacks a script is made of are not helpers. If this fired on them it
+// would fire on every script ever compiled, which is how a lint gets turned
+// off.
+func TestStepAndRetryCallbacksAreNotHelpers(t *testing.T) {
+	findings, err := Lint(`const PATH = "/";
+atr.setup(() => { atr.navigate(PATH); });
+atr.step(1, "Search", () => {
+  atr.retry(() => { atr.click("#go"); });
+  atr.expectExists("#results");
+});`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if contains(codes(findings), CodeLocalHelper) {
+		t.Errorf("a step or retry callback was reported as a helper: %v", findings)
 	}
 }

@@ -154,6 +154,14 @@ failure it raised, and the wrong call produces the wrong diagnosis:
 - Use atr.waitFor and atr.waitForText only to reach a state on the way to
   something else — a page you must load before you can click — never as the
   check that the state arrived.
+- Do not declare functions of your own. Write the steps out. If the spec asks
+  you to use an operation by name — "using openFirstPost() from the shared
+  library" — and no library above declares it, that operation does not exist:
+  write what it would have done, plainly, in the step. Declaring a local
+  function of that name is the one thing not to do. It passes, it reads as
+  though the script shares code when it does not, and if a library operation
+  of that name ever appears the local one silently wins over it. Naming an
+  operation is not your job: repetition across specs is hoisted for you.
 - A step whose purpose is to GET somewhere carries no assertions of its own.
   Assert what the spec asks you to assert, in the step that asks. Do not add
   a defensive check in the middle of a journey: the spec's own checks come
