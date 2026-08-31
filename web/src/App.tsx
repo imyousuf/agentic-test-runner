@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Library } from './Library';
 import { Player } from './Player';
 import { RecordButton } from './RecordButton';
+import { ThemeButton } from './ThemeButton';
 import { useLiveView } from './useLiveView';
 import { useRoute } from './useRoute';
 import { Viewport } from './Viewport';
@@ -12,6 +13,7 @@ export function App() {
   const [draft, setDraft] = useState('');
   const [hold, setHold] = useState(false);
   const [notice, setNotice] = useState('');
+  const [fit, setFit] = useState(true);
 
   const active = state.pages.find((p) => p.active) ?? state.pages[0];
 
@@ -25,10 +27,12 @@ export function App() {
   if (route.view === 'library') {
     return (
       <div className="app">
-        <div className="urlbar">
-          <button type="button" onClick={() => go('/')}>
+        <div className="bar">
+          <button type="button" className="btn" onClick={() => go('/')}>
             ← Live view
           </button>
+          <span className="grow" />
+          <ThemeButton />
         </div>
         <Library onOpen={(id) => go(`/recordings/${id}`)} />
       </div>
@@ -61,15 +65,18 @@ export function App() {
         ))}
       </div>
 
-      <form className="urlbar" onSubmit={submitUrl}>
+      <form className="bar" onSubmit={submitUrl}>
         <input
+          className="field url"
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           spellCheck={false}
           placeholder="https://"
         />
-        <button type="submit">Go</button>
-        <button type="button" onClick={togglePolicy} className={hold ? 'on' : ''}>
+        <button type="submit" className="btn btn-primary">
+          Go
+        </button>
+        <button type="button" onClick={togglePolicy} className={hold ? 'btn on' : 'btn'}>
           {hold ? 'Holding my tab' : 'Following the agent'}
         </button>
         <RecordButton
@@ -78,9 +85,10 @@ export function App() {
           onChange={setRecord}
           onError={setNotice}
         />
-        <button type="button" onClick={() => go('/recordings')}>
+        <button type="button" className="btn" onClick={() => go('/recordings')}>
           Recordings
         </button>
+        <ThemeButton />
       </form>
 
       {!state.streaming && state.connected && (
@@ -97,7 +105,7 @@ export function App() {
       )}
       {state.error && <div className="banner error">{state.error}</div>}
 
-      <div className="stage">
+      <div className={fit ? 'stage fit' : 'stage actual'}>
         <Viewport
           takeFrame={takeFrame}
           header={header}
@@ -107,16 +115,30 @@ export function App() {
       </div>
 
       <div className="status">
-        <span className={state.connected ? 'dot ok' : 'dot bad'} />
-        <span>{state.connected ? 'connected' : 'disconnected'}</span>
-        <span>{state.fps} fps</span>
-        <span>
+        <span className="pill">
+          <span className={state.connected ? 'dot ok' : 'dot bad'} />
+          {state.connected ? 'connected' : 'disconnected'}
+        </span>
+        <span className="pill num">{state.fps} fps</span>
+        <span className="pill num">
           {state.viewers} viewer{state.viewers === 1 ? '' : 's'}
         </span>
-        {state.viewOnly && <span className="warn">view only</span>}
-        {state.record.recording && <span className="rec-live">● recording</span>}
-        <span className="grow" />
-        <span>{active?.url ?? ''}</span>
+        {state.viewOnly && <span className="pill warn">view only</span>}
+        {state.record.recording && <span className="pill rec-live">● recording</span>}
+        <span className="grow url-now" title={active?.url ?? ''}>
+          {active?.url ?? ''}
+        </span>
+
+        {/* Fit scales a 1280 px frame up to a 2000 px window, and an upscaled
+            JPEG looks soft. 1:1 is the way back. */}
+        <span className="seg">
+          <button type="button" className={fit ? 'on' : ''} onClick={() => setFit(true)}>
+            Fit
+          </button>
+          <button type="button" className={fit ? '' : 'on'} onClick={() => setFit(false)}>
+            1:1
+          </button>
+        </span>
       </div>
     </div>
   );

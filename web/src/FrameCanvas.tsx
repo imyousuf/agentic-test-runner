@@ -41,6 +41,9 @@ export function FrameCanvas({
         if (canvas.width !== bitmap.width || canvas.height !== bitmap.height) {
           canvas.width = bitmap.width;
           canvas.height = bitmap.height;
+          // The stage scales the canvas to fit. CSS cannot derive the ratio
+          // from a canvas without letting one axis stretch, so publish it.
+          canvas.style.setProperty('--ar', String(bitmap.width / bitmap.height));
         }
         canvas.getContext('2d')?.drawImage(bitmap, 0, 0);
         if (onDrawn) onDrawn(bitmap);

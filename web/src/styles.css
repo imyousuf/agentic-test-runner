@@ -1,12 +1,98 @@
+/* ── Tokens ─────────────────────────────────────────────────────────── */
+
 :root {
-  color-scheme: dark;
-  --bg: #121212;
-  --panel: #1d1d1d;
-  --line: #2e2e2e;
-  --text: #e4e4e4;
-  --dim: #8d8d8d;
-  --accent: #4aa3a3;
+  color-scheme: light dark;
+
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 24px;
+  --s-6: 32px;
+
+  --r-1: 6px;
+  --r-2: 10px;
+  --r-3: 14px;
+  --r-pill: 999px;
+
+  --t-xs: 11px;
+  --t-sm: 12px;
+  --t-md: 14px;
+  --t-lg: 16px;
+  --t-xl: 20px;
+
+  --fast: 120ms ease;
 }
+
+/* ── Theme: light is the base set ───────────────────────────────────── */
+
+:root {
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --surface-2: #eef0f4;
+  --surface-3: #e4e8ee;
+  --line: #dfe3e8;
+  --text: #1a1d21;
+  --dim: #5f6672;
+  --accent: #0f7b7b;
+  --accent-ink: #ffffff;
+  --accent-soft: #e2f1f1;
+  --danger: #c2352f;
+  --danger-soft: #fdecea;
+  --ok: #1f8b45;
+  --warn: #8a6100;
+  --warn-soft: #fdf3d8;
+  --mat: #e9ecf0;
+  --shadow: 0 1px 2px rgb(16 24 40 / 6%), 0 4px 14px rgb(16 24 40 / 8%);
+}
+
+/* ── Theme: dark ────────────────────────────────────────────────────── */
+
+/* Two selectors pull in the same set: the system asks for dark, or the user
+   did. A hand-picked light theme wins over the system. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --bg: #0e0f11;
+    --surface: #17181b;
+    --surface-2: #1f2126;
+    --surface-3: #282b31;
+    --line: #2a2d33;
+    --text: #e8eaed;
+    --dim: #9aa0a6;
+    --accent: #4ec9c9;
+    --accent-ink: #06211f;
+    --accent-soft: #16302f;
+    --danger: #ff6b6b;
+    --danger-soft: #33191a;
+    --ok: #4ac26b;
+    --warn: #ffd479;
+    --warn-soft: #3a2f11;
+    --mat: #0a0b0d;
+    --shadow: 0 1px 2px rgb(0 0 0 / 40%), 0 4px 14px rgb(0 0 0 / 30%);
+  }
+}
+
+:root[data-theme='dark'] {
+  --bg: #0e0f11;
+  --surface: #17181b;
+  --surface-2: #1f2126;
+  --surface-3: #282b31;
+  --line: #2a2d33;
+  --text: #e8eaed;
+  --dim: #9aa0a6;
+  --accent: #4ec9c9;
+  --accent-ink: #06211f;
+  --accent-soft: #16302f;
+  --danger: #ff6b6b;
+  --danger-soft: #33191a;
+  --ok: #4ac26b;
+  --warn: #ffd479;
+  --warn-soft: #3a2f11;
+  --mat: #0a0b0d;
+  --shadow: 0 1px 2px rgb(0 0 0 / 40%), 0 4px 14px rgb(0 0 0 / 30%);
+}
+
+/* ── Base ───────────────────────────────────────────────────────────── */
 
 * { box-sizing: border-box; }
 
@@ -14,17 +100,124 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  font: 13px/1.4 system-ui, -apple-system, sans-serif;
+  font: var(--t-md) / 1.45 system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
 }
 
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.dim { color: var(--dim); }
+.small { font-size: var(--t-sm); }
+.warn { color: var(--warn); }
+.grow { flex: 1; }
+.num { font-variant-numeric: tabular-nums; }
+
+/* ── Buttons ────────────────────────────────────────────────────────── */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-1);
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  line-height: 1.3;
+  white-space: nowrap;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background var(--fast), border-color var(--fast), color var(--fast);
+}
+
+.btn:hover { background: var(--surface-3); }
+.btn:disabled { opacity: 0.5; cursor: default; }
+.btn:disabled:hover { background: var(--surface-2); }
+
+.btn-primary {
+  border-color: transparent;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 600;
+}
+
+.btn-primary:hover { background: var(--accent); filter: brightness(1.08); }
+
+.btn-danger { color: var(--danger); }
+.btn-danger:hover { background: var(--danger-soft); border-color: var(--danger); }
+
+.btn-icon { width: 32px; height: 32px; padding: 0; justify-content: center; }
+
+.btn.on { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+
+/* A segmented control: one border around the group, hairlines between. */
+.seg {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: var(--r-1);
+  overflow: hidden;
+}
+
+.seg > button {
+  padding: 6px 10px;
+  border: none;
+  border-left: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--dim);
+  font: inherit;
+  cursor: pointer;
+  transition: background var(--fast), color var(--fast);
+}
+
+.seg > button:first-child { border-left: none; }
+.seg > button:hover { background: var(--surface-3); color: var(--text); }
+.seg > button.on { background: var(--accent); color: var(--accent-ink); font-weight: 600; }
+
+/* ── Fields ─────────────────────────────────────────────────────────── */
+
+.field {
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-1);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+
+.field:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.field::placeholder { color: var(--dim); }
+
+/* ── App shell ──────────────────────────────────────────────────────── */
+
 .app { display: flex; flex-direction: column; height: 100vh; }
+
+.bar {
+  display: flex;
+  gap: var(--s-2);
+  align-items: center;
+  padding: var(--s-2) var(--s-3);
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}
+
+.bar .url {
+  flex: 1;
+  min-width: 0;
+  max-width: 720px;
+  padding: 6px 14px;
+  border-radius: var(--r-pill);
+}
+
+/* ── Tabs ───────────────────────────────────────────────────────────── */
 
 .tabs {
   display: flex;
   gap: 2px;
-  padding: 6px 8px 0;
-  background: var(--panel);
+  padding: var(--s-2) var(--s-3) 0;
+  background: var(--surface);
   overflow-x: auto;
+  scrollbar-width: thin;
 }
 
 .tab {
@@ -35,120 +228,119 @@ body {
   padding: 6px 12px;
   border: 1px solid var(--line);
   border-bottom: none;
-  border-radius: 6px 6px 0 0;
-  background: #171717;
+  border-radius: var(--r-1) var(--r-1) 0 0;
+  background: var(--surface-2);
   color: var(--dim);
-  cursor: pointer;
-}
-
-.tab.active { background: var(--bg); color: var(--text); }
-
-.urlbar {
-  display: flex;
-  gap: 6px;
-  padding: 8px;
-  background: var(--panel);
-  border-bottom: 1px solid var(--line);
-}
-
-.urlbar input {
-  flex: 1;
-  padding: 6px 10px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: #111;
-  color: var(--text);
   font: inherit;
-}
-
-.urlbar button {
-  padding: 6px 12px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: #262626;
-  color: var(--text);
   cursor: pointer;
 }
 
-.urlbar button.on { border-color: var(--accent); color: var(--accent); }
+.tab.active { background: var(--surface); color: var(--text); }
 
-.banner {
-  padding: 8px 12px;
-  background: #4a3a10;
-  color: #ffd479;
-}
-
-.banner.error { background: #4a1a1a; color: #ff9b9b; }
+/* ── Stage and canvas ───────────────────────────────────────────────── */
 
 .stage {
   flex: 1;
+  min-height: 0;
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: center;
   overflow: auto;
-  padding: 10px;
+  padding: var(--s-4);
+  background: var(--bg);
 }
 
+/* The canvas holds a screenshot of some other page. A white page on a white
+   background loses its edge, so it keeps a mat, a border and a shadow. */
 .viewport {
-  max-width: 100%;
-  background: #000;
+  display: block;
+  background: var(--mat);
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: var(--r-2);
+  box-shadow: var(--shadow);
 }
 
-.viewport:focus { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* Fit scales the frame up as well as down, and it keeps the aspect ratio. The
+   box stays exactly the size of the drawn image, because Viewport maps a click
+   through the canvas rectangle.
+
+   The width has to win on a wide stage and the height on a tall one. A plain
+   max-height cannot do that: it clamps the height and leaves the width alone,
+   which stretches the picture. So the stage becomes a size container, and the
+   width is the smaller of the two limits. FrameCanvas publishes --ar. */
+.stage.fit { container-type: size; }
+
+.stage.fit .viewport { width: min(100cqw, 100cqh * var(--ar, 1.6)); height: auto; }
+
+/* 1:1 shows the frame at its own pixel size, and the stage scrolls. */
+.stage.actual .viewport {
+  width: auto;
+  height: auto;
+  max-width: none;
+  max-height: none;
+  margin: auto;
+}
+
+.viewport:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+
+/* ── Status bar ─────────────────────────────────────────────────────── */
 
 .status {
   display: flex;
-  gap: 14px;
+  gap: var(--s-3);
   align-items: center;
-  padding: 6px 10px;
-  background: var(--panel);
+  padding: var(--s-2) var(--s-3);
+  background: var(--surface);
   border-top: 1px solid var(--line);
   color: var(--dim);
+  font-size: var(--t-sm);
 }
 
-.status .grow { flex: 1; }
-.status .warn { color: #ffd479; }
-
-.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
-.dot.ok { background: #4ac26b; }
-.dot.bad { background: #d95c5c; }
-
-/* Recording */
-
-.rec { display: flex; gap: 6px; align-items: center; }
-
-.rec input {
-  padding: 6px 10px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: #111;
-  color: var(--text);
-  font: inherit;
-}
-
-.rec button,
-.rec-btn {
+.status .pill {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: #262626;
-  color: var(--text);
-  cursor: pointer;
-  white-space: nowrap;
+  gap: var(--s-2);
+  padding: 2px 10px;
+  border-radius: var(--r-pill);
+  background: var(--surface-2);
 }
 
-.rec-btn.on { border-color: #d95c5c; color: #ff9b9b; }
+/* The interesting end of a URL is the right one, so it truncates on the left. */
+.status .url-now {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  direction: rtl;
+  text-align: right;
+}
+
+.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.dot.ok { background: var(--ok); }
+.dot.bad { background: var(--danger); }
+
+/* ── Banners ────────────────────────────────────────────────────────── */
+
+.banner {
+  padding: var(--s-2) var(--s-4);
+  background: var(--warn-soft);
+  color: var(--warn);
+  border-bottom: 1px solid var(--line);
+}
+
+.banner.error { background: var(--danger-soft); color: var(--danger); }
+
+/* ── Recording ──────────────────────────────────────────────────────── */
+
+.rec { display: flex; gap: var(--s-2); align-items: center; }
+
+.rec-btn.on { border-color: var(--danger); background: var(--danger-soft); color: var(--danger); }
 
 .rec-dot {
   width: 9px;
   height: 9px;
   border-radius: 50%;
-  background: #d95c5c;
+  background: var(--danger);
   display: inline-block;
 }
 
@@ -157,106 +349,60 @@ body {
 @keyframes pulse { 50% { opacity: 0.25; } }
 
 .rec-meta { color: var(--dim); font-variant-numeric: tabular-nums; }
+.status .rec-live { color: var(--danger); }
 
-.status .rec-live { color: #ff9b9b; }
+/* ── Library ────────────────────────────────────────────────────────── */
 
-/* Library */
+.library { padding: var(--s-5) var(--s-5) var(--s-6); overflow: auto; }
 
-.library { padding: 16px 20px; overflow: auto; }
-.library-head { display: flex; align-items: center; gap: 12px; }
-.library-head h1 { font-size: 18px; margin: 0 0 12px; flex: 1; }
-.library-head button {
-  padding: 6px 12px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: #262626;
-  color: var(--text);
-  cursor: pointer;
-}
-
-.dim { color: var(--dim); }
-.small { font-size: 12px; }
-.warn { color: #ffd479; }
+.library-head { display: flex; align-items: center; gap: var(--s-3); margin-bottom: var(--s-4); }
+.library-head h1 { flex: 1; margin: 0; font-size: var(--t-xl); }
 
 .rec-list { list-style: none; margin: 0; padding: 0; }
 
 .rec-list li {
   display: flex;
-  gap: 12px;
+  gap: var(--s-3);
   align-items: center;
-  padding: 10px 0;
+  padding: var(--s-3) var(--s-2);
   border-bottom: 1px solid var(--line);
+  border-radius: var(--r-1);
 }
+
+/* The whole row opens the player, so it has to look like a target. */
+.rec-list li.openable { cursor: pointer; transition: background var(--fast); }
+.rec-list li.openable:hover { background: var(--surface-2); }
+.rec-list li.openable:hover .rec-title { color: var(--accent); }
+.rec-list li.openable:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 
 .rec-list li.busy { opacity: 0.5; pointer-events: none; }
+
 .rec-main { flex: 1; min-width: 0; }
-.rec-main form { display: flex; gap: 6px; }
-.rec-main input {
-  flex: 1;
-  padding: 5px 8px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: #111;
-  color: var(--text);
-  font: inherit;
-}
+.rec-title { font-size: var(--t-lg); font-weight: 600; }
+.rec-main form { display: flex; gap: var(--s-2); }
+.rec-main form .field { flex: 1; }
 
-.link {
-  background: none;
-  border: none;
-  padding: 0;
-  color: var(--text);
-  font: inherit;
-  font-weight: 600;
-  cursor: pointer;
-  text-align: left;
-}
-.link:hover { color: var(--accent); }
+.rec-actions { display: flex; gap: var(--s-2); flex-wrap: wrap; }
 
-.rec-actions { display: flex; gap: 6px; flex-wrap: wrap; }
-.rec-actions button,
-.rec-actions a {
-  padding: 5px 10px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: #262626;
-  color: var(--text);
-  cursor: pointer;
-  text-decoration: none;
-  font: inherit;
-}
-.rec-actions .danger { color: #ff9b9b; }
-
-/* Player */
+/* ── Player ─────────────────────────────────────────────────────────── */
 
 .player { display: flex; flex-direction: column; height: 100vh; }
 
 .player-head {
   display: flex;
-  align-items: baseline;
-  gap: 12px;
-  padding: 10px 14px;
-  background: var(--panel);
+  align-items: center;
+  gap: var(--s-3);
+  padding: var(--s-2) var(--s-3);
+  background: var(--surface);
   border-bottom: 1px solid var(--line);
 }
-.player-head h1 { font-size: 15px; margin: 0; }
-.player-head button {
-  padding: 5px 10px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: #262626;
-  color: var(--text);
-  cursor: pointer;
-}
 
-.timeline { position: relative; padding: 0 14px; }
-.timeline input[type='range'] { width: 100%; margin: 0; }
+.player-head h1 { margin: 0; font-size: var(--t-lg); }
 
-.ticks {
-  position: relative;
-  height: 8px;
-  margin: 0 8px;
-}
+.timeline { position: relative; padding: var(--s-2) var(--s-4) 0; background: var(--surface); }
+.timeline input[type='range'] { width: 100%; margin: 0; accent-color: var(--accent); }
+
+.ticks { position: relative; height: 8px; margin: 0 8px; }
 
 .tick {
   position: absolute;
@@ -266,31 +412,29 @@ body {
   background: var(--accent);
   transform: translateX(-1px);
 }
-.tick.stall { background: #ffd479; }
-.tick.resume { background: #4ac26b; }
+
+.tick.stall { background: var(--warn); }
+.tick.resume { background: var(--ok); }
 
 .controls {
   display: flex;
-  gap: 8px;
+  gap: var(--s-2);
   align-items: center;
-  padding: 8px 14px 12px;
-  background: var(--panel);
-  border-top: 1px solid var(--line);
   flex-wrap: wrap;
+  padding: var(--s-2) var(--s-4) var(--s-3);
+  background: var(--surface);
 }
-.controls button,
-.controls a {
-  padding: 5px 10px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: #262626;
-  color: var(--text);
-  cursor: pointer;
-  text-decoration: none;
-  font: inherit;
-}
-.controls button.primary { min-width: 84px; }
-.controls button.on { border-color: var(--accent); color: var(--accent); }
-.controls label { display: flex; gap: 5px; align-items: center; color: var(--dim); }
+
+.controls .btn-primary { min-width: 92px; justify-content: center; }
+.controls label { display: flex; gap: var(--s-1); align-items: center; color: var(--dim); }
 .controls label.on { color: var(--accent); }
-.controls .grow { flex: 1; }
+
+/* ── Motion ─────────────────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

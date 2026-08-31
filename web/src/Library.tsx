@@ -32,7 +32,7 @@ export function Library({ onOpen }: Props) {
     <div className="library">
       <div className="library-head">
         <h1>Recordings</h1>
-        <button type="button" onClick={() => void reload()}>
+        <button type="button" className="btn" onClick={() => void reload()}>
           Refresh
         </button>
       </div>
@@ -46,84 +46,115 @@ export function Library({ onOpen }: Props) {
       )}
 
       <ul className="rec-list">
-        {items.map((r: RecordingSummary) => (
-          <li key={r.id} className={busy === r.id ? 'busy' : ''}>
-            <div className="rec-main">
-              {editing === r.id ? (
-                <form
-                  onSubmit={(ev) => {
-                    ev.preventDefault();
-                    setEditing('');
-                    void act(r.id, () => api.rename(r.id, draft.trim()));
-                  }}
-                >
-                  <input autoFocus value={draft} onChange={(e) => setDraft(e.target.value)} />
-                  <button type="submit">Save</button>
-                  <button type="button" onClick={() => setEditing('')}>
-                    Cancel
-                  </button>
-                </form>
-              ) : (
-                <button className="link" type="button" onClick={() => onOpen(r.id)}>
-                  {r.title || r.id}
-                </button>
-              )}
-              <div className="dim small">
-                {new Date(r.startedAt).toLocaleString()} · {clock(r.durationMs)} ·{' '}
-                {r.frames} frames · {humanBytes(r.bytes)}
-                {r.hasMp4 && ' · mp4'}
-              </div>
-              {r.partial && (
-                <div className="warn small">
-                  This recording was interrupted, so it has no manifest yet.
-                </div>
-              )}
-            </div>
-
-            <div className="rec-actions">
-              {r.partial ? (
-                <button type="button" onClick={() => void act(r.id, () => api.repair(r.id))}>
-                  Repair
-                </button>
-              ) : (
-                <>
-                  <button type="button" onClick={() => onOpen(r.id)}>
-                    Play
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setEditing(r.id);
-                      setDraft(r.title);
+        {items.map((r: RecordingSummary) => {
+          // A partial recording has no manifest, so there is nothing to play
+          // until it is repaired. Renaming makes the row a form, not a target.
+          const open = r.partial || editing === r.id ? undefined : () => onOpen(r.id);
+          return (
+            <li
+              key={r.id}
+              className={[busy === r.id ? 'busy' : '', open ? 'openable' : ''].join(' ').trim()}
+              role={open ? 'button' : undefined}
+              tabIndex={open ? 0 : undefined}
+              aria-label={open ? `Play ${r.title || r.id}` : undefined}
+              onClick={open}
+              onKeyDown={(ev) => {
+                if (!open) return;
+                if (ev.key === 'Enter' || ev.key === ' ') {
+                  ev.preventDefault();
+                  open();
+                }
+              }}
+            >
+              <div className="rec-main">
+                {editing === r.id ? (
+                  <form
+                    onSubmit={(ev) => {
+                      ev.preventDefault();
+                      setEditing('');
+                      void act(r.id, () => api.rename(r.id, draft.trim()));
                     }}
                   >
-                    Rename
-                  </button>
-                  {r.hasMp4 ? (
-                    <a href={api.mp4URL(r.id)} download={`${r.id}.mp4`}>
-                      Download
-                    </a>
-                  ) : (
-                    <button type="button" onClick={() => void act(r.id, () => api.encode(r.id))}>
-                      Export MP4
+                    <input
+                      autoFocus
+                      className="field"
+                      value={draft}
+                      onChange={(e) => setDraft(e.target.value)}
+                    />
+                    <button type="submit" className="btn btn-primary">
+                      Save
                     </button>
-                  )}
-                </>
-              )}
-              <button
-                type="button"
-                className="danger"
-                onClick={() => {
-                  if (confirm(`Delete ${r.title || r.id}?`)) {
-                    void act(r.id, () => api.remove(r.id));
-                  }
-                }}
-              >
-                Delete
-              </button>
-            </div>
-          </li>
-        ))}
+                    <button type="button" className="btn" onClick={() => setEditing('')}>
+                      Cancel
+                    </button>
+                  </form>
+                ) : (
+                  <div className="rec-title">{r.title || r.id}</div>
+                )}
+                <div className="dim small">
+                  {new Date(r.startedAt).toLocaleString()} · {clock(r.durationMs)} ·{' '}
+                  {r.frames} frames · {humanBytes(r.bytes)}
+                  {r.hasMp4 && ' · mp4'}
+                </div>
+                {r.partial && (
+                  <div className="warn small">
+                    This recording was interrupted, so it has no manifest yet.
+                  </div>
+                )}
+              </div>
+
+              {/* The row opens the player, so an action must not bubble up to it. */}
+              <div className="rec-actions" onClick={(ev) => ev.stopPropagation()}>
+                {r.partial ? (
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={() => void act(r.id, () => api.repair(r.id))}
+                  >
+                    Repair
+                  </button>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      className="btn"
+                      onClick={() => {
+                        setEditing(r.id);
+                        setDraft(r.title);
+                      }}
+                    >
+                      Rename
+                    </button>
+                    {r.hasMp4 ? (
+                      <a className="btn" href={api.mp4URL(r.id)} download={`${r.id}.mp4`}>
+                        Download
+                      </a>
+                    ) : (
+                      <button
+                        type="button"
+                        className="btn"
+                        onClick={() => void act(r.id, () => api.encode(r.id))}
+                      >
+                        Export MP4
+                      </button>
+                    )}
+                  </>
+                )}
+                <button
+                  type="button"
+                  className="btn btn-danger"
+                  onClick={() => {
+                    if (confirm(`Delete ${r.title || r.id}?`)) {
+                      void act(r.id, () => api.remove(r.id));
+                    }
+                  }}
+                >
+                  Delete
+                </button>
+              </div>
+            </li>
+          );
+        })}
       </ul>
     </div>
   );

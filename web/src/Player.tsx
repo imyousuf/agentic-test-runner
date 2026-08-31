@@ -32,7 +32,8 @@ export function Player({ id, onBack }: Props) {
   const [error, setError] = useState('');
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState(1);
-  const [skipGaps, setSkipGaps] = useState(false);
+  // A recording is mostly waiting, so the useful default is to cut the waiting.
+  const [skipGaps, setSkipGaps] = useState(true);
   const [pos, setPos] = useState(0);
   const [encoding, setEncoding] = useState(false);
   const [mp4, setMp4] = useState(false);
@@ -234,7 +235,7 @@ export function Player({ id, onBack }: Props) {
     return (
       <div className="player">
         <div className="banner error">{error}</div>
-        <button type="button" onClick={onBack}>
+        <button type="button" className="btn" onClick={onBack}>
           Back
         </button>
       </div>
@@ -252,7 +253,7 @@ export function Player({ id, onBack }: Props) {
   return (
     <div className="player">
       <div className="player-head">
-        <button type="button" onClick={onBack}>
+        <button type="button" className="btn" onClick={onBack}>
           ← Recordings
         </button>
         <h1>{manifest.title || manifest.id}</h1>
@@ -262,7 +263,7 @@ export function Player({ id, onBack }: Props) {
         </span>
       </div>
 
-      <div className="stage">
+      <div className="stage fit">
         <FrameCanvas
           next={nextBitmap}
           onDrawn={keepBitmap}
@@ -296,29 +297,41 @@ export function Player({ id, onBack }: Props) {
       </div>
 
       <div className="controls">
-        <button type="button" onClick={() => step(-1)}>
+        <button
+          type="button"
+          className="btn btn-icon"
+          aria-label="Back one frame"
+          onClick={() => step(-1)}
+        >
           ⏮
         </button>
-        <button type="button" className="primary" onClick={() => setPlaying((p) => !p)}>
+        <button type="button" className="btn btn-primary" onClick={() => setPlaying((p) => !p)}>
           {playing ? '⏸ Pause' : '▶ Play'}
         </button>
-        <button type="button" onClick={() => step(1)}>
+        <button
+          type="button"
+          className="btn btn-icon"
+          aria-label="Forward one frame"
+          onClick={() => step(1)}
+        >
           ⏭
         </button>
-        <span className="dim">
+        <span className="dim num">
           {clock(pos)} / {clock(total)}
         </span>
 
-        {SPEEDS.map((s) => (
-          <button
-            key={s}
-            type="button"
-            className={speed === s ? 'on' : ''}
-            onClick={() => setSpeed(s)}
-          >
-            {s}×
-          </button>
-        ))}
+        <span className="seg">
+          {SPEEDS.map((s) => (
+            <button
+              key={s}
+              type="button"
+              className={speed === s ? 'on' : ''}
+              onClick={() => setSpeed(s)}
+            >
+              {s}×
+            </button>
+          ))}
+        </span>
 
         <label className={skipGaps ? 'on' : ''}>
           <input
@@ -335,12 +348,13 @@ export function Player({ id, onBack }: Props) {
         <span className="grow" />
 
         {mp4 ? (
-          <a href={api.mp4URL(id)} download={`${id}.mp4`}>
+          <a className="btn" href={api.mp4URL(id)} download={`${id}.mp4`}>
             Download MP4
           </a>
         ) : (
           <button
             type="button"
+            className="btn"
             disabled={encoding}
             onClick={() => {
               setEncoding(true);

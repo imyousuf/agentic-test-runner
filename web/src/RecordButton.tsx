@@ -52,7 +52,7 @@ export function RecordButton({ state, canRecord, onChange, onError }: Props) {
   if (state.recording) {
     return (
       <div className="rec">
-        <button type="button" className="rec-btn on" disabled={busy} onClick={stop}>
+        <button type="button" className="btn rec-btn on" disabled={busy} onClick={stop}>
           <span className="rec-dot" /> Stop
         </button>
         <span className="rec-meta">
@@ -74,15 +74,16 @@ export function RecordButton({ state, canRecord, onChange, onError }: Props) {
       >
         <input
           autoFocus
+          className="field"
           value={title}
           placeholder="Name this recording (optional)"
           onChange={(e) => setTitle(e.target.value)}
           onKeyDown={(e) => e.key === 'Escape' && setAsking(false)}
         />
-        <button type="submit" className="rec-btn" disabled={busy}>
+        <button type="submit" className="btn rec-btn" disabled={busy}>
           <span className="rec-dot" /> Start
         </button>
-        <button type="button" onClick={() => setAsking(false)}>
+        <button type="button" className="btn" onClick={() => setAsking(false)}>
           Cancel
         </button>
       </form>
@@ -92,7 +93,7 @@ export function RecordButton({ state, canRecord, onChange, onError }: Props) {
   return (
     <button
       type="button"
-      className="rec-btn"
+      className="btn rec-btn"
       disabled={busy}
       title="Record this session"
       onClick={() => setAsking(true)}
