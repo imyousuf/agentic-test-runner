@@ -101,7 +101,25 @@ type NetworkRequest struct {
 }
 
 // New creates a new browser instance with the given configuration.
+// defaultViewport is used when a caller builds a BrowserConfig by hand and
+// leaves the viewport at zero.
+//
+// It exists because NoDefaultDevice took away rod's. rod used to emulate
+// devices.LaptopWithMDPIScreen on every page, so a zero viewport silently
+// became 1280x800; without that, a headless page falls back to whatever size
+// Chrome starts with, and an in-page overlay such as the HUD can end up
+// covering the control a test is trying to click. Viper supplies this for the
+// CLI, but a struct literal bypasses viper.
+const (
+	defaultViewportWidth  = 1280
+	defaultViewportHeight = 800
+)
+
 func New(cfg config.BrowserConfig) (*Browser, error) {
+	if cfg.Viewport.Width <= 0 || cfg.Viewport.Height <= 0 {
+		cfg.Viewport.Width = defaultViewportWidth
+		cfg.Viewport.Height = defaultViewportHeight
+	}
 	return &Browser{
 		config:          cfg,
 		pages:           make([]*rod.Page, 0),

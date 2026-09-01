@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"sync"
@@ -40,6 +41,9 @@ type Streamer struct {
 	hub  *Hub // the viewer hub, when one is attached; nil for a headless recording
 	opts Options
 
+	// streamMu serialises stream() end to end; mu guards the fields below.
+	streamMu sync.Mutex
+
 	mu       sync.Mutex
 	sinks    []Sink
 	browser  *rod.Browser
@@ -51,7 +55,17 @@ type Streamer struct {
 	lastBeat time.Time
 	lastType time.Time
 	live     bool
-	policy   string // "follow", "pin", or "hold"
+	closed   bool
+	// switching is true while stream() is between tearing the old stream down
+	// and committing the new one, so the watchdog does not mistake that window
+	// for a dead view. gen identifies the current stream, so a frame callback
+	// from a cancelled one cannot write over its successor's state.
+	switching bool
+	gen       int
+	policy    string // "follow", "pin", or "hold"
+
+	// drag is the HTML5 drag Chrome handed back, if one is in flight.
+	drag *dragSession
 
 	// redactQuery strips the query string from every URL the log keeps.
 	redactQuery bool
@@ -188,6 +202,26 @@ func (s *Streamer) viewers() int {
 	return hub.Count()
 }
 
+// ErrViewOnly is returned when input reaches a read-only streamer.
+var ErrViewOnly = errors.New("the live view is read only")
+
+// viewOnly reports whether input must be refused. Enforcing here rather than in
+// a single handler means the REST, WebSocket and any future surface all inherit
+// it, instead of each having to remember the check.
+func (s *Streamer) viewOnly() error {
+	if s.opts.ViewOnly {
+		return ErrViewOnly
+	}
+	return nil
+}
+
+// Live reports whether frames are actually flowing.
+func (s *Streamer) Live() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.live
+}
+
 // Attach connects to the browser at the given CDP endpoint.
 //
 // NoDefaultDevice matters: rod otherwise applies its default device emulation
@@ -296,6 +330,9 @@ picture on the old one would look like nothing had happened, and a real browser
 puts you in the tab it just opened.
 */
 func (s *Streamer) NewPage(url string) error {
+	if err := s.viewOnly(); err != nil {
+		return err
+	}
 	s.mu.Lock()
 	browser := s.browser
 	s.mu.Unlock()
@@ -331,6 +368,9 @@ belongs to ATR rather than to this viewer, so one click in a web page must not
 be able to take it down.
 */
 func (s *Streamer) ClosePage(id string) error {
+	if err := s.viewOnly(); err != nil {
+		return err
+	}
 	s.mu.Lock()
 	browser := s.browser
 	current := s.targetID
@@ -488,6 +528,12 @@ func (s *Streamer) stop() {
 	page := s.page
 	s.cancel = nil
 	s.page = nil
+	// Clearing live matters: without it a stream() that fails after stop()
+	// leaves Live() reporting true with no page behind it.
+	s.live = false
+	// A drag belongs to the page it started on. Carrying it to the next tab
+	// would drop its payload somewhere the user never dragged it.
+	s.drag = nil
 	s.mu.Unlock()
 
 	if page != nil {
@@ -643,6 +689,9 @@ func (s *Streamer) Heartbeat(ctx context.Context, every time.Duration) {
 
 // Navigate loads a URL in the streamed tab.
 func (s *Streamer) Navigate(url string) error {
+	if err := s.viewOnly(); err != nil {
+		return err
+	}
 	s.mu.Lock()
 	page := s.page
 	s.mu.Unlock()

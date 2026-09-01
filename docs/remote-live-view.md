@@ -213,6 +213,82 @@ ATR live view
 The command never records on its own. It only gives the page the ability to
 start a recording, and to browse the recordings that already exist. See
 [`docs/session-recording.md`](./session-recording.md).
+```
+
+### 5.1 Subcommand: setup
+
+```
+atr remote setup [flags]
+```
+
+| Flag | Default | Purpose |
+|---|---|---|
+| `--port` | `7788` | The port to write into the service. |
+| `--bind` | `127.0.0.1` | The listen address to write into the service. |
+| `--fps` | `20` | The frame rate to write into the service. |
+| `--check` | `false` | Report the state. Change nothing. |
+| `--uninstall` | `false` | Remove the service. Keep the token. |
+
+Setup installs a systemd user unit on Linux, or a launchd agent on macOS. It also writes a
+token to `~/.atr/remote.env` with mode 0600, so the URL does not change between restarts.
+
+Setup does not look for a browser, and it does not install one. The browser belongs to ATR
+itself. Setup also never runs `sudo`: a Linux user service needs lingering to survive a
+logout, so setup prints `sudo loginctl enable-linger <user>` for you to run.
+
+## 5.2 Common flow
+
+### On one machine
+
+```bash
+atr browser start          # ATR starts the browser it will drive
+atr remote                    # start the live view, it prints a URL with a token
+```
+
+Open the printed URL. You now watch the browser and can take control.
+
+### Agent on a server, viewer on your laptop
+
+This is the usual case. The agent has no display, and a step needs a person.
+
+```bash
+# 1. On the server
+atr browser start --headless     # a display is not needed, Chrome encodes the frames
+atr remote setup                    # install the service, print the URL and the token
+
+# 2. On your laptop, forward the port
+ssh -L 7788:127.0.0.1:7788 myserver
+```
+
+Then open `http://127.0.0.1:7788/?t=<token>` on your laptop.
+
+Add the forward to `~/.ssh/config` to avoid the flag each time:
+
+```
+Host myserver
+  LocalForward 127.0.0.1:7788 127.0.0.1:7788
+```
+
+Bind the forward to `127.0.0.1`, not to `0.0.0.0`. Anyone who reaches the port gets full
+control of that browser.
+
+### Day to day
+
+```bash
+atr remote setup --check                  # the URL, the token, and the service state
+systemctl --user restart atr-remote       # Linux, after the browser restarts
+journalctl --user -u atr-remote -f        # Linux, follow the log
+grep ATR_REMOTE_TOKEN ~/.atr/remote.env      # recover the token
+```
+
+### When something looks wrong
+
+| Symptom | Cause and action |
+|---|---|
+| The canvas is blank | The streamed tab is in the background, so Chrome sends no frames. Use the tab bar, or press "Hold my tab". |
+| The banner says another tab is in front | The agent moved the foreground. Section 8 explains the two policies. |
+| Every tool reports "failed to connect" | The browser restarted, so its CDP endpoint changed. Restart the live view. |
+| The page loads but the styles are missing | The token reached the document but not its assets. The server sets a cookie for this; check that cookies are allowed. |
 
 ## 6. Protocol
 
@@ -242,6 +318,10 @@ Header fields: `seq`, `width`, `height`, `deviceWidth`, `deviceHeight`, `scrollX
 `canRecord` is false when the command runs with `--view-only`, or when the
 recordings directory cannot be opened. The `record` message repeats once a
 second while a recording runs, and once when it starts or stops.
+
+{"t":"status","viewers":1,"streaming":true,"fps":18}
+{"t":"error","message":"the page closed"}
+```
 
 ### Client to server, text
 
@@ -323,6 +403,19 @@ A viewer gets full control of a browser and its cookies.
 - Refuse a non-loopback bind when the token is empty.
 - Check the `Origin` header on the upgrade.
 - `--view-only` drops input on the server, not in the client.
+- Accept the token as a `Bearer` header, a query parameter, or a cookie.
+- Refuse a non-loopback bind unless the operator supplied a token explicitly. A
+  generated token is easy to miss in a service log, and it travels in a URL over
+  plaintext HTTP.
+- Check the `Origin` header on the upgrade.
+- `--view-only` refuses *input to the page* -- mouse, wheel, key, text, and
+  navigate -- in the `Streamer`, so the REST endpoints and the WebSocket both
+  inherit it rather than each keeping their own list.
+- Switching the streamed tab and setting the foreground policy are viewer
+  controls and remain available in view-only mode. Selecting a tab does call
+  `Page.bringToFront`, so a read-only viewer can still change which tab is in
+  the foreground of the session it is watching.
+- Store the token owner-only: `~/.atr/remote.env` and the launchd plist are both `0600`.
 
 ## 11. Package layout
 
@@ -343,6 +436,15 @@ The streamer fans a frame out to every sink. `Hub` is the sink that feeds the
 viewers. `RecorderSink` is the sink that feeds the disk. Neither knows about
 the other.
 
+internal/cli/remote.go         the cobra command
+internal/remote/server.go      HTTP, the WebSocket, and the static files
+internal/remote/screencast.go  the CDP screencast and the acknowledgement loop
+internal/remote/input.go       the event mapping
+internal/remote/hub.go         viewers and the frame fan-out
+internal/remote/discover.go    the endpoint discovery order
+web/                        the React source and the build output
+```
+
 No change is needed in `internal/mcp`, `internal/agent`, `internal/api`, or
 `internal/browser`.
 
@@ -361,6 +463,15 @@ Stack: Vite, React 19, and TypeScript. No user interface framework.
 | `RecordButton` | Start and stop a recording. It is hidden when `canRecord` is false. |
 | `Library` | The list of recordings. |
 | `Player` | Playback of one recording. |
+| Module | Purpose |
+|---|---|
+| `useLiveView` | The socket, the state, and the reconnection with backoff. |
+| `App` | The tab list, the URL bar, the foreground policy, and the status line. |
+| `Viewport` | The canvas. It draws frames and captures input. |
+| `protocol` | The wire types and the binary frame decoder. |
+
+The tab list, URL bar, and status line are rendered inline by `App` rather than
+being separate components.
 
 Rules:
 
@@ -373,6 +484,10 @@ Build:
 
 - `make web` runs `npm ci && npm run build` into `web/dist`.
 - `//go:embed all:web/dist` puts the result in the binary.
+- `web/embed.go` embeds it with `//go:embed all:dist`.
+- `web/dist` is build output but is committed, so `go install ...@latest` and a
+  fresh `go build ./...` work without Node. Run `make web` after changing
+  `web/src` and commit the result; CI rebuilds it and fails on drift.
 - A `noweb` build tag serves a short message, so a contributor without Node can build the Go
   code.
 
@@ -381,6 +496,17 @@ Build:
 - Unit: the coordinate conversion at several scale factors.
 - Unit: the modifier bit field for every combination.
 - Unit: the hub replaces a queued frame and never grows.
+Implemented:
+
+- Unit: the hub replaces a pending frame and never grows; control messages are kept.
+- Unit: the binary frame layout round-trips.
+- Unit: endpoint resolution for the `ws://`, `http://`, `cdp://`, and bare host forms.
+- Unit: every accepted and rejected token form, and the `Origin` check.
+- Unit: `--view-only` refuses input at the streamer and returns 403 over REST.
+- Unit: `LookupToken` writes nothing; `EnsureToken` writes `0600`; plist XML escaping.
+
+Still manual:
+
 - Integration: attach, stream, and receive ten frames.
 - Integration: a canvas click changes the page URL.
 - Integration: the watchdog reports silence when another tab moves to the front.
@@ -425,5 +551,8 @@ The spike replaced estimates with measurements.
 3. ~~Do you want `atr view` as an alias?~~ Answered. The command is `atr remote`, and it
    keeps `view` and `rdp` as aliases. RDP is the name of a Microsoft protocol, and this
    command uses CDP and shows a page, not a desktop.
+3. ~~Do you want `atr view` as an alias? RDP is the name of a Microsoft protocol, and this
+   command uses CDP and shows a page, not a desktop.~~ Settled: the command is `atr remote`,
+   with `view` kept as an alias. It was renamed before shipping, so no migration was needed.
 4. Should input force the foreground? A click reaches a background tab, but you cannot see
    the result.

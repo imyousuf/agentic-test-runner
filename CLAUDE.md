@@ -12,6 +12,7 @@ Go version: 1.25+
 ## Build & Development Commands
 
 ```bash
+make web                # Rebuild the live view web app into web/dist (needs Node 22+)
 make build              # Build binary to bin/atr
 make install            # Install to GOPATH/bin
 make test               # Run tests: go test -v ./...
@@ -116,6 +117,8 @@ model in the loop; the agent returns only to triage a failure.
 - **`internal/api/`** — REST daemon (the execution engine). Holds session state and runs primitives. Started by `atr browser start` / `atr computer start`; CLI subcommands HTTP into it.
 - **`internal/mcp/`** — MCP JSON-RPC server for Claude Code integration (`atr mcp serve`). Peer surface to CLI/REST: embeds its own `Browser`/`Computer` and calls the same package methods.
 - **`internal/secret/`** — Fetches secrets by running the user's password-manager command. Used by `browser_fill_secret` so a credential is fetched and consumed inside one tool call and never becomes a tool result (which would put it in the LLM message history, re-sent on every later turn).
+- **`internal/remote/`** — Browser live view (`atr remote`). Attaches to a running browser as a second CDP session and streams the active page over a WebSocket to an embedded web app, relaying mouse/keyboard input back. Read-only mode (`--view-only`) is enforced in the `Streamer` for page input (mouse/wheel/key/text/navigate), so REST and WebSocket both inherit it; tab selection and foreground policy stay available to viewers. Never owns or closes the browser.
+- **`web/`** — The live view's React/Vite application. `web/dist` is build output but **is** committed, because `//go:embed all:dist` resolves from the module zip on the installing user's machine, and that carries tracked files only — untracking it breaks `go install ...@latest`. So a fresh clone builds with no Node. After changing anything under `web/src`, run `make web` and **commit the rebuilt assets**; CI's `web-assets` job rebuilds them and fails if the committed copy has drifted. The `noweb` build tag serves a placeholder for contributors without Node.
 - **`internal/capture/`** — Test failure context capture
 - **`internal/output/`** — Output formatting (text, file, summarization)
 - **`pkg/behavior/`** and **`pkg/result/`** — Public result types

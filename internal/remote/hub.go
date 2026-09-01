@@ -27,6 +27,19 @@ type viewer struct {
 	text    [][]byte
 	wake    chan struct{}
 	closed  bool
+	lastErr string
+}
+
+// repeatError reports whether this message is the same as the last one sent,
+// so a failure that recurs on every action does not queue without bound.
+func (v *viewer) repeatError(msg string) bool {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if v.lastErr == msg {
+		return true
+	}
+	v.lastErr = msg
+	return false
 }
 
 func newViewer() *viewer {
@@ -139,21 +152,6 @@ func (h *Hub) Text(msg []byte) {
 	for v := range h.viewers {
 		v.send(msg)
 	}
-}
-
-// Error tells every viewer that something they asked for did not happen.
-//
-// A viewer acts through the socket and gets no reply, so without this a refused
-// action is indistinguishable from a lost one, and the viewer tries again.
-func (h *Hub) Error(message string) {
-	msg, err := json.Marshal(struct {
-		T       string `json:"t"`
-		Message string `json:"message"`
-	}{T: "error", Message: message})
-	if err != nil {
-		return
-	}
-	h.Text(msg)
 }
 
 // Log hands one line to every viewer and keeps it for the next one. It

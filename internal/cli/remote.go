@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -53,14 +54,27 @@ Examples:
   # Watch without the ability to click
   atr remote --view-only`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			// Whether the operator supplied a token has to be captured before
+			// one is generated, or the non-loopback check below can never fire.
+			supplied := token != "" || os.Getenv("ATR_REMOTE_TOKEN") != ""
 			if token == "" {
 				token = os.Getenv("ATR_REMOTE_TOKEN")
 			}
 			if token == "" {
 				token = remote.NewToken()
 			}
-			if !isLoopback(bind) && token == "" {
-				return fmt.Errorf("a token is required to bind %s", bind)
+			if !isLoopback(bind) && !supplied {
+				return fmt.Errorf(
+					"refusing to bind %s with a generated token.\n"+
+						"A viewer gets full control of the browser and its cookies, and the token "+
+						"would travel in a URL over plaintext HTTP.\n"+
+						"Prefer an SSH tunnel to 127.0.0.1, or pass --token / ATR_REMOTE_TOKEN "+
+						"explicitly to confirm you intend this", bind)
+			}
+			if !isLoopback(bind) {
+				fmt.Fprintf(os.Stderr,
+					"Warning: bound to %s. Anyone who can reach this port and the token has "+
+						"full control of the browser. Prefer an SSH tunnel.\n", bind)
 			}
 
 			cdpURL, err := remote.Discover(attach)
@@ -168,6 +182,92 @@ Examples:
 	cmd.Flags().BoolVar(&redactQ, "redact-query", false,
 		"Drop the query string from every URL in the log")
 	addChangeFlags(cmd)
+
+	cmd.AddCommand(newRemoteSetupCmd())
+
+	return cmd
+}
+
+func newRemoteSetupCmd() *cobra.Command {
+	var (
+		port      int
+		bind      string
+		fps       int
+		check     bool
+		uninstall bool
+	)
+
+	cmd := &cobra.Command{
+		Use:   "setup",
+		Short: "Install a service that keeps the live view running",
+		Long: `Install a service that keeps the live view running.
+
+The command writes a systemd user unit on Linux, or a launchd agent on macOS.
+It also generates an access token and stores it with owner-only permissions.
+
+It does not install a browser. The browser belongs to ATR itself, and the live
+view attaches to whichever one ATR is driving.
+
+Examples:
+  atr remote setup                 # install, enable, and print the URL
+  atr remote setup --check         # report the state, change nothing
+  atr remote setup --port 9000     # use another port
+  atr remote setup --uninstall     # remove the service, keep the token`,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			switch {
+			case check:
+				installed, running, path := remote.Status()
+				fmt.Println("ATR live view service")
+				fmt.Printf("  Platform:  %s\n", runtime.GOOS)
+				fmt.Printf("  File:      %s\n", path)
+				fmt.Printf("  Installed: %t\n", installed)
+				fmt.Printf("  Running:   %t\n", running)
+				token, tokenPath, found, err := remote.LookupToken()
+				if err != nil {
+					return err
+				}
+				if !found {
+					fmt.Printf("  Token:     none yet (%s)\n", tokenPath)
+					fmt.Println("  URL:       run \"atr remote setup\" to generate one")
+					return nil
+				}
+				fmt.Printf("  Token:     %s\n", tokenPath)
+				fmt.Printf("  URL:       http://%s:%d/?t=%s\n", bind, port, token)
+				return nil
+
+			case uninstall:
+				path, err := remote.Uninstall()
+				if err != nil {
+					return err
+				}
+				fmt.Println("Removed the live view service.")
+				fmt.Printf("  File: %s\n", path)
+				fmt.Println("  The token is kept, so a later setup gives the same URL.")
+				return nil
+			}
+
+			result, err := remote.Setup(remote.SetupOptions{Port: port, Bind: bind, FPS: fps})
+			if err != nil {
+				return err
+			}
+
+			fmt.Println("ATR live view installed")
+			fmt.Printf("  Platform: %s\n", result.Platform)
+			fmt.Printf("  Service:  %s\n", result.ServicePath)
+			fmt.Printf("  Token:    %s\n", result.TokenPath)
+			fmt.Printf("  URL:      %s\n", result.URL)
+			for _, note := range result.Notes {
+				fmt.Printf("\n%s\n", note)
+			}
+			return nil
+		},
+	}
+
+	cmd.Flags().IntVar(&port, "port", 7788, "HTTP port for the service")
+	cmd.Flags().StringVar(&bind, "bind", "127.0.0.1", "Listen address for the service")
+	cmd.Flags().IntVar(&fps, "fps", 20, "Target frame rate")
+	cmd.Flags().BoolVar(&check, "check", false, "Report the state and change nothing")
+	cmd.Flags().BoolVar(&uninstall, "uninstall", false, "Remove the service")
 
 	return cmd
 }

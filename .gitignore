@@ -44,5 +44,9 @@ atr
 # belong in a password manager, referenced by name via atr.fillSecret.
 *.override.properties
 # Live view web application
+# web/dist is committed: //go:embed all:dist resolves on the installing user's
+# machine, from the module zip, which contains tracked files only. Untracking it
+# breaks "go install ...@latest" and a plain "go build ./..." on a fresh clone.
+# CI rebuilds it and fails if the committed copy has drifted.
 web/node_modules/
 web/tsconfig.tsbuildinfo
