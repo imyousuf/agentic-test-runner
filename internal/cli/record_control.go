@@ -308,3 +308,118 @@ branch on it without reading the output.`,
 	cmd.Flags().StringP("output", "o", "", "Recordings directory (default: ~/.atr/recordings)")
 	return cmd
 }
+
+func newRecordExportCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "export <id>",
+		Short: "Write a recording to a .zip",
+		Long: `Write one recording to a single file, so it can be sent somewhere.
+
+Everything that makes the recording what it is goes in: the frames, the
+manifest that carries the timeline, and the console and network journal. What
+comes back from "atr record import" plays exactly as the original did.
+
+The MP4 is left out unless --mp4 asks for it. It is derived from the frames, so
+including it roughly doubles the file for nothing the player needs.
+
+Examples:
+  atr record export 20260101-120000-checkout
+  atr record export 20260101-120000-checkout -o /tmp/bug-1234.zip --mp4`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			f := cmd.Flags()
+			output, _ := f.GetString("output")
+			out, _ := f.GetString("file")
+			withMP4, _ := f.GetBool("mp4")
+
+			store, err := record.NewStore(output)
+			if err != nil {
+				return err
+			}
+			if out == "" {
+				out = args[0] + ".zip"
+			}
+			// Written beside the target and renamed, so an interrupted export
+			// leaves no half a zip looking like a whole one.
+			tmp, err := os.CreateTemp(filepath.Dir(out), ".export-*")
+			if err != nil {
+				return err
+			}
+			defer func() { _ = os.Remove(tmp.Name()) }()
+
+			if err := record.Export(store, args[0], tmp, withMP4); err != nil {
+				_ = tmp.Close()
+				return err
+			}
+			if err := tmp.Close(); err != nil {
+				return err
+			}
+			if err := os.Rename(tmp.Name(), out); err != nil {
+				return err
+			}
+			st, _ := os.Stat(out)
+			fmt.Printf("Wrote %s", out)
+			if st != nil {
+				fmt.Printf("  (%s)", humanBytes(st.Size()))
+			}
+			fmt.Println()
+			return nil
+		},
+	}
+	cmd.Flags().StringP("output", "o", "", "Recordings directory (default: ~/.atr/recordings)")
+	cmd.Flags().StringP("file", "f", "", "Where to write the zip (default: <id>.zip)")
+	cmd.Flags().Bool("mp4", false, "Include the exported MP4, if one exists")
+	return cmd
+}
+
+func newRecordImportCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "import <file.zip>",
+		Short: "Read a recording out of a .zip",
+		Long: `Put a recording written by "atr record export" back into the library.
+
+It arrives whole: the frames, the timeline, and the console and network
+journal, so the player and its dock behave as they did where it was recorded.
+
+The id comes from the manifest inside the archive, so an imported recording
+keeps the identity it was recorded under. If that id is already here the import
+stops rather than overwriting; --force replaces it.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			f := cmd.Flags()
+			output, _ := f.GetString("output")
+			force, _ := f.GetBool("force")
+
+			store, err := record.NewStore(output)
+			if err != nil {
+				return err
+			}
+			file, err := os.Open(args[0])
+			if err != nil {
+				return err
+			}
+			defer func() { _ = file.Close() }()
+			st, err := file.Stat()
+			if err != nil {
+				return err
+			}
+
+			res, err := record.Import(store, file, st.Size(), force)
+			if err != nil {
+				return err
+			}
+			fmt.Printf("Imported %s: %d frames, %s\n", res.ID, res.Frames, humanBytes(res.Bytes))
+			if res.Skipped > 0 {
+				// Never silent: an archive carrying entries that are not part
+				// of a recording is worth knowing about.
+				fmt.Fprintf(cmd.ErrOrStderr(),
+					"Ignored %d entries that are not part of a recording.\n", res.Skipped)
+			}
+			fmt.Printf("Play it with \"atr remote\", at #/recordings/%s\n", res.ID)
+			return nil
+		},
+	}
+	cmd.Flags().StringP("output", "o", "", "Recordings directory (default: ~/.atr/recordings)")
+	cmd.Flags().Bool("force", false, "Replace a recording that is already here")
+	return cmd
+}

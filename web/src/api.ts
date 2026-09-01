@@ -84,6 +84,24 @@ export const api = {
   frameURL: (id: string, file: string) => withToken(`/api/recordings/${id}/frames/${file}`),
 
   mp4URL: (id: string) => withToken(`/api/recordings/${id}/recording.mp4`),
+
+  /** A plain href, so the browser downloads it rather than buffering it here. */
+  exportURL: (id: string, withMP4 = false) =>
+    withToken(`/api/recordings/${id}/export.zip`) + (withMP4 ? '&mp4=1' : ''),
+
+  /**
+   * The zip goes up as the raw body. There is one file and no other field, so
+   * multipart would only add a boundary to parse on both sides.
+   */
+  importZip: async (file: File, force = false) => {
+    const res = await fetch(withToken('/api/recordings/import') + (force ? '&force=1' : ''), {
+      method: 'POST',
+      body: file,
+    });
+    const body = (await res.json()) as { id?: string; error?: string; skipped?: number };
+    if (!res.ok) throw new Error(body.error ?? `import failed (${res.status})`);
+    return body;
+  },
 };
 
 /** humanBytes formats a byte count the way the CLI does. */

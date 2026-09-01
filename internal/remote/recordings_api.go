@@ -3,6 +3,8 @@ package remote
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path"
@@ -11,6 +13,10 @@ import (
 
 	"github.com/imyousuf/agentic-test-runner/internal/record"
 )
+
+// maxUploadBytes caps an imported archive. The recorder's own default stops a
+// recording at 1 GB, so this leaves room for one that was raised.
+const maxUploadBytes = 4 << 30
 
 // registerRecording adds the record and recordings routes. A server with no
 // session serves none of them, which is what "atr remote" does when it could
@@ -23,6 +29,7 @@ func (s *Server) registerRecording(mux *http.ServeMux) {
 	mux.HandleFunc("/api/record/stop", s.handleRecordStop)
 	mux.HandleFunc("/api/record/status", s.handleRecordStatus)
 	mux.HandleFunc("/api/recordings", s.handleRecordings)
+	mux.HandleFunc("/api/recordings/import", s.handleImport)
 	mux.HandleFunc("/api/recordings/", s.handleRecording)
 }
 
@@ -73,6 +80,56 @@ func (s *Server) handleRecordStop(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleRecordStatus(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, s.session.Status())
+}
+
+/*
+handleImport takes an uploaded archive and puts the recording in the library.
+
+The body is spooled to a temporary file first, because a zip is read from the
+end and needs random access, and because holding a gigabyte of somebody's
+upload in memory to find out it is not a recording is a poor trade.
+
+It is refused on a view-only link. Reading a recording out of an archive writes
+to the disk of whoever is running the server, which is not something a
+watch-only viewer gets to do.
+*/
+func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "use POST"})
+		return
+	}
+	if s.viewOnly {
+		writeJSON(w, http.StatusForbidden,
+			map[string]string{"error": "this live view is view-only, so it cannot import"})
+		return
+	}
+
+	spool, err := os.CreateTemp("", "atr-import-*.zip")
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	defer func() {
+		_ = spool.Close()
+		_ = os.Remove(spool.Name())
+	}()
+
+	size, err := io.Copy(spool, http.MaxBytesReader(w, r.Body, maxUploadBytes))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest,
+			map[string]string{"error": "the upload did not finish: " + err.Error()})
+		return
+	}
+
+	force := r.URL.Query().Get("force") == "1"
+	res, err := record.Import(s.session.Store(), spool, size, force)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"id": res.ID, "frames": res.Frames, "bytes": res.Bytes, "skipped": res.Skipped,
+	})
 }
 
 func (s *Server) handleRecordings(w http.ResponseWriter, _ *http.Request) {
@@ -147,6 +204,19 @@ func (s *Server) handleRecording(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, http.StatusOK, m)
+
+	case len(parts) == 2 && parts[1] == "export.zip":
+		// Streamed straight out rather than built in memory: a recording of an
+		// hour is a gigabyte, and the caller is a browser download.
+		w.Header().Set("Content-Type", "application/zip")
+		w.Header().Set("Content-Disposition",
+			fmt.Sprintf("attachment; filename=%q", id+".zip"))
+		withMP4 := r.URL.Query().Get("mp4") == "1"
+		if err := record.Export(store, id, w, withMP4); err != nil {
+			// The header is already out, so there is no status left to send.
+			// Truncating the zip is what tells the client it failed.
+			return
+		}
 
 	case len(parts) == 2 && parts[1] == "devtools.jsonl":
 		// The journal goes over as it is on the disk, one JSON object a line.

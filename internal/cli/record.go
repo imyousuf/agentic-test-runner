@@ -54,6 +54,8 @@ Examples:
 		newRecordStopCmd(),
 		newRecordStatusCmd(),
 		newRecordListCmd(),
+		newRecordExportCmd(),
+		newRecordImportCmd(),
 		newRecordEncodeCmd(),
 		newRecordRepairCmd(),
 		newRecordRmCmd(),

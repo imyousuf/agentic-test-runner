@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { api, clock, humanBytes } from './api';
 import { useRecordings } from './useRecordings';
 import type { RecordingSummary } from './protocol';
@@ -11,6 +11,8 @@ interface Props {
 export function Library({ onOpen }: Props) {
   const { items, loading, error, reload, setError } = useRecordings(true);
   const [busy, setBusy] = useState('');
+  const [importing, setImporting] = useState(false);
+  const picker = useRef<HTMLInputElement>(null);
   const [editing, setEditing] = useState('');
   const [draft, setDraft] = useState('');
 
@@ -32,6 +34,42 @@ export function Library({ onOpen }: Props) {
     <div className="library">
       <div className="library-head">
         <h1>Recordings</h1>
+        {/* A hidden input, because a styled file picker is a label wrapped
+            round one and that cannot also be a button in this bar. */}
+        <input
+          ref={picker}
+          type="file"
+          accept=".zip,application/zip"
+          hidden
+          onChange={(ev) => {
+            const file = ev.target.files?.[0];
+            ev.target.value = '';
+            if (!file) return;
+            setImporting(true);
+            setError('');
+            api
+              .importZip(file)
+              .then((res) => {
+                if (res.skipped) {
+                  setError(
+                    `Imported ${res.id}, ignoring ${res.skipped} entries that are not part of a recording.`,
+                  );
+                }
+                return reload();
+              })
+              .catch((err) => setError(err instanceof Error ? err.message : String(err)))
+              .finally(() => setImporting(false));
+          }}
+        />
+        <button
+          type="button"
+          className="btn"
+          disabled={importing}
+          title="Read a recording out of a .zip written by Export"
+          onClick={() => picker.current?.click()}
+        >
+          {importing ? 'Importing …' : 'Import'}
+        </button>
         <button type="button" className="btn" onClick={() => void reload()}>
           Refresh
         </button>
@@ -147,6 +185,16 @@ export function Library({ onOpen }: Props) {
                     >
                       Rename
                     </button>
+                    {/* Everything the recording is, in one file: frames, the
+                        timeline, and the console and network log. */}
+                    <a
+                      className="btn"
+                      href={api.exportURL(r.id)}
+                      download={`${r.id}.zip`}
+                      title="Export the whole recording as a .zip"
+                    >
+                      Export
+                    </a>
                     {r.hasMp4 ? (
                       <a className="btn" href={api.mp4URL(r.id)} download={`${r.id}.mp4`}>
                         Download
