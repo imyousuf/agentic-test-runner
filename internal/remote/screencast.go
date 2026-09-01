@@ -342,6 +342,7 @@ func (s *Streamer) NewPage(url string) error {
 	if url == "" {
 		url = blankPage
 	}
+	url = resolveURL(url)
 
 	page, err := browser.Page(proto.TargetCreateTarget{URL: url})
 	if err != nil {
@@ -698,6 +699,7 @@ func (s *Streamer) Navigate(url string) error {
 	if page == nil {
 		return fmt.Errorf("no page is selected")
 	}
+	url = resolveURL(url)
 	if err := page.Navigate(url); err != nil {
 		return fmt.Errorf("failed to navigate: %w", err)
 	}
