@@ -189,8 +189,12 @@ func (s *Streamer) viewers() int {
 }
 
 // Attach connects to the browser at the given CDP endpoint.
+//
+// NoDefaultDevice matters: rod otherwise applies its default device emulation
+// to every page it touches, which would rewrite the viewport and the user agent
+// of the tabs ATR is already driving. The viewer never owns the browser.
 func (s *Streamer) Attach(cdpURL string) error {
-	browser := rod.New().ControlURL(cdpURL)
+	browser := rod.New().ControlURL(cdpURL).NoDefaultDevice()
 	if err := browser.Connect(); err != nil {
 		return fmt.Errorf("failed to attach to the browser at %s: %w", cdpURL, err)
 	}
