@@ -90,6 +90,7 @@ The web page adds control and playback on top.
     frames/
       000001.jpg
       000002.jpg
+    recording.live.json   present only while a recorder is writing this directory
     recording.mp4         only after somebody exports
 ```
 
@@ -97,20 +98,30 @@ The web page adds control and playback on top.
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "id": "20260831-142530",
   "title": "",
   "startedAt": "2026-08-31T14:25:30.112Z",
   "stoppedAt": "2026-08-31T14:27:02.880Z",
   "durationMs": 92768,
   "browser": "Chrome/151.0.7922.170",
-  "options": { "quality": 60, "maxWidth": 1600, "fps": 10, "policy": "follow" },
+  "options": { "quality": 60, "maxWidth": 1600, "fps": 10, "policy": "follow",
+               "refLagMs": 1000, "changeThreshold": 0.002,
+               "dedupeEpsilon": 0.0005, "keepEveryMs": 2000 },
   "droppedFrames": 0,
+  "sharedFrames": 324,
   "frames": [
-    { "seq": 1, "file": "000001.jpg", "atMs": 0, "w": 1280, "h": 720, "targetId": "A1" }
+    { "seq": 1, "file": "000001.jpg", "atMs": 0, "w": 1280, "h": 720,
+      "targetId": "A1", "score": 0.0027 },
+    { "seq": 2, "file": "000001.jpg", "atMs": 100, "w": 1280, "h": 720,
+      "targetId": "A1" }
   ],
   "events": [
     { "atMs": 12480, "t": "tab",   "targetId": "B2", "url": "https://example.com/pay" },
+    { "atMs": 14100, "t": "click", "targetId": "B2", "reason": "left" },
+    { "atMs": 15600, "t": "type",  "targetId": "B2" },
+    { "atMs": 18200, "t": "key",   "targetId": "B2", "reason": "Enter" },
+    { "atMs": 19050, "t": "nav",   "targetId": "B2", "url": "https://example.com/paid" },
     { "atMs": 31000, "t": "stall", "reason": "another tab took the foreground" },
     { "atMs": 31200, "t": "resume" }
   ]
@@ -119,9 +130,59 @@ The web page adds control and playback on top.
 
 `atMs` is milliseconds from `startedAt`. The manifest is the only timing source.
 
+### The event kinds
+
+| `t`      | What it means                          | `reason` holds        |
+| -------- | -------------------------------------- | --------------------- |
+| `tab`    | the recording moved to another tab     | —                     |
+| `nav`    | the tab it is on went somewhere else   | —                     |
+| `click`  | a viewer pressed a mouse button        | the button name       |
+| `type`   | a viewer typed                         | nothing, ever         |
+| `key`    | a viewer pressed a named key           | `Enter`, `Tab`, `Escape` |
+| `stall`  | the page stopped producing frames      | why                   |
+| `resume` | it started again                       | —                     |
+| `note`   | anything a caller adds by hand         | the note              |
+
+**A `type` event records that somebody typed, never what they typed.** A password is typed
+the same way as a search term, and a recording that keeps one keeps the other. One event
+covers a whole burst of keys: a mark for each letter would be a wall of marks that says
+nothing, and it would also spell the word out on the timeline.
+
+`nav` and `tab` ride on the tab list the streamer polls once a second, so they work for a
+browser that nobody is driving through ATR, and they catch a single page application that
+only rewrites its URL. `click`, `type` and `key` come from the live view's own input path,
+so a session that nobody watched has none of them.
+
+`file` is not unique. Frame 2 above shows the same picture as frame 1, so it points at the
+same JPEG. `score` is how much the frame differs from the frame one reference lag earlier,
+and it is left out when it is zero. Version 1 has neither; see §7a.
+
 The recorder appends one JSON line for each frame to `frames.jsonl` as it writes. It
 assembles `manifest.json` on stop. A killed process therefore leaves a readable record, and
 `atr record repair <id>` rebuilds the manifest from the sidecar.
+
+### Knowing that a recording is running
+
+A directory with no manifest looks the same whether a recorder is filling it or a recorder
+died in it. The two need different answers — one needs the library to wait, the other needs
+a repair — so a running recorder writes `recording.live.json` and refreshes it every two
+seconds:
+
+```json
+{ "id": "20260831-142530", "title": "Login flow", "pid": 4113,
+  "source": "cli", "startedAt": "…", "seenAt": "…" }
+```
+
+It is removed on a clean stop. A marker whose `seenAt` is more than 15 seconds old belongs
+to a process that is gone, so the directory reads as interrupted again. Nothing coordinates
+this: `atr record` and `atr remote` are separate processes that share only the recordings
+root, and a file with a refreshed timestamp tells one about the other with a single `stat`.
+
+`source` is what started it: `cli` for `atr record`, `live-view` for the button in the page.
+
+This is why the library can say **● recording** on a row, why the live view can say that
+somebody else is recording the browser you are watching, and why `DELETE` on a live
+recording is refused rather than pulling the directory out from under a running recorder.
 
 ## 6. The record button
 
@@ -150,6 +211,13 @@ Rules:
 - `--view-only` blocks the start. A view-only viewer must not write to the operator's disk.
 - One recording at a time for each server. A second start returns 409.
 - Stopping the server stops the recording and writes the manifest.
+- **The button never disappears.** A server with no recordings directory, and a view-only
+  link, both show it disabled with the reason on it. A control that vanishes reads as a
+  missing feature; a disabled one that says why reads as an answer.
+- When another process is recording this browser, the bar says so beside the button:
+  `● atr record is recording · 0:45`, and the status bar shows `● recording elsewhere`.
+  This server did not start that recording and cannot stop it, so it offers no Stop for
+  it — but somebody watching the screen has to know that what they are doing is being kept.
 
 ### Server API
 
@@ -165,8 +233,14 @@ The server pushes the state once a second while recording, and once on every cha
 
 ```json
 {"t":"record","recording":true,"id":"20260831-142530",
- "elapsedMs":92000,"frames":418,"bytes":4300000,"dropped":0}
+ "elapsedMs":92000,"frames":418,"bytes":4300000,"dropped":0,
+ "elsewhere":[{"id":"20260831-142012","title":"Login flow",
+               "source":"cli","elapsedMs":45000}]}
 ```
+
+`elsewhere` is every live marker under the recordings root that this server did not write.
+It is on every `record` message, including the one sent when a viewer connects, so a viewer
+who joins in the middle sees the same thing as one who was there at the start.
 
 `ServerMsg` in `web/src/protocol.ts` gains `RecordMsg`.
 
@@ -190,6 +264,21 @@ A second view in the same page lists what is on disk and plays it.
 
 The `⋯` menu holds Rename, Export MP4, Download, and Delete.
 
+A row whose directory has a fresh `recording.live.json` is drawn differently, and it is
+inert:
+
+```
+│  ┌────────┐  Login flow  ● recording                                 │
+│  │ thumb  │  running · 418 frames · 4.1 MB                           │
+│  │        │  atr record is writing this now. It can be played        │
+│  └────────┘  once it stops.                                          │
+```
+
+It has no actions and it does not open. Rename and Export need the manifest that the stop
+will write, playing it would run off the end of a file list that is still growing, and
+Delete would pull the directory out from under a running recorder. Saying so on the row is
+better than offering four buttons that all fail.
+
 The player:
 
 ```
@@ -200,18 +289,49 @@ The player:
 │                        the canvas                                    │
 │                                                                      │
 ├──────────────────────────────────────────────────────────────────────┤
-│ [▶] ├────────●────────┬──────────────┬─────────────────┤  0:41 / 1:32 │
-│                       ▲tab           ▲stall                          │
-│      1× ▾   ☑ Skip gaps over 2 s          https://example.com/pay    │
+│ ▌· ▬  ▌      ·· ▌         ▬ ·         ▌                    the marks │
+│ ▁▃█▅▂▁ ░░0:14░░ ▂█▇█▅▃▁▂ ░░0:12░░ ▁▄█▆▂ ░░0:11░░                      │
+│                                 │playhead                            │
+│ [◀|] [▶] [|▶] 1× ▾  ☑ Skip inactivity (−0:36)   0:14 / 0:27 (0:49)   │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
-- The timeline draws each manifest event as a tick. Click a tick to seek to it.
-- **Skip gaps** compresses any gap longer than 2 s down to 0.5 s. A test that waits 30 s
-  for a page load is otherwise 30 s of a still picture. This is the feature a video cannot
-  give you.
+The bar is the activity timeline. A plain progress bar says nothing about a session
+recording, because most of a session is a still page and the interesting seconds look
+exactly like the boring ones.
+
+- The height of each column is the change score for that moment, on a log scale. The
+  scores span three decades — a blinking caret is 0.0002 and a page navigation is near 1 —
+  so a linear bar would be a flat line with a few spikes.
+- A hatched block is a stretch where nothing changed. It is labelled with how long it
+  really lasted. **Click it to play it in full**; nothing was thrown away.
+- **Skip inactivity** squeezes every quiet stretch to 0.5 s. The label says how much real
+  time that removes, and the clock shows the played length with the real length after it.
+  This is the feature a video cannot give you.
+- **A row of marks sits along the top of the bar**, one for each manifest event. The bars
+  and the marks answer different questions: the bars find the busy part of a session, the
+  marks find the click that started it.
+- A mark takes a shape from its kind, so the row reads without hovering every mark: a tall
+  teal bar for `nav` and `tab`, a black dot for `click`, a black dash for `type`, an amber
+  dot for `key` and `stall`, a green dot for `resume`.
+- Marks closer than 1/140 of the bar are drawn as one. A cluster takes the shape of its
+  most notable member, in the order nav, tab, key, click, type, stall, resume, note,
+  because a navigation next to a click is a navigation to somebody looking for the moment
+  the page changed.
+- The tooltip says the time, what happened, and the URL or the reason:
+  `0:14 · went to https://example.com/pay`. A cluster adds `(+3 more)`.
+- Click a mark to seek to it. **`[◀|]` and `[|▶]` jump to the previous and the next mark**,
+  and the up and down arrow keys do the same from the keyboard.
+- Marks are placed on the playback clock, not on the recording clock. Skipping inactivity
+  moves everything after the first cut, so a mark travels with the frame it belongs to.
 - The URL under the playhead comes from the last `tab` event at or before it.
 - Speed is 0.5×, 1×, 2×, or 4×.
+- At the end the Play button becomes **Replay** and starts again from the top. A Play
+  button that is already at the end has nothing to play, and pressing it and getting
+  nothing reads as a broken player. The space bar follows the same rule.
+
+A version 1 recording has no scores. The player falls back to the old rule there: a pause
+longer than 2 s between frames is the only evidence of inactivity such a manifest carries.
 
 ### Recordings API
 
@@ -233,9 +353,14 @@ The list carries enough for a card without reading every manifest:
     "startedAt": "2026-08-31T14:25:30.112Z", "durationMs": 92768,
     "frames": 418, "bytes": 4300000, "mp4": false,
     "thumb": "/api/recordings/20260831-142530/frames/000001.jpg",
-    "urls": ["https://example.com/login", "https://example.com/pay"] }
+    "urls": ["https://example.com/login", "https://example.com/pay"],
+    "live": false, "source": "" }
 ]}
 ```
+
+`live` is true while a fresh marker sits in the directory, and `source` says which process
+put it there. A live recording has no manifest yet, so its frame count and its length come
+from the frames journal, and its title and its start time come from the marker.
 
 **Path traversal is the main risk here**, because two path segments come from the client.
 
@@ -244,7 +369,9 @@ The list carries enough for a card without reading every manifest:
 - Serve through `http.ServeFileFS` over an `os.DirFS(recordingsDir)`, never through a
   `filepath.Join` on the raw input.
 - The existing token check covers every one of these routes.
-- `DELETE` removes one directory under the recordings root, and it refuses a symlink.
+- `DELETE` removes one directory under the recordings root, and it refuses a symlink. It
+  also refuses a directory with a fresh live marker, because the recorder writing it would
+  keep writing frames into a path that no longer exists.
 
 `--recordings-dir` sets the root. The default is `~/.atr/recordings`, mode 0700.
 
@@ -259,8 +386,74 @@ from and when they are shown.
   garbage collector does not reclaim on its own. `Viewport.tsx:31` already closes each
   frame after it draws. The player holds many, so the rule matters more.
 - Seeking clears the cache and refetches from the new position.
-- Skip gaps builds a second timeline that maps real time to played time. The scrub bar uses
-  the played timeline; the manifest keeps the real one.
+- Skip inactivity builds a second timeline that maps real time to played time. The scrub
+  bar uses the played timeline; the manifest keeps the real one. Opening one quiet stretch
+  rebuilds it, so the playhead is moved to the start of that stretch rather than left
+  where it was, which would land on an unrelated moment.
+
+### Finding the quiet stretches
+
+`web/src/activity.ts` turns the per frame scores into spans.
+
+- A frame counts as movement when its score is at or above the threshold. The recorder
+  writes the threshold it used into the manifest, but the player is free to use another
+  one: the score carries no threshold, so a finished recording can be re-judged.
+- Movement is widened by 1.2 s after and 0.5 s before. Cutting on the exact frame reads as
+  a stutter. The eye needs a moment of stillness to take a change in, and a moment before
+  the next one to find the place.
+- A quiet run shorter than 1.5 s is not cut. It costs more attention to notice the cut
+  than to watch the second.
+
+## 7a. Telling movement from a still page
+
+The recorder scores every frame as it captures it, and writes the score into the manifest.
+Doing it at record time costs 13 ms per frame on a goroutine that already sits behind a
+queue, and it saves the player from decoding a thousand JPEGs before it can draw a bar.
+
+**A signature is a 32×20 greyscale thumbnail.** Comparing whole JPEGs is useless: the
+encoder makes every frame differ, so byte equality found exactly one static pair in a 1421
+frame recording. Downsampling throws that noise away and keeps the layout, which is what
+actually changes when something happens.
+
+**The difference is the worst tile of a 4×4 grid, not the frame mean.** One changed word in
+a large page moves the frame mean by almost nothing, so a frame mean calls typing idle.
+
+**The reference frame sits 1 s back, not one frame back.** This is the part that makes it
+work. A caret blinks: it differs from the frame before it and matches the frame a second
+earlier. Measuring against a lagged reference cancels anything that reverts and keeps
+anything cumulative, such as typing. Measured against the previous frame, typing is only
+3–5× louder than a caret blink; measured against a 1 s reference, the two separate
+cleanly.
+
+Verified against a recording with an exact typing schedule: every typing second scored
+0.0021 to 0.0030 and every idle second scored 0.0000 to 0.0004. At the 0.002 threshold
+that is 13 of 13 hits and no false positive.
+
+| Setting | Default | Why |
+| --- | --- | --- |
+| Reference lag | 1000 ms | Cancels the caret blink, which reverts. |
+| Activity threshold | 0.002 | Sits in the empty band between typing and a caret. |
+| Dedupe epsilon | 0.0005 | One typed character always writes a file; a blink shares one. |
+| Keep every | 2000 ms | Bounds a drift that stays under the epsilon. |
+
+### Nothing is dropped; a file is shared
+
+A frame whose picture matches the last one written keeps its own record, with its own
+`atMs` and its own score, and points `file` at the JPEG that is already on disk. The
+timeline stays complete and the disk holds one copy.
+
+- `Manifest.sharedFrames` counts the frames that point at a file another frame owns. It is
+  how much the sharing saved, not how much was lost.
+- The ring buffer counts references per file name. A file is deleted only when the last
+  frame pointing at it is cut, or a still page would lose its only picture on the first
+  trim.
+- The MP4 export needs no change. The concat demuxer already emits one entry per frame
+  with an explicit duration, so a repeated name simply holds for as long as the run did.
+
+Measured on a 49 s session: 369 frame entries, 45 files, 3.5 MB. All 369 moments are on
+the timeline.
+
+`--keep-all` turns the sharing off and writes every frame to its own file.
 
 Refactor: pull the canvas and the draw loop out of `Viewport.tsx` into `FrameCanvas.tsx`.
 `Viewport` becomes `FrameCanvas` plus the input handlers. `Player` becomes `FrameCanvas`
@@ -272,12 +465,25 @@ recording. No router library. The page is too small to earn one.
 ## 9. The CLI
 
 ```
-atr record [flags]              record until Ctrl+C
+atr record start [flags]        start recording and return; prints the id
+atr record start --foreground   record until Ctrl+C instead
+atr record stop [id]            stop, and wait until the manifest is on disk
+atr record status               what is recording now; exits 1 when nothing is
 atr record list                 the same list the API returns
 atr record encode <id>          write recording.mp4
 atr record repair <id>          rebuild manifest.json from frames.jsonl
 atr record rm <id>
 ```
+
+`atr record` on its own records nothing. It is the parent, and it refuses an
+argument it does not know, so a mistyped subcommand cannot start a recording by
+accident.
+
+`start` re-runs this binary detached and waits for the live marker before it
+prints the id, so a caller never has to write `nohup ... &` or guess a PID.
+`stop` reads the pid out of `recording.live.json`, sends `SIGINT`, and waits for
+`manifest.json`. It interrupts and never kills: a killed recorder leaves frames
+with no manifest, which is what `repair` exists to clean up.
 
 | Flag | Default | Purpose |
 |---|---|---|
@@ -293,6 +499,11 @@ atr record rm <id>
 | `--heartbeat` | `5s` | Force one frame after this much silence. `0` turns it off. |
 | `--policy` | `follow` | `follow` the front tab, `pin` one tab, or `hold` it in front. |
 | `--encode` | `none` | `none`, `mp4`, or `webm`. Encode when the recording stops. |
+| `--change-threshold` | `0.002` | The activity score the player treats as movement. |
+| `--keep-every` | `2s` | Write a frame of its own at least this often. |
+| `--keep-all` | off | Write every frame to its own file. See §7a. |
+
+`atr remote` takes the same three activity flags, because it records too.
 
 `--encode` defaults to `none`, because the web page plays frames and most recordings never
 need a file.
@@ -630,9 +841,23 @@ Go:
 Web:
 
 - Unit: the binary search finds the frame for a playhead time, including both edges.
-- Unit: the skip-gaps timeline maps real time to played time and back.
+- Unit: the skip-inactivity timeline maps real time to played time and back, and stays
+  monotonic when one quiet stretch is opened.
+- Unit: a version 1 manifest still plays, on the pause rule.
 - Unit: the bitmap cache closes every bitmap it evicts.
 - Manual: record a login, then play it, and confirm the timing looks right.
+
+Activity detection:
+
+- Unit: the difference of a signature with itself is zero, and a change in one tile of
+  sixteen is above the threshold.
+- Unit: a signal that reverts within the reference lag, such as a caret, scores below the
+  threshold.
+- Unit: a run of identical frames writes one file and keeps every frame entry.
+- Unit: the ring trim keeps a file while any frame still points at it.
+- Unit: `ConcatList` gives a repeated file its real time.
+- Golden, opt in through `ATR_GOLDEN_RECORDING`: replay a real recording and assert the
+  active fraction is that of a session with a person in it.
 
 ## 18. Phases
 
@@ -643,6 +868,7 @@ Web:
 | 2 | `/api/record/*`, the `record` WebSocket message, `RecordButton` | You can record from the page. |
 | 3 | `/api/recordings/*`, `FrameCanvas` extract, `Library` | You can see what you recorded. |
 | 4 | `Player`, the timeline, event ticks, skip gaps | You can watch what you recorded. |
+| 4a | Manifest version 2: change scores, shared files, `Scrubber` | You can see where the session had a person in it, and skip the rest. |
 | 5 | `concat.txt`, ffmpeg, Export, `atr record encode`, `atr record doctor` | You can send someone an MP4. |
 | 6 | `--keep-last`, `--max-size`, `--heartbeat`, `repair` | Safe to leave running. |
 | 7 | `atr run --behavior --record`, the path in `FailureContext` | A failed test carries its recording. |

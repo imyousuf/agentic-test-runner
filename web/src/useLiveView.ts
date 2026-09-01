@@ -1,5 +1,34 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { decodeFrame, type FrameHeader, type PageInfo, type ServerMsg } from './protocol';
+import {
+  decodeFrame,
+  type FrameHeader,
+  type LogEvent,
+  type PageInfo,
+  type ServerMsg,
+} from './protocol';
+
+/**
+ * How many log rows the live dock keeps. The server holds the same number, so
+ * a viewer who connects late sees exactly what one who was there sees. A live
+ * view runs for hours, and the whole log of those hours is on disk in the
+ * recording, not in a tab.
+ */
+const LOG_RING = 2000;
+
+/**
+ * How often the arrived rows are moved into state. The tap lets through up to
+ * two hundred rows a second, and a render for each one would cost more than
+ * the frames do.
+ */
+const LOG_FLUSH_MS = 300;
+
+/** A recording another process is writing, such as one "atr record" started. */
+export interface Elsewhere {
+  id: string;
+  title: string;
+  source: string;
+  elapsedMs: number;
+}
 
 export interface RecordState {
   recording: boolean;
@@ -10,6 +39,12 @@ export interface RecordState {
   bytes: number;
   dropped: number;
   note: string;
+  /**
+   * Recordings of this library that somebody else is writing. This server did
+   * not start them and cannot stop them, but a person watching the live view
+   * still has to know that what is on the screen is being kept.
+   */
+  elsewhere: Elsewhere[];
 }
 
 export const idleRecord: RecordState = {
@@ -21,6 +56,7 @@ export const idleRecord: RecordState = {
   bytes: 0,
   dropped: 0,
   note: '',
+  elsewhere: [],
 };
 
 export interface LiveState {
@@ -33,6 +69,8 @@ export interface LiveState {
   fps: number;
   error: string;
   record: RecordState;
+  /** What the page has reported, newest last, capped at LOG_RING rows. */
+  log: LogEvent[];
 }
 
 /**
@@ -51,12 +89,14 @@ export function useLiveView() {
     fps: 0,
     error: '',
     record: idleRecord,
+    log: [],
   });
 
   const socket = useRef<WebSocket | null>(null);
   const pending = useRef<ImageBitmap | null>(null);
   const header = useRef<FrameHeader | null>(null);
   const counter = useRef(0);
+  const inbox = useRef<LogEvent[]>([]);
 
   const send = useCallback((msg: unknown) => {
     const ws = socket.current;
@@ -100,9 +140,13 @@ export function useLiveView() {
               bytes: msg.bytes,
               dropped: msg.dropped,
               note: msg.note ?? '',
+              elsewhere: msg.elsewhere ?? [],
             },
           }));
         }
+        // The rows queue in a ref and land in state on the flush, so a page
+        // that logs in a loop cannot drive the render rate.
+        if (msg.t === 'log') inbox.current.push(...msg.rows);
         if (msg.t === 'error') setState((s) => ({ ...s, error: msg.message }));
         return;
       }
@@ -129,8 +173,19 @@ export function useLiveView() {
       setState((s) => (s.fps === fps ? s : { ...s, fps }));
     }, 1000);
 
+    const flush = setInterval(() => {
+      const rows = inbox.current;
+      if (rows.length === 0) return;
+      inbox.current = [];
+      setState((s) => {
+        const next = s.log.concat(rows);
+        return { ...s, log: next.length > LOG_RING ? next.slice(-LOG_RING) : next };
+      });
+    }, LOG_FLUSH_MS);
+
     return () => {
       clearInterval(meter);
+      clearInterval(flush);
       ws.close();
       pending.current?.close();
       pending.current = null;
@@ -152,5 +207,14 @@ export function useLiveView() {
     setState((s) => ({ ...s, record }));
   }, []);
 
-  return { state, send, takeFrame, header, setRecord };
+  /**
+   * clearError dismisses the last thing the server refused. Nothing else clears
+   * it, and a refusal is about one action, so without this the banner outlives
+   * the moment it describes.
+   */
+  const clearError = useCallback(() => {
+    setState((s) => (s.error === '' ? s : { ...s, error: '' }));
+  }, []);
+
+  return { state, send, takeFrame, header, setRecord, clearError };
 }

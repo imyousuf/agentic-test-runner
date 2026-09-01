@@ -29,6 +29,7 @@ func newRemoteCmd() *cobra.Command {
 		maxWidth int
 		fps      int
 		output   string
+		redactQ  bool
 	)
 
 	cmd := &cobra.Command{
@@ -76,6 +77,9 @@ Examples:
 				return err
 			}
 			defer streamer.Close()
+			// Set this before Select. Select starts the stream, and the tap
+			// that goes with it reads the setting once.
+			streamer.SetRedactQuery(redactQ)
 
 			if err := streamer.Select(""); err != nil {
 				return err
@@ -101,6 +105,7 @@ Examples:
 				fmt.Fprintf(os.Stderr, "Recording is unavailable: %v\n", storeErr)
 			} else {
 				session = remote.NewSession(store, streamer, record.Limits{}, false)
+				session.SetChangeOptions(changeOptions(cmd))
 				server = server.WithSession(session)
 				go session.Publish(ctx)
 			}
@@ -160,6 +165,9 @@ Examples:
 	cmd.Flags().IntVar(&fps, "fps", 20, "Target frame rate")
 	cmd.Flags().StringVarP(&output, "output", "o", "",
 		"Recordings directory (default: ~/.atr/recordings)")
+	cmd.Flags().BoolVar(&redactQ, "redact-query", false,
+		"Drop the query string from every URL in the log")
+	addChangeFlags(cmd)
 
 	return cmd
 }

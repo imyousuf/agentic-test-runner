@@ -153,6 +153,7 @@ func (s *Store) List() ([]Summary, error) {
 func (s *Store) summary(id string) (Summary, error) {
 	dir := filepath.Join(s.root, id)
 	_, mp4Err := os.Stat(filepath.Join(dir, mp4File))
+	live, running := readLive(dir)
 
 	m, err := s.Load(id)
 	if err == nil {
@@ -160,6 +161,8 @@ func (s *Store) summary(id string) (Summary, error) {
 			ID: m.ID, Title: m.Title, StartedAt: m.StartedAt,
 			DurationMs: m.DurationMs, Frames: len(m.Frames),
 			Bytes: m.Bytes, HasMP4: mp4Err == nil,
+			Live: running, Source: live.Source,
+			Errors: manifestErrors(m),
 		}, nil
 	}
 
@@ -169,7 +172,16 @@ func (s *Store) summary(id string) (Summary, error) {
 	if jerr != nil {
 		return Summary{}, err
 	}
-	sum := Summary{ID: id, Frames: len(frames), HasMP4: mp4Err == nil, Partial: true}
+	// A running recording has no manifest either, but it needs no repair. Only
+	// a directory whose marker has gone stale is really interrupted.
+	//
+	// The error count stays at zero here. Counting it means reading the whole
+	// log journal, and this row is polled every two seconds while a recording
+	// runs. A repair fills the count in.
+	sum := Summary{
+		ID: id, Frames: len(frames), HasMP4: mp4Err == nil,
+		Partial: !running, Live: running, Source: live.Source,
+	}
 	if t, terr := time.Parse("20060102-150405", id[:15]); terr == nil {
 		sum.StartedAt = t
 	}
@@ -177,6 +189,10 @@ func (s *Store) summary(id string) (Summary, error) {
 		sum.DurationMs = frames[n-1].AtMs
 	}
 	sum.Bytes = dirBytes(filepath.Join(dir, framesDir))
+	if running {
+		sum.Title = live.Title
+		sum.StartedAt = live.StartedAt
+	}
 	return sum, nil
 }
 
@@ -230,6 +246,11 @@ func (s *Store) Delete(id string) error {
 	if _, err := os.Stat(dir); err != nil {
 		return fmt.Errorf("no recording %s", id)
 	}
+	// Deleting the directory under a running recorder would leave it writing
+	// frames into a path that no longer exists.
+	if _, running := readLive(dir); running {
+		return fmt.Errorf("%s is being recorded right now; stop it first", id)
+	}
 	if err := os.RemoveAll(dir); err != nil {
 		return fmt.Errorf("failed to delete %s: %w", id, err)
 	}
@@ -266,6 +287,13 @@ func (s *Store) Repair(id string) (*Manifest, error) {
 	if t, terr := time.Parse("20060102-150405", id[:15]); terr == nil {
 		started = t
 	}
+	// Frames may share a file, so the number of files is not the number of
+	// frames.
+	files := map[string]bool{}
+	for _, f := range kept {
+		files[f.File] = true
+	}
+	events, dt := recoverLog(dir)
 	m := &Manifest{
 		Version:    Version,
 		ID:         id,
@@ -273,8 +301,10 @@ func (s *Store) Repair(id string) (*Manifest, error) {
 		StoppedAt:  started.Add(time.Duration(kept[len(kept)-1].AtMs) * time.Millisecond),
 		DurationMs: kept[len(kept)-1].AtMs,
 		Frames:     kept,
-		Events:     []Event{},
+		Events:     events,
+		Shared:     len(kept) - len(files),
 		Bytes:      dirBytes(filepath.Join(dir, framesDir)),
+		DevTools:   dt,
 	}
 	if err := s.Save(m); err != nil {
 		return nil, err

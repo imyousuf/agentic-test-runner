@@ -44,6 +44,29 @@ func TestConcatListNeverEmitsAZeroDuration(t *testing.T) {
 	}
 }
 
+func TestConcatListHoldsARepeatedFileForItsRealTime(t *testing.T) {
+	// A still page writes one file and points a run of frames at it. The
+	// export must still last as long as the run did, so the same name appears
+	// once per frame with the duration that frame covered.
+	m := &Manifest{Frames: []FrameRecord{
+		{File: "000001.jpg", AtMs: 0},
+		{File: "000001.jpg", AtMs: 1000},
+		{File: "000001.jpg", AtMs: 2000},
+		{File: "000004.jpg", AtMs: 2100},
+	}}
+	got := string(ConcatList(m))
+
+	if n := strings.Count(got, "000001.jpg"); n != 3 {
+		t.Errorf("the shared file appears %d times, want 3:\n%s", n, got)
+	}
+	if n := strings.Count(got, "duration 1.000"); n != 2 {
+		t.Errorf("the shared file should hold for a second each time:\n%s", got)
+	}
+	if !strings.Contains(got, "duration 0.100") {
+		t.Errorf("the frame after the still run should last 0.100 s:\n%s", got)
+	}
+}
+
 func TestCanvasSizeIsEvenBecauseH264NeedsIt(t *testing.T) {
 	m := &Manifest{Frames: []FrameRecord{
 		{W: 1281, H: 721},

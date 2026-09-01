@@ -184,13 +184,13 @@ func TestRepairRebuildsTheManifestAndDropsAFrameThatIsNotOnDisk(t *testing.T) {
 		t.Fatal(err)
 	}
 	for i := 1; i <= 3; i++ {
-		if _, err := w.write(i, int64(i-1)*100, []byte("x"), 320, 240, ""); err != nil {
+		if _, err := w.write(i, int64(i-1)*100, []byte("x"), 320, 240, "", 0); err != nil {
 			t.Fatal(err)
 		}
 	}
 	// A fourth line reached the journal, but the process died before the file
 	// did. That is the exact case repair has to survive.
-	if _, err := w.write(4, 300, []byte("y"), 320, 240, ""); err != nil {
+	if _, err := w.write(4, 300, []byte("y"), 320, 240, "", 0); err != nil {
 		t.Fatal(err)
 	}
 	if err := w.close(); err != nil {
@@ -226,7 +226,7 @@ func TestListMarksARecordingWithNoManifestAsPartial(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := w.write(1, 0, []byte("x"), 10, 10, ""); err != nil {
+	if _, err := w.write(1, 0, []byte("x"), 10, 10, "", 0); err != nil {
 		t.Fatal(err)
 	}
 	if err := w.close(); err != nil {

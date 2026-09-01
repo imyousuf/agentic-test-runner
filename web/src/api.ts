@@ -71,6 +71,16 @@ export const api = {
       method: 'POST',
     }),
 
+  /**
+   * devtools reads the whole log journal as text. It is not JSON: it is one
+   * JSON object a line, so a crashed recording still parses up to its last
+   * complete line. An empty string means the recording has no journal.
+   */
+  devtools: (id: string) =>
+    fetch(withToken(`/api/recordings/${id}/devtools.jsonl`)).then((r) =>
+      r.ok ? r.text() : '',
+    ),
+
   frameURL: (id: string, file: string) => withToken(`/api/recordings/${id}/frames/${file}`),
 
   mp4URL: (id: string) => withToken(`/api/recordings/${id}/recording.mp4`),

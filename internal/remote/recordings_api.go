@@ -148,6 +148,13 @@ func (s *Server) handleRecording(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, http.StatusOK, m)
 
+	case len(parts) == 2 && parts[1] == "devtools.jsonl":
+		// The journal goes over as it is on the disk, one JSON object a line.
+		// The player streams it and filters it, and a person can read it with
+		// "less". Parsing it here would only make it bigger.
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		serveUnder(w, r, store.Root(), path.Join(id, "devtools.jsonl"))
+
 	case len(parts) == 3 && parts[1] == "frames":
 		if !record.ValidFrameName(parts[2]) {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "not a frame"})

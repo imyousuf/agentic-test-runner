@@ -1,6 +1,7 @@
 package remote
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -10,6 +11,8 @@ import (
 
 	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/proto"
+
+	"github.com/imyousuf/agentic-test-runner/internal/record"
 )
 
 // Options tune the stream.
@@ -46,12 +49,25 @@ type Streamer struct {
 	seq      int
 	lastAt   time.Time
 	lastBeat time.Time
+	lastType time.Time
 	live     bool
 	policy   string // "follow", "pin", or "hold"
+
+	// redactQuery strips the query string from every URL the log keeps.
+	redactQuery bool
+
+	// lastTap is the seam line of the tab the tap is on. A recording is started
+	// after the stream is, so without this the journal would open in the middle
+	// of a page and never say which page it is.
+	lastTap *record.LogEvent
 
 	// last holds the most recent frame. A static page produces one frame and
 	// then nothing, so a viewer that connects later needs this to see anything.
 	last *Frame
+
+	// lastPages is the tab list as it was last sent, so the poll can stay quiet
+	// while nothing about the tabs has changed.
+	lastPages []byte
 }
 
 // NewStreamer builds a streamer with no sinks. Attach them with AddSink.
@@ -79,10 +95,16 @@ func (s *Streamer) AddSink(k Sink) {
 		return
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.sinks = append(s.sinks, k)
 	if h, ok := k.(*Hub); ok && s.hub == nil {
 		s.hub = h
+	}
+	seam := s.lastTap
+	s.mu.Unlock()
+
+	// Tell a late sink which tab it is looking at, before anything else.
+	if l, ok := k.(Logger); ok && seam != nil {
+		l.Log(*seam)
 	}
 }
 
@@ -108,6 +130,38 @@ func (s *Streamer) emit(f *Frame) {
 	s.mu.Unlock()
 	for _, k := range sinks {
 		k.Frame(f)
+	}
+}
+
+// Action is something a viewer did to the page, on its way to the timeline of
+// a recording.
+//
+// Detail says what kind of thing it was, never what it contained. A click
+// carries the button, a key carries the key name, and typing carries nothing
+// at all: a password is typed the same way as a search term, so the text is
+// not ours to write to a disk.
+type Action struct {
+	Kind   string // "click", "type" or "key"
+	Detail string
+}
+
+// Actor is a Sink that also wants the actions, not only the pixels. A Hub does
+// not implement it, because a viewer already saw the action it sent.
+type Actor interface {
+	Action(Action)
+}
+
+// act fans one action out to the sinks that want them. The caller must not
+// hold s.mu.
+func (s *Streamer) act(a Action) {
+	s.mu.Lock()
+	sinks := make([]Sink, len(s.sinks))
+	copy(sinks, s.sinks)
+	s.mu.Unlock()
+	for _, k := range sinks {
+		if actor, ok := k.(Actor); ok {
+			actor.Action(a)
+		}
 	}
 }
 
@@ -226,6 +280,106 @@ func (s *Streamer) Select(id string) error {
 	return s.stream(chosen)
 }
 
+// blankPage is what a new tab opens. It is the browser convention, and it
+// leaves the URL box as the next thing to use.
+const blankPage = "about:blank"
+
+/*
+NewPage opens a tab and streams it.
+
+Streaming it is the point. A new tab that appeared in the strip but left the
+picture on the old one would look like nothing had happened, and a real browser
+puts you in the tab it just opened.
+*/
+func (s *Streamer) NewPage(url string) error {
+	s.mu.Lock()
+	browser := s.browser
+	s.mu.Unlock()
+	if browser == nil {
+		return fmt.Errorf("not attached")
+	}
+	if url == "" {
+		url = blankPage
+	}
+
+	page, err := browser.Page(proto.TargetCreateTarget{URL: url})
+	if err != nil {
+		return fmt.Errorf("failed to open a tab: %w", err)
+	}
+	if err := s.stream(page); err != nil {
+		return err
+	}
+	s.publishPages()
+	return nil
+}
+
+/*
+ClosePage closes one tab.
+
+Two things have to happen in order. The screencast holds the page, so it is
+stopped before Chrome is asked to destroy it; otherwise the stream is left
+attached to a target that no longer exists and simply goes quiet. Then, if the
+closed tab was the one being streamed, the stream moves to another tab rather
+than leaving the viewer on a frozen last frame.
+
+The last tab is refused. Chrome quits when its final tab closes, and the browser
+belongs to ATR rather than to this viewer, so one click in a web page must not
+be able to take it down.
+*/
+func (s *Streamer) ClosePage(id string) error {
+	s.mu.Lock()
+	browser := s.browser
+	current := s.targetID
+	s.mu.Unlock()
+	if browser == nil {
+		return fmt.Errorf("not attached")
+	}
+	if id == "" {
+		return fmt.Errorf("no page id to close")
+	}
+
+	pages, err := browser.Pages()
+	if err != nil {
+		return fmt.Errorf("failed to list the pages: %w", err)
+	}
+	if len(pages) <= 1 {
+		return fmt.Errorf("this is the last tab, and closing it would close the browser")
+	}
+
+	var target *rod.Page
+	rest := make(rod.Pages, 0, len(pages)-1)
+	for _, p := range pages {
+		if string(p.TargetID) == id {
+			target = p
+			continue
+		}
+		rest = append(rest, p)
+	}
+	if target == nil {
+		return fmt.Errorf("no page with id %s", id)
+	}
+
+	streamed := string(current) == id
+	if streamed {
+		s.stop()
+	}
+	if err := target.Close(); err != nil {
+		// The stream is already down, so put it back on something rather than
+		// leaving the viewer with no frames after a failed close.
+		if streamed {
+			_ = s.stream(frontMost(pages))
+		}
+		return fmt.Errorf("failed to close the page: %w", err)
+	}
+	if streamed {
+		if err := s.stream(frontMost(rest)); err != nil {
+			return err
+		}
+	}
+	s.publishPages()
+	return nil
+}
+
 // frontMost prefers the visible tab, because only that one produces frames.
 func frontMost(pages rod.Pages) *rod.Page {
 	for _, p := range pages {
@@ -256,6 +410,10 @@ func (s *Streamer) stream(page *rod.Page) error {
 	s.lastAt = time.Now()
 	s.live = true
 	s.mu.Unlock()
+
+	// The tap rides the same bound page, so it starts with the stream and dies
+	// with it. A tab switch therefore moves the log along with the pixels.
+	s.startTap(bound, string(page.TargetID))
 
 	go bound.EachEvent(func(e *proto.PageScreencastFrame) {
 		// Acknowledge at once. Chrome stops the stream without this, and it
@@ -362,7 +520,11 @@ func (s *Streamer) Watch(ctx context.Context) {
 			policy := s.policy
 			s.mu.Unlock()
 
-			if page == nil || idle < 2*time.Second {
+			if page == nil {
+				continue
+			}
+			s.pollPages()
+			if idle < 2*time.Second {
 				continue
 			}
 
@@ -502,13 +664,31 @@ func (s *Streamer) publishStatus(live bool) {
 	s.emitText(msg)
 }
 
-func (s *Streamer) publishPages() {
+func (s *Streamer) publishPages() { s.sendPages(true) }
+
+// pollPages sends the tab list when something about it changed.
+//
+// Chrome pushes no tab list, and the agent navigates without telling this
+// server, so nothing else notices a page that moved on its own. The live view
+// needs it to keep the tab titles honest, and the recorder needs it to mark the
+// navigation on the timeline. A single page application that only rewrites its
+// URL is caught here too, which is the common case in the apps we record.
+func (s *Streamer) pollPages() { s.sendPages(false) }
+
+func (s *Streamer) sendPages(force bool) {
 	pages, err := s.Pages()
 	if err != nil {
 		return
 	}
 	msg, err := json.Marshal(map[string]any{"t": "pages", "pages": pages})
 	if err != nil {
+		return
+	}
+	s.mu.Lock()
+	same := bytes.Equal(msg, s.lastPages)
+	s.lastPages = msg
+	s.mu.Unlock()
+	if same && !force {
 		return
 	}
 	s.emitText(msg)

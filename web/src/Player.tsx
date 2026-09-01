@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { analyse, frameAt, IDLE_SHOWN_MS, marks, timeline } from './activity';
 import { api, clock, humanBytes } from './api';
+import { DevTools } from './DevTools';
+import { countUpTo, parse, warnings } from './devtools';
 import { FrameCanvas } from './FrameCanvas';
-import type { Manifest } from './protocol';
+import { Icon } from './Icon';
+import { Scrubber } from './Scrubber';
+import type { LogEvent, Manifest } from './protocol';
 
-/** A pause longer than this is a gap worth skipping. */
-const GAP_MS = 2000;
-/** A skipped gap is replayed as this much, so the cut is still visible. */
-const GAP_SHOWN_MS = 500;
 /** How far ahead to decode. About six seconds at ten frames a second. */
 const PREFETCH = 60;
 /** How far behind to keep, so a small step back does not refetch. */
@@ -33,10 +34,16 @@ export function Player({ id, onBack }: Props) {
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState(1);
   // A recording is mostly waiting, so the useful default is to cut the waiting.
-  const [skipGaps, setSkipGaps] = useState(true);
+  const [skipIdle, setSkipIdle] = useState(true);
+  // Idle spans the viewer opened by hand. Nothing was thrown away, so any of
+  // them can be played in full.
+  const [opened, setOpened] = useState<Set<number>>(new Set());
   const [pos, setPos] = useState(0);
   const [encoding, setEncoding] = useState(false);
   const [mp4, setMp4] = useState(false);
+  const [log, setLog] = useState<LogEvent[]>([]);
+  const [dock, setDock] = useState(false);
+  const [showWarnings, setShowWarnings] = useState(false);
 
   const posRef = useRef(0);
   const drawnRef = useRef(-1);
@@ -57,6 +64,14 @@ export function Player({ id, onBack }: Props) {
     fetch(api.mp4URL(id), { method: 'HEAD' })
       .then((r) => live && setMp4(r.ok))
       .catch(() => undefined);
+    // The whole journal at once. It is text, it is capped at twenty megabytes,
+    // and every part of the dock needs a different slice of it, so streaming it
+    // would only move the parsing to a worse place.
+    setLog([]);
+    api
+      .devtools(id)
+      .then((text) => live && setLog(parse(text)))
+      .catch(() => undefined);
     return () => {
       live = false;
     };
@@ -64,26 +79,38 @@ export function Player({ id, onBack }: Props) {
 
   const frames = manifest?.frames ?? [];
 
+  const act = useMemo(() => analyse(manifest), [manifest]);
+
+  const collapsed = useCallback(
+    (span: number) => skipIdle && !opened.has(span),
+    [skipIdle, opened],
+  );
+
   /**
    * playAt maps each frame to its position on the playback timeline. With
-   * "skip gaps" on, a long pause is compressed, so the timeline is no longer
-   * the recording clock and every lookup has to go through this array.
+   * "skip inactivity" on, a quiet stretch is squeezed, so the timeline is no
+   * longer the recording clock and every lookup has to go through this array.
    */
-  const playAt = useMemo(() => {
-    const out = new Array<number>(frames.length);
-    let t = 0;
-    for (let i = 0; i < frames.length; i += 1) {
-      if (i > 0) {
-        let d = frames[i].atMs - frames[i - 1].atMs;
-        if (skipGaps && d > GAP_MS) d = GAP_SHOWN_MS;
-        t += d;
-      }
-      out[i] = t;
-    }
-    return out;
-  }, [frames, skipGaps]);
+  const playAt = useMemo(
+    () => timeline(frames, act, collapsed),
+    [frames, act, collapsed],
+  );
 
-  const total = playAt.length > 0 ? playAt[playAt.length - 1] + GAP_SHOWN_MS : 0;
+  const total = playAt.length > 0 ? playAt[playAt.length - 1] + IDLE_SHOWN_MS : 0;
+
+  /** What happened, placed on the playback clock. */
+  const warnMarks = useMemo(() => (showWarnings ? warnings(log) : []), [showWarnings, log]);
+  const events = useMemo(
+    () => [...(manifest?.events ?? []), ...warnMarks],
+    [manifest, warnMarks],
+  );
+  const acts = useMemo(() => marks(frames, events, playAt), [frames, events, playAt]);
+
+  /** How much real time the current cuts remove. */
+  const cutMs = act.spans.reduce(
+    (n, sp, i) => (sp.idle && collapsed(i) ? n + Math.max(0, sp.realMs - IDLE_SHOWN_MS) : n),
+    0,
+  );
 
   /** indexAt finds the last frame whose turn has come. */
   const indexAt = useCallback(
@@ -104,6 +131,73 @@ export function Player({ id, onBack }: Props) {
     },
     [playAt],
   );
+
+  /**
+   * gapScale is how much playback time one millisecond of recording time buys
+   * in the stretch that runs up to frame i. It is 1 everywhere except in a
+   * quiet stretch that has been cut, where the whole stretch is squeezed into
+   * IDLE_SHOWN_MS.
+   *
+   * The index is the later frame of the pair, because that is how timeline()
+   * accumulates: the gap before frame i is scaled by the span frame i is in.
+   */
+  const gapScale = useCallback(
+    (i: number) => {
+      if (i <= 0 || i >= frames.length) return 1;
+      const at = act.spanOf[i];
+      const sp = act.spans[at];
+      if (!sp || !sp.idle || !collapsed(at) || sp.realMs <= 0) return 1;
+      return IDLE_SHOWN_MS / sp.realMs;
+    },
+    [frames, act, collapsed],
+  );
+
+  /**
+   * The playhead in recording time. The dock rows are stamped on that clock,
+   * and the playback clock is a different one as soon as one quiet stretch is
+   * cut, so the two have to be converted rather than compared.
+   *
+   * It interpolates inside the gap rather than snapping to the frame. This
+   * recording holds one frame for seven seconds, and a clock that only moved
+   * when the picture did would leave the dock seven seconds behind the bar.
+   *
+   * Neither direction rounds. Inside a cut stretch the scale can be 1:90, so
+   * half a millisecond of playback is most of a second of recording, and
+   * rounding here would seek to a log row and then hide it.
+   */
+  const realAt = useCallback(
+    (t: number) => {
+      if (frames.length === 0) return 0;
+      const i = indexAt(t);
+      return frames[i].atMs + (t - playAt[i]) / gapScale(i + 1);
+    },
+    [frames, indexAt, playAt, gapScale],
+  );
+
+  /** playPos is realAt backwards: where a moment of the recording is played. */
+  const playPos = useCallback(
+    (atMs: number) => {
+      if (frames.length === 0) return 0;
+      const i = frameAt(frames, atMs);
+      return playAt[i] + (atMs - frames[i].atMs) * gapScale(i + 1);
+    },
+    [frames, playAt, gapScale],
+  );
+
+  const realMs = realAt(pos);
+  /**
+   * How much of the log the playhead has reached. A dock that showed the whole
+   * journal would answer a question about the end of the session while the
+   * picture is still at the start of it.
+   *
+   * A count, not a slice: the playhead moves ten times a second and the visible
+   * set changes far less often than that.
+   *
+   * The extra millisecond is the rounding in realAt and playPos. Without it,
+   * clicking a row seeks to that row and then hides it, which reads as the row
+   * having been deleted by the click.
+   */
+  const seen = useMemo(() => countUpTo(log, realMs + 1), [log, realMs]);
 
   // Decode a window around the playhead, and close what falls outside it.
   // ImageBitmap holds decoded pixels, so an unbounded cache of a long
@@ -210,9 +304,70 @@ export function Player({ id, onBack }: Props) {
     prefetch(indexAt(posRef.current));
   };
 
+  /**
+   * seekReal moves to a moment in recording time. A dock row knows when it
+   * happened, not where that lands after the cuts, so it has to travel through
+   * the frame that covers it.
+   */
+  const seekReal = (atMs: number) => {
+    if (frames.length === 0) return;
+    seek(playPos(atMs));
+    setPlaying(false);
+  };
+
+  /**
+   * openSpan plays a cut stretch in full. The timeline changes underneath, so
+   * the playhead is moved to the start of that stretch on the new one; leaving
+   * it where it was would jump to an unrelated moment.
+   */
+  const openSpan = (span: number) => {
+    const next = new Set(opened);
+    next.add(span);
+    setOpened(next);
+    const after = timeline(frames, act, (s) => skipIdle && !next.has(s));
+    const start = after[act.spans[span].from] ?? 0;
+    posRef.current = start;
+    setPos(start);
+    drawnRef.current = -1;
+  };
+
+  /**
+   * At the end the button says Replay and starts from the top. A Play button
+   * that is already at the end has nothing to play, and pressing it and getting
+   * nothing reads as a broken player.
+   */
+  const ended = total > 0 && pos >= total;
+
+  const toggle = () => {
+    if (ended && !playing) {
+      seek(0);
+      setPlaying(true);
+      return;
+    }
+    setPlaying((p) => !p);
+  };
+
   const step = (delta: number) => {
     const i = Math.max(0, Math.min(frames.length - 1, indexAt(posRef.current) + delta));
     seek(playAt[i]);
+    setPlaying(false);
+  };
+
+  /**
+   * jump moves to the next or previous thing that happened. Aiming at a mark
+   * in a bar a thousand pixels wide is a game of darts, so the marks are also
+   * reachable as a pair of buttons and as a pair of keys.
+   */
+  const jump = (delta: number) => {
+    if (acts.length === 0) return;
+    // A tolerance, or a jump forward lands on the mark already under the head.
+    const here = posRef.current;
+    const next =
+      delta > 0
+        ? acts.find((m) => m.at > here + 1)
+        : [...acts].reverse().find((m) => m.at < here - 1);
+    if (!next) return;
+    seek(next.at);
     setPlaying(false);
   };
 
@@ -221,10 +376,12 @@ export function Player({ id, onBack }: Props) {
       if (ev.target instanceof HTMLInputElement) return;
       if (ev.key === ' ') {
         ev.preventDefault();
-        setPlaying((p) => !p);
+        toggle();
       }
       if (ev.key === 'ArrowRight') step(1);
       if (ev.key === 'ArrowLeft') step(-1);
+      if (ev.key === 'ArrowDown') jump(1);
+      if (ev.key === 'ArrowUp') jump(-1);
       if (ev.key === 'Escape') onBack();
     };
     window.addEventListener('keydown', onKey);
@@ -243,13 +400,6 @@ export function Player({ id, onBack }: Props) {
   }
   if (!manifest) return <div className="player">Loading …</div>;
 
-  const gaps = skipGaps
-    ? 0
-    : frames.reduce(
-        (n, f, i) => (i > 0 && f.atMs - frames[i - 1].atMs > GAP_MS ? n + 1 : n),
-        0,
-      );
-
   return (
     <div className="player">
       <div className="player-head">
@@ -263,61 +413,92 @@ export function Player({ id, onBack }: Props) {
         </span>
       </div>
 
-      <div className="stage fit">
-        <FrameCanvas
-          next={nextBitmap}
-          onDrawn={keepBitmap}
-          className="viewport"
-        />
+      {/* The dock sits beside the stage, not inside it: the stage is a size
+          container, and a sibling inside it would be measured as part of the
+          space the picture is allowed to fill. */}
+      <div className="work">
+        <div className="stage fit">
+          <FrameCanvas
+            next={nextBitmap}
+            onDrawn={keepBitmap}
+            className="viewport"
+          />
+        </div>
+        {dock && (
+          <DevTools
+            rows={log}
+            limit={seen}
+            atMs={realMs}
+            onSeek={seekReal}
+            onClose={() => setDock(false)}
+          />
+        )}
       </div>
 
       <div className="timeline">
-        <input
-          type="range"
-          min={0}
-          max={Math.max(1, total)}
-          value={pos}
-          onChange={(e) => seek(Number(e.target.value))}
+        <Scrubber
+          frames={frames}
+          marks={acts}
+          act={act}
+          playAt={playAt}
+          total={total}
+          pos={pos}
+          collapsed={collapsed}
+          onSeek={seek}
+          onExpand={openSpan}
         />
-        <div className="ticks">
-          {manifest.events.map((ev, i) => {
-            const at = playAt[frameAt(frames, ev.atMs)] ?? 0;
-            return (
-              <span
-                key={i}
-                className={`tick ${ev.t}`}
-                style={{ left: `${total > 0 ? (at / total) * 100 : 0}%` }}
-                title={`${clock(ev.atMs)} ${ev.t}${ev.url ? ` · ${ev.url}` : ''}${
-                  ev.reason ? ` · ${ev.reason}` : ''
-                }`}
-              />
-            );
-          })}
-        </div>
       </div>
 
       <div className="controls">
         <button
           type="button"
           className="btn btn-icon"
+          title="Back one frame (left arrow)"
           aria-label="Back one frame"
           onClick={() => step(-1)}
         >
-          ⏮
+          <Icon name="stepBack" />
         </button>
-        <button type="button" className="btn btn-primary" onClick={() => setPlaying((p) => !p)}>
-          {playing ? '⏸ Pause' : '▶ Play'}
+        <button type="button" className="btn btn-primary" onClick={toggle}>
+          <Icon name={playing ? 'pause' : ended ? 'replay' : 'play'} />
+          {playing ? 'Pause' : ended ? 'Replay' : 'Play'}
         </button>
         <button
           type="button"
           className="btn btn-icon"
+          title="Forward one frame (right arrow)"
           aria-label="Forward one frame"
           onClick={() => step(1)}
         >
-          ⏭
+          <Icon name="stepForward" />
         </button>
+
+        {/* A recording with no marks gets no jump buttons: two dead controls
+            say less than none at all. */}
+        {acts.length > 0 && (
+          <span className="seg">
+            <button
+              type="button"
+              title="Previous action (up arrow)"
+              aria-label="Previous action"
+              onClick={() => jump(-1)}
+            >
+              <Icon name="prevMark" />
+            </button>
+            <button
+              type="button"
+              title="Next action (down arrow)"
+              aria-label="Next action"
+              onClick={() => jump(1)}
+            >
+              <Icon name="nextMark" />
+            </button>
+          </span>
+        )}
+
         <span className="dim num">
           {clock(pos)} / {clock(total)}
+          {cutMs > 0 && ` (${clock(manifest.durationMs)})`}
         </span>
 
         <span className="seg">
@@ -333,17 +514,58 @@ export function Player({ id, onBack }: Props) {
           ))}
         </span>
 
-        <label className={skipGaps ? 'on' : ''}>
+        <label
+          className={skipIdle ? 'on' : ''}
+          title={
+            act.scored
+              ? 'Cut the stretches where the page did not change'
+              : 'This recording has no activity scores, so long pauses are cut instead'
+          }
+        >
           <input
             type="checkbox"
-            checked={skipGaps}
+            checked={skipIdle}
             onChange={(e) => {
-              setSkipGaps(e.target.checked);
+              setSkipIdle(e.target.checked);
+              setOpened(new Set());
               seek(0);
             }}
           />
-          Skip gaps over 2 s{gaps > 0 && ` (${gaps})`}
+          Skip inactivity{cutMs > 0 && ` (−${clock(cutMs)})`}
         </label>
+
+        {/* A recording made before the log existed has no dock. An empty dock
+            would claim the page said nothing, which is a different statement. */}
+        {manifest.devtools && (
+          <>
+            <button
+              type="button"
+              className={`btn${dock ? ' on' : ''}`}
+              title="Console, network and issues"
+              aria-pressed={dock}
+              onClick={() => setDock((d) => !d)}
+            >
+              <Icon name="console" />
+              DevTools
+              {manifest.devtools.errors > 0 && (
+                <span className="pill bad">{manifest.devtools.errors}</span>
+              )}
+            </button>
+            <button
+              type="button"
+              className={`btn${showWarnings ? ' on' : ''}`}
+              title="Also mark the warnings on the timeline"
+              aria-pressed={showWarnings}
+              onClick={() => setShowWarnings((w) => !w)}
+            >
+              <Icon name="warn" />
+              Warnings
+              {showWarnings && warnMarks.length > 0 && (
+                <span className="pill">{warnMarks.length}</span>
+              )}
+            </button>
+          </>
+        )}
 
         <span className="grow" />
 
@@ -378,21 +600,4 @@ export function Player({ id, onBack }: Props) {
       )}
     </div>
   );
-}
-
-/** frameAt finds the frame that covers a moment in recording time. */
-function frameAt(frames: { atMs: number }[], atMs: number): number {
-  let lo = 0;
-  let hi = frames.length - 1;
-  let best = 0;
-  while (lo <= hi) {
-    const mid = (lo + hi) >> 1;
-    if (frames[mid].atMs <= atMs) {
-      best = mid;
-      lo = mid + 1;
-    } else {
-      hi = mid - 1;
-    }
-  }
-  return best;
 }

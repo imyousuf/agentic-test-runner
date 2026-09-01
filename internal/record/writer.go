@@ -36,30 +36,48 @@ func newWriter(dir string) (*writer, error) {
 }
 
 // write stores one image and returns the record that describes it.
-func (w *writer) write(seq int, atMs int64, jpeg []byte, width, height float64, targetID string) (FrameRecord, error) {
+func (w *writer) write(seq int, atMs int64, jpeg []byte, width, height float64, targetID string, score float64) (FrameRecord, error) {
 	name := fmt.Sprintf("%06d.jpg", seq)
 	path := filepath.Join(w.frames, name)
 	if err := os.WriteFile(path, jpeg, 0o644); err != nil {
 		return FrameRecord{}, fmt.Errorf("failed to write %s: %w", path, err)
 	}
+	w.bytes += int64(len(jpeg))
 
-	rec := FrameRecord{Seq: seq, File: name, AtMs: atMs, W: width, H: height, TargetID: targetID}
+	rec := FrameRecord{
+		Seq: seq, File: name, AtMs: atMs,
+		W: width, H: height, TargetID: targetID, Score: score,
+	}
+	return rec, w.journalise(rec)
+}
+
+// share records a frame that shows the same picture as one already on disk. It
+// writes no image, only the journal line, so the frame keeps its own place on
+// the timeline at no cost in bytes.
+func (w *writer) share(seq int, atMs int64, file string, width, height float64, targetID string, score float64) (FrameRecord, error) {
+	rec := FrameRecord{
+		Seq: seq, File: file, AtMs: atMs,
+		W: width, H: height, TargetID: targetID, Score: score,
+	}
+	return rec, w.journalise(rec)
+}
+
+func (w *writer) journalise(rec FrameRecord) error {
 	line, err := json.Marshal(rec)
 	if err != nil {
-		return rec, fmt.Errorf("failed to encode the frame record: %w", err)
+		return fmt.Errorf("failed to encode the frame record: %w", err)
 	}
 	if _, err := w.buf.Write(append(line, '\n')); err != nil {
-		return rec, fmt.Errorf("failed to append to the frame journal: %w", err)
+		return fmt.Errorf("failed to append to the frame journal: %w", err)
 	}
 
-	w.bytes += int64(len(jpeg))
 	w.count++
 	// Flush often enough that a crash loses at most a handful of journal
 	// lines, and rarely enough that the disk is not the bottleneck.
 	if w.count%20 == 0 {
 		_ = w.buf.Flush()
 	}
-	return rec, nil
+	return nil
 }
 
 // remove deletes one frame file. The ring buffer uses this to hold the

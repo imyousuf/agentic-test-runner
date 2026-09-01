@@ -1,27 +1,36 @@
 import { useState } from 'react';
-import { api, clock, humanBytes } from './api';
+import { api } from './api';
+import { Icon } from './Icon';
 import { idleRecord, type RecordState } from './useLiveView';
 
 interface Props {
   state: RecordState;
   canRecord: boolean;
+  /** Why recording is not offered. Shown on the disabled button. */
+  reason?: string;
   onChange: (next: RecordState) => void;
   onError: (message: string) => void;
 }
 
 /**
- * RecordButton starts and stops a recording.
+ * RecordButton starts a recording.
  *
  * Recording is off until somebody presses this. Nothing in ATR turns it on by
  * itself, so a person who opens the live view is never recorded without having
  * asked for it.
+ *
+ * Stopping is not here. Once a recording runs, RecordOverlay owns it: the state
+ * belongs over the picture that is being kept, and reporting it in two places
+ * would leave two things to keep in step.
+ *
+ * The button stays on the bar when this page may not record. A control that
+ * disappears reads as a missing feature; a disabled one that says why reads as
+ * an answer.
  */
-export function RecordButton({ state, canRecord, onChange, onError }: Props) {
+export function RecordButton({ state, canRecord, reason, onChange, onError }: Props) {
   const [busy, setBusy] = useState(false);
   const [asking, setAsking] = useState(false);
   const [title, setTitle] = useState('');
-
-  if (!canRecord) return null;
 
   const start = async (withTitle: string) => {
     setBusy(true);
@@ -37,31 +46,9 @@ export function RecordButton({ state, canRecord, onChange, onError }: Props) {
     }
   };
 
-  const stop = async () => {
-    setBusy(true);
-    try {
-      await api.stopRecording();
-      onChange(idleRecord);
-    } catch (err) {
-      onError(String(err instanceof Error ? err.message : err));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  if (state.recording) {
-    return (
-      <div className="rec">
-        <button type="button" className="btn rec-btn on" disabled={busy} onClick={stop}>
-          <span className="rec-dot" /> Stop
-        </button>
-        <span className="rec-meta">
-          {clock(state.elapsedMs)} · {state.frames} frames · {humanBytes(state.bytes)}
-          {state.dropped > 0 && ` · ${state.dropped} dropped`}
-        </span>
-      </div>
-    );
-  }
+  // The overlay is showing the running recording and its Stop button, so the
+  // bar has nothing to add.
+  if (state.recording) return null;
 
   if (asking) {
     return (
@@ -81,7 +68,7 @@ export function RecordButton({ state, canRecord, onChange, onError }: Props) {
           onKeyDown={(e) => e.key === 'Escape' && setAsking(false)}
         />
         <button type="submit" className="btn rec-btn" disabled={busy}>
-          <span className="rec-dot" /> Start
+          <Icon name="record" /> Start
         </button>
         <button type="button" className="btn" onClick={() => setAsking(false)}>
           Cancel
@@ -91,14 +78,16 @@ export function RecordButton({ state, canRecord, onChange, onError }: Props) {
   }
 
   return (
-    <button
-      type="button"
-      className="btn rec-btn"
-      disabled={busy}
-      title="Record this session"
-      onClick={() => setAsking(true)}
-    >
-      <span className="rec-dot" /> Record
-    </button>
+    <div className="rec">
+      <button
+        type="button"
+        className="btn rec-btn"
+        disabled={busy || !canRecord}
+        title={canRecord ? 'Record this session' : reason}
+        onClick={() => setAsking(true)}
+      >
+        <Icon name="record" /> Record
+      </button>
+    </div>
   );
 }

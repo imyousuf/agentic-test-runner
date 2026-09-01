@@ -122,14 +122,83 @@ func TestKeepLastDropsTheOldestFramesFromDisk(t *testing.T) {
 	}
 
 	// Every frame the manifest lists must still be on disk, and nothing else
-	// should be left behind.
+	// should be left behind. Frames may share a file, so the two counts differ.
 	dir := filepath.Join(s.Root(), m.ID, framesDir)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(entries) != len(m.Frames) {
-		t.Errorf("%d files on disk but %d in the manifest", len(entries), len(m.Frames))
+	wanted := map[string]bool{}
+	for _, f := range m.Frames {
+		wanted[f.File] = true
+		if _, err := os.Stat(filepath.Join(dir, f.File)); err != nil {
+			t.Errorf("frame %s is in the manifest but not on disk", f.File)
+		}
+	}
+	for _, e := range entries {
+		if !wanted[e.Name()] {
+			t.Errorf("%s is on disk but no frame points at it", e.Name())
+		}
+	}
+}
+
+func TestARunOfIdenticalFramesSharesOneFile(t *testing.T) {
+	s := newTestStore(t)
+	r, err := Start(s, StartOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	img := testJPEG(t, 320, 240)
+	for i := 0; i < 8; i++ {
+		r.Write(Image{JPEG: img})
+	}
+	m, err := r.Stop()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m.Frames) != 8 {
+		t.Fatalf("kept %d frames, want all 8; nothing may be dropped", len(m.Frames))
+	}
+	if m.Shared != 7 {
+		t.Errorf("shared %d frames, want 7", m.Shared)
+	}
+	for _, f := range m.Frames {
+		if f.File != m.Frames[0].File {
+			t.Fatalf("frame %d wrote its own file %s", f.Seq, f.File)
+		}
+	}
+
+	entries, err := os.ReadDir(filepath.Join(s.Root(), m.ID, framesDir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Errorf("%d files on disk, want 1", len(entries))
+	}
+}
+
+func TestTheRingKeepsAFileWhileAnyFramePointsAtIt(t *testing.T) {
+	s := newTestStore(t)
+	r, err := Start(s, StartOptions{Limits: Limits{KeepLast: 60 * time.Millisecond}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	img := testJPEG(t, 64, 64)
+	for i := 0; i < 12; i++ {
+		r.Write(Image{JPEG: img})
+		time.Sleep(15 * time.Millisecond)
+	}
+	m, err := r.Stop()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Every kept frame shares one file with frames the window already cut. The
+	// ring must not have deleted it on the first cut.
+	dir := filepath.Join(s.Root(), m.ID, framesDir)
+	for _, f := range m.Frames {
+		if _, err := os.Stat(filepath.Join(dir, f.File)); err != nil {
+			t.Fatalf("the ring deleted %s while frame %d still points at it", f.File, f.Seq)
+		}
 	}
 }
 

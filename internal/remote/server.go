@@ -236,16 +236,23 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		v.send(msg)
 	}
 	// Tell a viewer that joins mid-recording that one is running, so the
-	// button shows the right state at once.
+	// button shows the right state at once. That includes a recording started
+	// by another process, such as "atr record".
 	if s.session != nil {
 		st := s.session.Status()
 		if msg, err := json.Marshal(map[string]any{
 			"t": "record", "recording": st.Recording, "id": st.ID, "title": st.Title,
 			"elapsedMs": st.ElapsedMs, "frames": st.Frames, "bytes": st.Bytes,
-			"dropped": st.Dropped,
+			"dropped": st.Dropped, "elsewhere": elsewhereJSON(s.session.Elsewhere()),
 		}); err == nil {
 			v.send(msg)
 		}
+	}
+	// Give the dock what the page said before anybody was watching. Somebody
+	// opens the live view because something went wrong, and the error is
+	// already behind them.
+	if msg := s.hub.Backlog(); msg != nil {
+		v.send(msg)
 	}
 	// A still page emits no frame at all. Capture one on demand so the viewer
 	// sees the page immediately instead of a blank canvas.
@@ -273,7 +280,7 @@ func (s *Server) dispatch(msg inbound) {
 	// A view-only server drops input here, on the server, not in the client.
 	if s.viewOnly {
 		switch msg.T {
-		case "mouse", "wheel", "key", "text", "navigate":
+		case "mouse", "wheel", "key", "text", "navigate", "newPage", "closePage":
 			return
 		}
 	}
@@ -295,6 +302,16 @@ func (s *Server) dispatch(msg inbound) {
 		_ = s.streamer.Text(msg.Value)
 	case "selectPage":
 		_ = s.streamer.Select(msg.ID)
+	case "newPage":
+		if err := s.streamer.NewPage(msg.URL); err != nil {
+			s.hub.Error(err.Error())
+		}
+	case "closePage":
+		if err := s.streamer.ClosePage(msg.ID); err != nil {
+			// Refusing the last tab is the common case here, and a viewer that
+			// clicked ✕ and saw nothing happen would just click it again.
+			s.hub.Error(err.Error())
+		}
 	case "navigate":
 		_ = s.streamer.Navigate(msg.URL)
 	case "policy":

@@ -1,7 +1,10 @@
 package remote
 
 import (
+	"encoding/json"
 	"sync"
+
+	"github.com/imyousuf/agentic-test-runner/internal/record"
 )
 
 // Frame is one encoded screencast image with the metadata the client needs to
@@ -80,10 +83,20 @@ func (v *viewer) close() {
 	v.signal()
 }
 
+// logRing is how many log lines the hub keeps for a viewer that joins late.
+//
+// The dock has to show something the moment it opens, and the page reported
+// most of what matters before anybody thought to look. Two thousand rows is
+// about a minute of a busy application at the rate cap.
+const logRing = 2000
+
 // Hub keeps the connected viewers and fans frames out to them.
 type Hub struct {
 	mu      sync.RWMutex
 	viewers map[*viewer]struct{}
+
+	logMu  sync.Mutex
+	recent []record.LogEvent
 }
 
 func NewHub() *Hub {
@@ -126,4 +139,54 @@ func (h *Hub) Text(msg []byte) {
 	for v := range h.viewers {
 		v.send(msg)
 	}
+}
+
+// Error tells every viewer that something they asked for did not happen.
+//
+// A viewer acts through the socket and gets no reply, so without this a refused
+// action is indistinguishable from a lost one, and the viewer tries again.
+func (h *Hub) Error(message string) {
+	msg, err := json.Marshal(struct {
+		T       string `json:"t"`
+		Message string `json:"message"`
+	}{T: "error", Message: message})
+	if err != nil {
+		return
+	}
+	h.Text(msg)
+}
+
+// Log hands one line to every viewer and keeps it for the next one. It
+// satisfies Logger.
+func (h *Hub) Log(ev record.LogEvent) {
+	h.logMu.Lock()
+	h.recent = append(h.recent, ev)
+	if n := len(h.recent) - logRing; n > 0 {
+		h.recent = append(h.recent[:0], h.recent[n:]...)
+	}
+	h.logMu.Unlock()
+
+	msg, err := json.Marshal(map[string]any{"t": "log", "rows": []record.LogEvent{ev}})
+	if err != nil {
+		return
+	}
+	h.Text(msg)
+}
+
+// Backlog is the log as one message, for a viewer that has just connected.
+// It returns nil when the page has said nothing yet.
+func (h *Hub) Backlog() []byte {
+	h.logMu.Lock()
+	rows := make([]record.LogEvent, len(h.recent))
+	copy(rows, h.recent)
+	h.logMu.Unlock()
+
+	if len(rows) == 0 {
+		return nil
+	}
+	msg, err := json.Marshal(map[string]any{"t": "log", "rows": rows})
+	if err != nil {
+		return nil
+	}
+	return msg
 }

@@ -122,6 +122,12 @@ The left control is the page picker. The URL field is a pill, and it caps at
 720 px so the text stays near the middle. The right group holds the foreground
 toggle, the record button, the library link, and the theme button.
 
+The record button is always on the bar. It used to render nothing when the
+server had no recordings directory, and nothing again on a view-only link, so
+the feature looked missing rather than unavailable. It is now disabled instead,
+and the reason is on the button. Beside it, `● atr record is recording · 0:45`
+appears when another process is recording this browser.
+
 ### 6.2 The page picker
 
 The tab strip fails at 27 pages. A picker does not.
@@ -185,6 +191,10 @@ truncates from the middle.
 - A `⋯` menu holds Rename, Export MP4 or Download, Repair, and Delete.
 - Search filters the title and the id. Sort offers newest, longest, largest.
 - The empty state explains how to make the first recording.
+- A recording that is still being written shows a **● recording** badge, says
+  which process is writing it, and carries no actions. Rename and Export need
+  the manifest the stop will write, and Delete would pull the directory out
+  from under a running recorder.
 
 ### 7.2 Where the poster comes from
 
@@ -220,35 +230,93 @@ This is the only Go change in the redesign.
 │                     └──────────────────────┘                       │
 │                                                                    │
 ├────────────────────────────────────────────────────────────────────┤
-│      ╷        ╷                          ╷                         │
+│ ▌·     ▬                  ▌              ·        the mark row     │
 │ ━━━━━━━━━━━━━━●─────────────────────────────────────────────────── │
-│ ⏮ ⏴ ▶ ⏵  0:02 / 0:05      [0.5×│1×│2×│4×]  ☐ Skip gaps   ⬇ MP4    │
+│ ◀| ▶ |▶ [◀|│|▶] 0:02 / 0:05 [0.5×│1×│2×│4×]  ☐ Skip gaps   ⬇ MP4   │
 └────────────────────────────────────────────────────────────────────┘
 ```
 
 ### 8.2 The scrub bar
 
-I keep `input[type=range]`. It gives the keyboard and the screen reader
-behaviour for free. I style it fully instead:
+**Built, and it is not a range input.** I had planned to style
+`input[type=range]`, for the keyboard and screen reader behaviour it gives
+free. A range input cannot hold the activity graph: it has one thumb, one
+track, and no place to put a clickable region inside it. `Scrubber.tsx` is a
+`div` with `role="slider"` and the aria value attributes instead.
 
-- The track shows the played part in the accent colour, through a background
-  gradient driven by a CSS custom property.
-- The thumb is 14 px, and the hit area is 20 px tall.
-- A tick layer sits above the track. A tab change, a stall and a resume each
-  get a colour.
-- A gap layer shades the compressed parts, so you can see what "skip gaps"
-  removed.
+```
+▁▃█▅▂▁ ░░0:14░░ ▂█▇█▅▃▁▂ ░░0:12░░ ▁▄█▆▂ ░░0:11░░
+```
+
+- Each column is the change score for that moment, on a log scale, taken as
+  the loudest frame in the column. The scores span three decades, so a linear
+  bar would be a flat line with a few spikes.
+- A hatched block is a stretch where nothing changed, labelled with how long
+  it really lasted. Click it to play it in full.
+- The played part is a 14% accent tint over the whole height, not a fill. A
+  solid fill would hide the half of the session already watched.
+- **A 16 px mark row sits along the top edge**, above the bars and separated by
+  a rule. It was drawn as ticks along the bottom at first. They were 2 px wide,
+  they sat under the bars, and nobody found them. The marks are what a person
+  looks for — the click, the navigation — so they get their own row and a 16 px
+  hit target around a 6 px pip.
+- A pip takes a shape from its kind: a tall accent bar for `nav` and `tab`, a
+  text-coloured dot for `click`, a text-coloured dash for `type`, a warn dot for
+  `key` and `stall`, an ok dot for `resume`. Shape first and colour second, so
+  the row survives a colour-blind reader and a dark theme.
+- Marks within 1/140 of the bar merge into one, and the cluster takes the shape
+  of its most notable member. The tooltip names every event in it.
+- Everything inside is positioned by played time, not recording time, because
+  a cut stretch is narrower on the bar than it really was.
+
+A label is drawn only when its block is at least 3% of the bar. A clipped
+label reads as a wrong number.
 
 ### 8.3 The controls
 
 The transport groups at the left. Play is the one primary button. The speed
-buttons become a segmented control. Skip gaps and the export move to the right.
+buttons become a segmented control. Skip inactivity and the export move to the
+right.
 
-**Skip gaps is on by default.** A recording is mostly waiting, so the useful
-default is to cut the waiting. Clear the box to watch the real clock.
+A segmented pair sits after the frame steps: previous mark and next mark. The
+up and down arrow keys do the same, and the left and right arrows keep stepping
+one frame. The mark row is only useful if you can walk it without aiming a
+mouse at a 6 px pip. A recording with no marks gets no pair, because two dead
+controls say less than none at all.
+
+At the end the primary button becomes **Replay** and restarts from the top. A
+Play button that is already at the end has nothing to play, and pressing it and
+getting nothing reads as a broken player. The space bar follows the same rule.
+
+**Skip inactivity is on by default.** A recording is mostly waiting, so the
+useful default is to cut the waiting. The checkbox says how much real time the
+cuts remove, and the clock shows the played length with the real length after
+it: `0:14 / 0:27 (0:49)`.
+
+Nothing is thrown away to make this work. A cut stretch keeps its place on the
+bar and opens on a click, so the viewer can always check what was skipped.
 
 While the recording plays, the head bar and the control bar fade out after
 2.5 s. Any mouse move, any key press, or a pause brings them back.
+
+### 8.4 Icons are drawn, not typed
+
+The controls used to be Unicode: ⏮ U+23EE, ⏭ U+23ED and ⏸ U+23F8. The
+stylesheet asks for `system-ui` and loads no icon font, and `system-ui` on Linux
+has no glyph for any of the three, so they drew as empty boxes. ▶ survived,
+which is why Play looked right and the step buttons did not.
+
+`Icon.tsx` holds one inline SVG per name: play, pause, replay, stepBack,
+stepForward, prevMark, nextMark, record, stop, auto, light, dark. Each sizes at
+`1em` and paints with `currentColor`, so it follows the button it sits in, on
+every platform. The transport glyphs paint a filled body, because an outline is
+mud at 14 px. No icon font, and no new dependency.
+
+The page had no favicon at all, so every browser asked for `/favicon.ico` and
+got a 404 in the log. `web/public/favicon.svg` is an accent tile with a tab
+strip over a record dot — the live view, and what it is for. One `<link
+rel="icon" type="image/svg+xml">` in `index.html` serves it, and Vite copies
+`web/public/` into the embedded `dist`.
 
 ## 9. Accessibility
 
@@ -269,7 +337,10 @@ web/src/Menu.tsx           a popover menu; the cards use it
 web/src/AppBar.tsx         the merged top bar
 web/src/PagePicker.tsx     the replacement for the tab strip
 web/src/RecordingCard.tsx  one card in the grid
-web/src/Scrubber.tsx       the styled range, the ticks and the gaps
+web/src/Scrubber.tsx       the activity bar, the mark row and the idle blocks
+web/src/activity.ts        scores to spans, marks, and the played timeline
+web/src/Icon.tsx           one inline SVG per control
+web/public/favicon.svg     the tab icon
 ```
 
 **Changed**
@@ -280,9 +351,10 @@ web/src/App.tsx            routes and the new bar
 web/src/Library.tsx        the grid, the search and the sort
 web/src/Player.tsx         the layout, the scrubber and the controls
 web/src/Viewport.tsx       fit and 1:1
-web/src/RecordButton.tsx   the new button classes
+web/src/RecordButton.tsx   the new button classes; disabled, never hidden
 web/src/api.ts             posterURL
-web/src/protocol.ts        Summary.poster
+web/src/protocol.ts        Summary.poster, Summary.live, RecordMsg.elsewhere
+web/index.html             the favicon link
 internal/record/types.go   Summary.Poster
 internal/record/store.go   fill it in List
 internal/record/store_test.go

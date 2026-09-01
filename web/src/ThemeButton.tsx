@@ -1,7 +1,7 @@
+import { Icon } from './Icon';
 import { useTheme, type ThemeChoice } from './useTheme';
 
 const ORDER: ThemeChoice[] = ['auto', 'light', 'dark'];
-const FACE: Record<ThemeChoice, string> = { auto: '◐', light: '☀', dark: '☾' };
 const NAME: Record<ThemeChoice, string> = {
   auto: 'system theme',
   light: 'light theme',
@@ -22,7 +22,7 @@ export function ThemeButton() {
       aria-label={label}
       onClick={() => setTheme(next)}
     >
-      {FACE[theme]}
+      <Icon name={theme} />
     </button>
   );
 }

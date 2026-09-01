@@ -49,11 +49,15 @@ export function Library({ onOpen }: Props) {
         {items.map((r: RecordingSummary) => {
           // A partial recording has no manifest, so there is nothing to play
           // until it is repaired. Renaming makes the row a form, not a target.
-          const open = r.partial || editing === r.id ? undefined : () => onOpen(r.id);
+          // A live one has no manifest either, and it is not broken: it is
+          // still being written, so every action on it has to wait.
+          const open = r.partial || r.live || editing === r.id ? undefined : () => onOpen(r.id);
           return (
             <li
               key={r.id}
-              className={[busy === r.id ? 'busy' : '', open ? 'openable' : ''].join(' ').trim()}
+              className={[busy === r.id ? 'busy' : '', open ? 'openable' : '', r.live ? 'live' : '']
+                .join(' ')
+                .trim()}
               role={open ? 'button' : undefined}
               tabIndex={open ? 0 : undefined}
               aria-label={open ? `Play ${r.title || r.id}` : undefined}
@@ -89,13 +93,28 @@ export function Library({ onOpen }: Props) {
                     </button>
                   </form>
                 ) : (
-                  <div className="rec-title">{r.title || r.id}</div>
+                  <div className="rec-title">
+                    {r.title || r.id}
+                    {r.live && <span className="rec-badge">● recording</span>}
+                    {/* Which session to open, before opening any of them. */}
+                    {r.errors !== undefined && r.errors > 0 && (
+                      <span className="rec-badge">
+                        {r.errors} error{r.errors === 1 ? '' : 's'}
+                      </span>
+                    )}
+                  </div>
                 )}
                 <div className="dim small">
-                  {new Date(r.startedAt).toLocaleString()} · {clock(r.durationMs)} ·{' '}
-                  {r.frames} frames · {humanBytes(r.bytes)}
+                  {new Date(r.startedAt).toLocaleString()} ·{' '}
+                  {r.live ? 'running' : clock(r.durationMs)} · {r.frames} frames ·{' '}
+                  {humanBytes(r.bytes)}
                   {r.hasMp4 && ' · mp4'}
                 </div>
+                {r.live && (
+                  <div className="dim small">
+                    {source(r.source)} is writing this now. It can be played once it stops.
+                  </div>
+                )}
                 {r.partial && (
                   <div className="warn small">
                     This recording was interrupted, so it has no manifest yet.
@@ -103,9 +122,12 @@ export function Library({ onOpen }: Props) {
                 )}
               </div>
 
-              {/* The row opens the player, so an action must not bubble up to it. */}
+              {/* The row opens the player, so an action must not bubble up to it.
+                  A live row gets no actions at all: rename and export need the
+                  manifest that the stop will write, and delete would pull the
+                  directory out from under a running recorder. */}
               <div className="rec-actions" onClick={(ev) => ev.stopPropagation()}>
-                {r.partial ? (
+                {r.live ? null : r.partial ? (
                   <button
                     type="button"
                     className="btn"
@@ -140,17 +162,19 @@ export function Library({ onOpen }: Props) {
                     )}
                   </>
                 )}
-                <button
-                  type="button"
-                  className="btn btn-danger"
-                  onClick={() => {
-                    if (confirm(`Delete ${r.title || r.id}?`)) {
-                      void act(r.id, () => api.remove(r.id));
-                    }
-                  }}
-                >
-                  Delete
-                </button>
+                {!r.live && (
+                  <button
+                    type="button"
+                    className="btn btn-danger"
+                    onClick={() => {
+                      if (confirm(`Delete ${r.title || r.id}?`)) {
+                        void act(r.id, () => api.remove(r.id));
+                      }
+                    }}
+                  >
+                    Delete
+                  </button>
+                )}
               </div>
             </li>
           );
@@ -158,4 +182,10 @@ export function Library({ onOpen }: Props) {
       </ul>
     </div>
   );
+}
+
+function source(name?: string): string {
+  if (name === 'cli') return 'atr record';
+  if (name === 'live-view') return 'The live view';
+  return name || 'Another process';
 }
