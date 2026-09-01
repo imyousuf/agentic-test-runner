@@ -27,22 +27,69 @@ not a step towards one, so "atr remote" plays a recording back without any
 video encoder installed. Export an MP4 later with "atr record encode <id>",
 which is the only part that needs ffmpeg.
 
-The command attaches to the running browser as a second DevTools session, the
+Recording attaches to the running browser as a second DevTools session, the
 same way "atr remote" does, so you can watch and record at the same time.
 
 Examples:
-  # Record until Ctrl+C
-  atr record
+  # Start recording, and get the prompt back
+  atr record start --title "Checkout flow"
 
-  # Give it a title, and keep only the last five minutes
-  atr record --title "Checkout flow" --keep-last 5m
+  # See what is running
+  atr record status
+
+  # Stop the newest recording and wait until it is playable
+  atr record stop`,
+		// Without this an unknown subcommand becomes a positional argument that
+		// the parent ignores, so "atr record stop" would start a recording.
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			_ = cmd.Help()
+			fmt.Fprintln(cmd.ErrOrStderr())
+			return fmt.Errorf("say what to do: \"atr record start\" begins a recording")
+		},
+	}
+
+	cmd.AddCommand(
+		newRecordStartCmd(),
+		newRecordStopCmd(),
+		newRecordStatusCmd(),
+		newRecordListCmd(),
+		newRecordEncodeCmd(),
+		newRecordRepairCmd(),
+		newRecordRmCmd(),
+		newRecordDoctorCmd(),
+	)
+	return cmd
+}
+
+func newRecordStartCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "start",
+		Short: "Start recording the browser session",
+		Long: `Start recording and give the prompt back.
+
+The recording runs in the background until "atr record stop", until one of the
+limits is reached, or until --max-duration expires. The command prints the id
+it started, so a script has something to stop later.
+
+Use --foreground to keep the recording attached to this terminal and stop it
+with Ctrl+C instead.
+
+Examples:
+  # Start, work, stop
+  atr record start --title "Checkout flow"
+  atr record stop
 
   # Record one tab and never pull it to the front
-  atr record --policy pin
+  atr record start --policy pin
 
-  # Record and export an MP4 when it stops
-  atr record --encode mp4`,
-		RunE: runRecord,
+  # Hold this terminal, and stop with Ctrl+C
+  atr record start --foreground
+
+  # Keep the id for later
+  ID=$(atr record start --quiet)`,
+		Args: cobra.NoArgs,
+		RunE: runRecordStart,
 	}
 
 	cmd.Flags().StringP("output", "o", "", "Recordings directory (default: ~/.atr/recordings)")
@@ -54,18 +101,50 @@ Examples:
 	cmd.Flags().Duration("max-duration", 30*time.Minute, "Stop after this long; 0 means no limit")
 	cmd.Flags().String("max-size", "1GB", "Stop at this size; 0 means no limit")
 	cmd.Flags().Duration("keep-last", 0, "Keep only the last part of the recording")
+	cmd.Flags().String("max-log-size", "20MB", "Cap the console and network log; 0 means no limit")
+	cmd.Flags().Bool("redact-query", false,
+		"Drop the query string from every URL in the log")
 	cmd.Flags().Duration("heartbeat", 5*time.Second, "Capture a frame after this much silence")
 	cmd.Flags().String("policy", "follow", "What to do when another tab takes the foreground: follow, pin, or hold")
 	cmd.Flags().String("encode", "none", "Encode when the recording stops: none or mp4")
-
-	cmd.AddCommand(
-		newRecordListCmd(),
-		newRecordEncodeCmd(),
-		newRecordRepairCmd(),
-		newRecordRmCmd(),
-		newRecordDoctorCmd(),
-	)
+	cmd.Flags().Bool("foreground", false, "Hold this terminal and stop on Ctrl+C")
+	// "PID:" contains "ID:", so the friendly output is a trap for anything that
+	// greps it. This prints the id and nothing else.
+	cmd.Flags().BoolP("quiet", "q", false, "Print only the recording id")
+	addChangeFlags(cmd)
 	return cmd
+}
+
+// addChangeFlags declares the activity detector flags. Both "atr record" and
+// "atr remote" record, so both need them.
+func addChangeFlags(cmd *cobra.Command) {
+	cmd.Flags().Float64("change-threshold", record.DefaultThreshold,
+		"Activity score a player treats as movement, 0 to 1")
+	cmd.Flags().Duration("keep-every", record.DefaultKeepEvery,
+		"Write a frame of its own at least this often, even on a still page")
+	cmd.Flags().Bool("keep-all", false,
+		"Write every frame to its own file instead of sharing one for a still page")
+}
+
+// changeOptions reads the activity detector flags.
+func changeOptions(cmd *cobra.Command) record.ChangeOptions {
+	f := cmd.Flags()
+	threshold, _ := f.GetFloat64("change-threshold")
+	keepEvery, _ := f.GetDuration("keep-every")
+	keepAll, _ := f.GetBool("keep-all")
+	return record.ChangeOptions{
+		Threshold: threshold,
+		KeepEvery: keepEvery,
+		KeepAll:   keepAll,
+	}
+}
+
+// runRecordStart either records here or spawns the process that does.
+func runRecordStart(cmd *cobra.Command, _ []string) error {
+	if fg, _ := cmd.Flags().GetBool("foreground"); fg {
+		return runRecord(cmd, nil)
+	}
+	return spawnRecorder(cmd)
 }
 
 func runRecord(cmd *cobra.Command, _ []string) error {
@@ -79,6 +158,8 @@ func runRecord(cmd *cobra.Command, _ []string) error {
 	maxDuration, _ := f.GetDuration("max-duration")
 	maxSizeText, _ := f.GetString("max-size")
 	keepLast, _ := f.GetDuration("keep-last")
+	maxLogText, _ := f.GetString("max-log-size")
+	redactQuery, _ := f.GetBool("redact-query")
 	heartbeat, _ := f.GetDuration("heartbeat")
 	policy, _ := f.GetString("policy")
 	encodeMode, _ := f.GetString("encode")
@@ -96,6 +177,16 @@ func runRecord(cmd *cobra.Command, _ []string) error {
 	maxSize, err := record.ParseSize(maxSizeText)
 	if err != nil {
 		return err
+	}
+	maxLog, err := record.ParseSize(maxLogText)
+	if err != nil {
+		return fmt.Errorf("--max-log-size: %w", err)
+	}
+	// The other limits read zero as "no limit". This one reads zero as "the
+	// caller asked for no cap", which is a different value, because a log with
+	// no cap is a disk waiting to fill.
+	if maxLog == 0 {
+		maxLog = record.NoMaxLog
 	}
 
 	store, err := record.NewStore(output)
@@ -116,6 +207,9 @@ func runRecord(cmd *cobra.Command, _ []string) error {
 	}
 	defer streamer.Close()
 	streamer.SetPolicy(policy)
+	// Set this before Select. Select starts the stream, and the tap that goes
+	// with it reads the setting once.
+	streamer.SetRedactQuery(redactQuery)
 
 	pages, _ := streamer.Pages()
 
@@ -133,7 +227,10 @@ func runRecord(cmd *cobra.Command, _ []string) error {
 
 	session := remote.NewSession(store, streamer, record.Limits{
 		MaxDuration: maxDuration, MaxSize: maxSize, KeepLast: keepLast,
+		MaxLog: maxLog,
 	}, encodeMode == "mp4")
+	session.SetChangeOptions(changeOptions(cmd))
+	session.SetSource("cli")
 
 	ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
