@@ -19,6 +19,9 @@ export function App() {
   const [notice, setNotice] = useState('');
   const [fit, setFit] = useState(true);
   const [dock, setDock] = useState(false);
+  // Tabs a close has been sent for. The list refreshes about once a second, so
+  // without this the cross stays live on a tab that is already gone.
+  const [closing, setClosing] = useState<Set<string>>(new Set());
 
   const active = state.pages.find((p) => p.active) ?? state.pages[0];
 
@@ -32,6 +35,16 @@ export function App() {
   useEffect(() => {
     if (active) setDraft(active.url);
   }, [active?.url]);
+
+  // Drop ids the server no longer lists, so the set does not grow for the life
+  // of the page and a reused id is not stuck disabled.
+  useEffect(() => {
+    setClosing((prev) => {
+      const live = new Set(state.pages.map((p) => p.id));
+      const next = new Set([...prev].filter((id) => live.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [state.pages]);
 
   if (route.view === 'player') {
     return <Player id={route.id} onBack={() => go('/recordings')} />;
@@ -88,7 +101,11 @@ export function App() {
                   className="tab-close"
                   title={`Close ${name}`}
                   aria-label={`Close ${name}`}
-                  onClick={() => send({ t: 'closePage', id: page.id })}
+                  disabled={closing.has(page.id)}
+                  onClick={() => {
+                    setClosing((s) => new Set(s).add(page.id));
+                    send({ t: 'closePage', id: page.id });
+                  }}
                 >
                   ✕
                 </button>

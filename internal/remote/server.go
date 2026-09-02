@@ -282,7 +282,6 @@ func (s *Server) dispatch(msg inbound, v *viewer) {
 		err = s.streamer.NewPage(msg.URL)
 	case "closePage":
 		err = s.streamer.ClosePage(msg.ID)
-		err = s.streamer.Select(msg.ID)
 	case "navigate":
 		err = s.streamer.Navigate(msg.URL)
 	case "policy":

@@ -309,7 +309,10 @@ func (s *Streamer) Select(id string) error {
 			}
 		}
 		if chosen == nil {
-			return fmt.Errorf("no page with id %s", id)
+			// Distinct from ClosePage's silence: asking to *look at* a tab
+			// that has gone cannot be satisfied by doing nothing, and
+			// switching to some other tab is not what was asked for.
+			return fmt.Errorf("that tab has closed")
 		}
 	default:
 		chosen = frontMost(pages)
@@ -387,12 +390,8 @@ func (s *Streamer) ClosePage(id string) error {
 	if err != nil {
 		return fmt.Errorf("failed to list the pages: %w", err)
 	}
-	if len(pages) <= 1 {
-		return fmt.Errorf("this is the last tab, and closing it would close the browser")
-	}
-
 	var target *rod.Page
-	rest := make(rod.Pages, 0, len(pages)-1)
+	rest := make(rod.Pages, 0, len(pages))
 	for _, p := range pages {
 		if string(p.TargetID) == id {
 			target = p
@@ -400,8 +399,21 @@ func (s *Streamer) ClosePage(id string) error {
 		}
 		rest = append(rest, p)
 	}
+
+	// "Is it still there?" is asked before "would closing it be fatal?", and
+	// the order matters. Two clicks on the same cross land either side of the
+	// one-second tab refresh: with the checks the other way round, the second
+	// click on the second-to-last tab answered "this is the last tab" -- about
+	// a tab the viewer was not trying to close.
+	//
+	// Already gone is not a failure either. Closing it is what was asked for,
+	// and it is closed.
 	if target == nil {
-		return fmt.Errorf("no page with id %s", id)
+		s.publishPages()
+		return nil
+	}
+	if len(rest) == 0 {
+		return fmt.Errorf("this is the last tab, and closing it would close the browser")
 	}
 
 	streamed := string(current) == id
