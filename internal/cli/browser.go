@@ -1179,8 +1179,9 @@ func summarizeMap(m map[string]interface{}) string {
 // Recording command
 
 var (
-	recordOutput string
-	recordURL    string
+	recordOutput  string
+	recordURL     string
+	recordOverlay bool
 )
 
 func newBrowserRecordCmd() *cobra.Command {
@@ -1190,9 +1191,14 @@ func newBrowserRecordCmd() *cobra.Command {
 		Long: `Record user interactions in the browser and output a .test.txt behavior test file.
 
 Captures clicks, form fills, keyboard shortcuts, navigation, and scroll events.
-A recording overlay appears in the browser showing captured steps in real time.
 
-Stop recording with Ctrl+C in the terminal or the "Stop" button in the browser overlay.
+Stop recording with Ctrl+C in the terminal.
+
+The recorder draws nothing into the page. It used to show a panel of captured
+steps, but that panel is part of the page once drawn: it lands in every
+screenshot taken during a capture and in every frame of a session recording
+made at the same time. Pass --overlay to bring it back, along with its own
+Stop button.
 
 Examples:
   atr browser record --url https://example.com --output repro.test.txt
@@ -1201,6 +1207,8 @@ Examples:
 	}
 	cmd.Flags().StringVarP(&recordOutput, "output", "o", "", "Output file path (default: record-<timestamp>.test.txt)")
 	cmd.Flags().StringVar(&recordURL, "url", "", "Initial URL to navigate to")
+	cmd.Flags().BoolVar(&recordOverlay, "overlay", false,
+		"Draw the recorder panel in the page (it appears in screenshots and session recordings)")
 	return cmd
 }
 
@@ -1209,6 +1217,9 @@ func runBrowserRecord(cmd *cobra.Command, args []string) error {
 	body := map[string]interface{}{}
 	if recordURL != "" {
 		body["url"] = recordURL
+	}
+	if recordOverlay {
+		body["overlay"] = true
 	}
 	result, err := apiRequestRaw("POST", "/record/start", body)
 	if err != nil {

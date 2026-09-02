@@ -151,7 +151,7 @@ func TestStartStopRecording(t *testing.T) {
 		t.Fatal("should not be recording initially")
 	}
 
-	err := testBrowser.StartRecording("")
+	err := testBrowser.StartRecording("", false)
 	if err != nil {
 		t.Fatalf("StartRecording failed: %v", err)
 	}
@@ -174,7 +174,7 @@ func TestStartStopRecording(t *testing.T) {
 func TestRecordClick(t *testing.T) {
 	resetFixture(t)
 
-	err := testBrowser.StartRecording("")
+	err := testBrowser.StartRecording("", false)
 	if err != nil {
 		t.Fatalf("StartRecording failed: %v", err)
 	}
@@ -214,7 +214,7 @@ func TestRecordClick(t *testing.T) {
 func TestRecordFill(t *testing.T) {
 	resetFixture(t)
 
-	err := testBrowser.StartRecording("")
+	err := testBrowser.StartRecording("", false)
 	if err != nil {
 		t.Fatalf("StartRecording failed: %v", err)
 	}
@@ -254,7 +254,7 @@ func TestRecordFill(t *testing.T) {
 func TestRecordSurvivesNavigation(t *testing.T) {
 	resetFixture(t)
 
-	err := testBrowser.StartRecording("")
+	err := testBrowser.StartRecording("", false)
 	if err != nil {
 		t.Fatalf("StartRecording failed: %v", err)
 	}
@@ -294,13 +294,13 @@ func TestRecordSurvivesNavigation(t *testing.T) {
 func TestRecordDoubleStart(t *testing.T) {
 	resetFixture(t)
 
-	err := testBrowser.StartRecording("")
+	err := testBrowser.StartRecording("", false)
 	if err != nil {
 		t.Fatalf("first StartRecording failed: %v", err)
 	}
 	defer testBrowser.StopRecording()
 
-	err = testBrowser.StartRecording("")
+	err = testBrowser.StartRecording("", false)
 	if err == nil {
 		t.Fatal("expected error on second StartRecording")
 	}
@@ -313,7 +313,7 @@ func TestStopWhenNotRecording(t *testing.T) {
 	resetFixture(t)
 
 	// Clear any leftover session by starting and stopping
-	testBrowser.StartRecording("")
+	testBrowser.StartRecording("", false)
 	testBrowser.StopRecording()
 	// Clear the inactive session
 	testBrowser.ClearRecording()
@@ -332,7 +332,7 @@ func TestStopWhenNotRecording(t *testing.T) {
 func TestStopIdempotent(t *testing.T) {
 	resetFixture(t)
 
-	err := testBrowser.StartRecording("")
+	err := testBrowser.StartRecording("", false)
 	if err != nil {
 		t.Fatalf("StartRecording failed: %v", err)
 	}
@@ -369,7 +369,7 @@ func TestStopIdempotent(t *testing.T) {
 func TestRecordWithURL(t *testing.T) {
 	resetFixture(t)
 
-	err := testBrowser.StartRecording(testFixtureURL + "/test_fixture.html")
+	err := testBrowser.StartRecording(testFixtureURL+"/test_fixture.html", false)
 	if err != nil {
 		t.Fatalf("StartRecording with URL failed: %v", err)
 	}

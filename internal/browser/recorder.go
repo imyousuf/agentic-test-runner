@@ -33,6 +33,7 @@ type RecordingSession struct {
 	sequence    int
 	startTime   time.Time
 	startURL    string
+	overlay     bool           // draw the in-page panel; off by default
 	stopFuncs   []func() error // page.Expose() cleanup functions
 	removeFuncs []func() error // EvalOnNewDocument cleanup functions
 	doneCh      chan struct{}  // closed when recording stops
@@ -40,7 +41,7 @@ type RecordingSession struct {
 
 // StartRecording begins recording user interactions across all open pages.
 // If initialURL is non-empty, the browser navigates to it first.
-func (b *Browser) StartRecording(initialURL string) error {
+func (b *Browser) StartRecording(initialURL string, overlay bool) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -57,6 +58,7 @@ func (b *Browser) StartRecording(initialURL string) error {
 		events:    make([]RecordedEvent, 0),
 		startTime: time.Now(),
 		startURL:  initialURL,
+		overlay:   overlay,
 		doneCh:    make(chan struct{}),
 	}
 	b.recording = session
@@ -227,7 +229,8 @@ func (b *Browser) injectRecorder(page *rod.Page) {
 	session.mu.Unlock()
 
 	// Register the recorder init script to run on every new document
-	remove, err := page.EvalOnNewDocument(recorderInitScript)
+	script := recorderScript(session.overlay)
+	remove, err := page.EvalOnNewDocument(script)
 	if err == nil {
 		session.mu.Lock()
 		session.removeFuncs = append(session.removeFuncs, remove)
@@ -235,7 +238,7 @@ func (b *Browser) injectRecorder(page *rod.Page) {
 	}
 
 	// Run the recorder immediately on the current document
-	_, _ = page.Eval(`() => { ` + recorderInitScript + ` }`)
+	_, _ = page.Eval(`() => { ` + script + ` }`)
 }
 
 // handleRecorderEvent processes events sent from the JS recorder.
@@ -446,6 +449,19 @@ func describeElement(evt RecordedEvent) string {
 		return label + " field"
 	}
 	return sel
+}
+
+// recorderScript builds the injected script.
+//
+// The overlay is a parameter rather than a constant because it is drawn into
+// the page under test: with it on, every session recording and every
+// screenshot taken during a capture carries a picture of the recorder.
+func recorderScript(overlay bool) string {
+	flag := "false"
+	if overlay {
+		flag = "true"
+	}
+	return "const __ATR_OVERLAY__ = " + flag + ";\n" + recorderInitScript
 }
 
 // recorderInitScript is the JavaScript IIFE injected into every page to capture
@@ -668,6 +684,10 @@ const recorderInitScript = `(function() {
   let stepCount = 0;
 
   function createOverlay() {
+    // Off by default. The panel is drawn into the page being recorded, so it
+    // lands in a session recording's frames and in any screenshot taken while
+    // it is up -- evidence of the tool, in the evidence about the app.
+    if (!__ATR_OVERLAY__) return;
     if (document.getElementById('__atr-recorder-overlay')) return;
     // Wait for body if it doesn't exist yet — poll every 50ms (max 5s)
     if (!document.body) {
@@ -771,6 +791,7 @@ const recorderInitScript = `(function() {
   }
 
   function addOverlayStep(data) {
+    if (!__ATR_OVERLAY__) return;
     if (data.type === 'stop') return;
     stepCount++;
     const countEl = document.getElementById('__atr-recorder-count');
