@@ -106,7 +106,7 @@ func TestAStaleMarkerReadsAsNotRunning(t *testing.T) {
 
 func TestDeleteRefusesARecordingThatIsStillBeingWritten(t *testing.T) {
 	s := newTestStore(t)
-	r, err := Start(s, StartOptions{Source: "live-view"})
+	r, err := Start(s, StartOptions{Title: "a test", Source: "live-view"})
 	if err != nil {
 		t.Fatal(err)
 	}

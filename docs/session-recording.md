@@ -488,7 +488,7 @@ with no manifest, which is what `repair` exists to clean up.
 | Flag | Default | Purpose |
 |---|---|---|
 | `--output`, `-o` | `~/.atr/recordings/<id>/` | The output directory. |
-| `--title` | empty | A label for the list. |
+| `--title` | **required** | What the recording is for. Refused when blank: an untitled recording is a bare timestamp in the library. |
 | `--attach` | discovered | A CDP endpoint. The same order as `atr remote`. |
 | `--quality` | `60` | JPEG quality, 1 to 100. |
 | `--max-width` | `1600` | The largest frame width. |

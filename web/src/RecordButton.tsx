@@ -63,11 +63,13 @@ export function RecordButton({ state, canRecord, reason, onChange, onError }: Pr
           autoFocus
           className="field"
           value={title}
-          placeholder="Name this recording (optional)"
+          placeholder="What is this recording for?"
           onChange={(e) => setTitle(e.target.value)}
           onKeyDown={(e) => e.key === 'Escape' && setAsking(false)}
         />
-        <button type="submit" className="btn rec-btn" disabled={busy}>
+        {/* Required, not optional. An untitled recording is a bare timestamp
+            in the library, and nobody can tell later what it was for. */}
+        <button type="submit" className="btn rec-btn" disabled={busy || title.trim() === ''}>
           <Icon name="record" /> Start
         </button>
         <button type="button" className="btn" onClick={() => setAsking(false)}>

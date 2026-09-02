@@ -54,8 +54,13 @@ func (s *Server) handleRecordStart(w http.ResponseWriter, r *http.Request) {
 	id, err := s.session.Start(body.Title)
 	if err != nil {
 		code := http.StatusInternalServerError
-		if err == ErrAlreadyRecording {
+		switch {
+		case err == ErrAlreadyRecording:
 			code = http.StatusConflict
+		case strings.Contains(err.Error(), "needs a title"):
+			// The caller's mistake, not the server's. record.Start owns the
+			// rule; this only reports it with the right status.
+			code = http.StatusBadRequest
 		}
 		writeJSON(w, code, map[string]string{"error": err.Error()})
 		return

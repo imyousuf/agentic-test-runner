@@ -64,7 +64,7 @@ func TestRecorderWritesTheLogJournalInOrder(t *testing.T) {
 // it happened on the recording clock, not where the recorder got to it.
 func TestALineFromBeforeTheRecordingLandsAtZero(t *testing.T) {
 	s := newTestStore(t)
-	r, err := Start(s, StartOptions{Browser: "Chrome/1"})
+	r, err := Start(s, StartOptions{Title: "a test", Browser: "Chrome/1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +86,7 @@ func TestALineFromBeforeTheRecordingLandsAtZero(t *testing.T) {
 
 func TestEveryRecordingCarriesADevToolsBlock(t *testing.T) {
 	s := newTestStore(t)
-	r, err := Start(s, StartOptions{Browser: "Chrome/1"})
+	r, err := Start(s, StartOptions{Title: "a test", Browser: "Chrome/1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +108,7 @@ func TestEveryRecordingCarriesADevToolsBlock(t *testing.T) {
 
 func TestAnErrorBecomesATimelineMark(t *testing.T) {
 	s := newTestStore(t)
-	r, err := Start(s, StartOptions{Browser: "Chrome/1"})
+	r, err := Start(s, StartOptions{Title: "a test", Browser: "Chrome/1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,7 +158,7 @@ func TestAnErrorBecomesATimelineMark(t *testing.T) {
 
 func TestRepeatedFailuresCollapseIntoOneMark(t *testing.T) {
 	s := newTestStore(t)
-	r, err := Start(s, StartOptions{Browser: "Chrome/1"})
+	r, err := Start(s, StartOptions{Title: "a test", Browser: "Chrome/1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,7 +193,7 @@ func TestRepeatedFailuresCollapseIntoOneMark(t *testing.T) {
 // Far enough apart is not a repeat. The same error an hour later is news.
 func TestTheSameErrorOutsideTheWindowIsANewMark(t *testing.T) {
 	s := newTestStore(t)
-	r, err := Start(s, StartOptions{Browser: "Chrome/1"})
+	r, err := Start(s, StartOptions{Title: "a test", Browser: "Chrome/1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -214,7 +214,7 @@ func TestTheSameErrorOutsideTheWindowIsANewMark(t *testing.T) {
 
 func TestTheLogStopsAtItsSizeCap(t *testing.T) {
 	s := newTestStore(t)
-	r, err := Start(s, StartOptions{
+	r, err := Start(s, StartOptions{Title: "a test",
 		Browser: "Chrome/1",
 		Limits:  Limits{MaxLog: 400},
 	})
@@ -282,7 +282,7 @@ func TestADropLineCountsWhatItReports(t *testing.T) {
 
 func TestRepairRebuildsTheMarksFromTheLog(t *testing.T) {
 	s := newTestStore(t)
-	r, err := Start(s, StartOptions{Browser: "Chrome/1"})
+	r, err := Start(s, StartOptions{Title: "a test", Browser: "Chrome/1"})
 	if err != nil {
 		t.Fatal(err)
 	}

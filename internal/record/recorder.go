@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"image/jpeg"
 	"os"
+	"strings"
 	"sync"
 	"time"
 )
@@ -127,6 +128,22 @@ type StartOptions struct {
 
 // Start creates a recording directory and begins accepting frames.
 func Start(store *Store, so StartOptions) (*Recorder, error) {
+	/*
+		A recording has to say what it is for.
+
+		Enforced here rather than in each caller, so the CLI, the live view's
+		button and anything added later inherit one rule. An untitled recording
+		gets an id that is only a timestamp, and a library of those cannot be
+		read: the one thing you want to know when you come back -- which run
+		was this? -- is the one thing that was never written down. A model
+		driving ATR will skip an optional field every time.
+	*/
+	so.Title = strings.TrimSpace(so.Title)
+	if so.Title == "" {
+		return nil, fmt.Errorf("a recording needs a title: say what it is for, " +
+			"or it lands in the library as a bare timestamp")
+	}
+
 	now := time.Now()
 	id := NewID(now, so.Title)
 	dir, err := store.Create(id)

@@ -7,6 +7,7 @@ import (
 	"image/jpeg"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -72,7 +73,7 @@ func TestRecorderWritesFramesAndAManifest(t *testing.T) {
 
 func TestStopIsSafeToCallTwice(t *testing.T) {
 	s := newTestStore(t)
-	r, err := Start(s, StartOptions{})
+	r, err := Start(s, StartOptions{Title: "a test"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +94,7 @@ func TestStopIsSafeToCallTwice(t *testing.T) {
 
 func TestARecordingWithNoFrameIsAnErrorThatSaysWhy(t *testing.T) {
 	s := newTestStore(t)
-	r, err := Start(s, StartOptions{})
+	r, err := Start(s, StartOptions{Title: "a test"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +105,7 @@ func TestARecordingWithNoFrameIsAnErrorThatSaysWhy(t *testing.T) {
 
 func TestKeepLastDropsTheOldestFramesFromDisk(t *testing.T) {
 	s := newTestStore(t)
-	r, err := Start(s, StartOptions{Limits: Limits{KeepLast: 50 * time.Millisecond}})
+	r, err := Start(s, StartOptions{Title: "a test", Limits: Limits{KeepLast: 50 * time.Millisecond}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -144,7 +145,7 @@ func TestKeepLastDropsTheOldestFramesFromDisk(t *testing.T) {
 
 func TestARunOfIdenticalFramesSharesOneFile(t *testing.T) {
 	s := newTestStore(t)
-	r, err := Start(s, StartOptions{})
+	r, err := Start(s, StartOptions{Title: "a test"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,7 +180,7 @@ func TestARunOfIdenticalFramesSharesOneFile(t *testing.T) {
 
 func TestTheRingKeepsAFileWhileAnyFramePointsAtIt(t *testing.T) {
 	s := newTestStore(t)
-	r, err := Start(s, StartOptions{Limits: Limits{KeepLast: 60 * time.Millisecond}})
+	r, err := Start(s, StartOptions{Title: "a test", Limits: Limits{KeepLast: 60 * time.Millisecond}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -204,7 +205,7 @@ func TestTheRingKeepsAFileWhileAnyFramePointsAtIt(t *testing.T) {
 
 func TestMaxSizeWithNoWindowStopsTheRecording(t *testing.T) {
 	s := newTestStore(t)
-	r, err := Start(s, StartOptions{Limits: Limits{MaxSize: 1200}})
+	r, err := Start(s, StartOptions{Title: "a test", Limits: Limits{MaxSize: 1200}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -230,7 +231,7 @@ func TestMaxSizeWithNoWindowStopsTheRecording(t *testing.T) {
 
 func TestWriteNeverBlocksAndCountsWhatItDrops(t *testing.T) {
 	s := newTestStore(t)
-	r, err := Start(s, StartOptions{})
+	r, err := Start(s, StartOptions{Title: "a test"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -259,4 +260,44 @@ func TestWriteNeverBlocksAndCountsWhatItDrops(t *testing.T) {
 		t.Errorf("%d written + %d dropped != %d offered",
 			len(m.Frames), m.Dropped, queueDepth*3)
 	}
+}
+
+/*
+A recording has to say what it is for.
+
+The library had entries like "20260901-071213" -- a bare timestamp, no title,
+no slug -- and there is no way to tell later which run that was. The rule lives
+in Start rather than in each caller so that the CLI, the live view's button and
+anything added later all inherit it, and so that a model driving ATR cannot
+skip it the way it skips every optional field.
+*/
+func TestStartNeedsATitle(t *testing.T) {
+	store, err := NewStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, blank := range []string{"", "   ", "\t\n"} {
+		if _, err := Start(store, StartOptions{Title: blank}); err == nil {
+			t.Errorf("a title of %q was accepted", blank)
+		} else if !strings.Contains(err.Error(), "needs a title") {
+			t.Errorf("title %q refused for the wrong reason: %v", blank, err)
+		}
+	}
+
+	// Nothing was created for the ones that were refused.
+	entries, _ := os.ReadDir(store.Root())
+	for _, e := range entries {
+		t.Errorf("a refused recording left %s behind", e.Name())
+	}
+
+	// And a real title still works, with the surrounding space taken off.
+	rec, err := Start(store, StartOptions{Title: "  Checkout flow  "})
+	if err != nil {
+		t.Fatalf("a titled recording was refused: %v", err)
+	}
+	if !strings.HasSuffix(rec.ID(), "-checkout-flow") {
+		t.Errorf("id %q does not carry the title", rec.ID())
+	}
+	_, _ = rec.Stop()
 }

@@ -30,7 +30,7 @@ func TestTheSinkMarksATabChangeAndANavigation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rec, err := record.Start(store, record.StartOptions{})
+	rec, err := record.Start(store, record.StartOptions{Title: "a test"})
 	if err != nil {
 		t.Fatal(err)
 	}

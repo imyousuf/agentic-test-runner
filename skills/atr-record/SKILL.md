@@ -36,7 +36,7 @@ Run a flow, then ask the recording what went wrong.
 # 1. Check it will work here. Exits 0 or 1.
 atr record doctor || exit 1
 
-# 2. Start. It returns immediately and prints the id.
+# 2. Start. --title is required. It returns immediately and prints the id.
 ID=$(atr record start --quiet --title "checkout repro")
 
 # 3. Drive the browser as usual: atr browser navigate/click/fill ...
@@ -55,6 +55,10 @@ immediately, with no sleep.
 
 Use `--quiet` when capturing the id. The friendly output contains a `PID:` line,
 and `PID:` contains `ID:`, so a naive grep picks up both.
+
+**`--title` is required, and it is not a formality.** Say what the run is for --
+"checkout 500 repro", not "test". You are writing it for whoever opens the
+library in a fortnight, which is usually you.
 
 ## Commands
 
@@ -77,7 +81,7 @@ by accident.
 
 | Flag | Default | Why |
 |---|---|---|
-| `--title` | empty | Always set one, or `atr record list` is unreadable |
+| `--title` | **required** | What the recording is for. There is no default: an untitled recording is a bare timestamp nobody can identify later |
 | `--quiet`, `-q` | off | Print only the id, for `ID=$(...)` |
 | `--foreground` | off | Hold the terminal and stop on Ctrl+C instead |
 | `--max-duration` | `30m` | The safety net. A caller that forgets to stop still terminates |

@@ -83,19 +83,22 @@ Examples:
   atr record stop
 
   # Record one tab and never pull it to the front
-  atr record start --policy pin
+  atr record start --title "Checkout flow" --policy pin
 
   # Hold this terminal, and stop with Ctrl+C
-  atr record start --foreground
+  atr record start --title "Checkout flow" --foreground
 
   # Keep the id for later
-  ID=$(atr record start --quiet)`,
+  ID=$(atr record start --title "Checkout flow" --quiet)`,
 		Args: cobra.NoArgs,
 		RunE: runRecordStart,
 	}
 
 	cmd.Flags().StringP("output", "o", "", "Recordings directory (default: ~/.atr/recordings)")
-	cmd.Flags().String("title", "", "A name for this recording")
+	cmd.Flags().String("title", "", "What this recording is for (required)")
+	// Required, not defaulted. An untitled recording is a bare timestamp in
+	// the library, and a model driving ATR skips an optional field every time.
+	_ = cmd.MarkFlagRequired("title")
 	cmd.Flags().String("attach", "", "CDP endpoint, such as cdp://127.0.0.1:9222")
 	cmd.Flags().Int("quality", 60, "JPEG quality, 1 to 100")
 	cmd.Flags().Int("max-width", 1600, "Largest frame width")
