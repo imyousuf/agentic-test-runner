@@ -53,7 +53,6 @@ type Streamer struct {
 	seq      int
 	lastAt   time.Time
 	lastBeat time.Time
-	lastType time.Time
 	live     bool
 	closed   bool
 	// switching is true while stream() is between tearing the old stream down
@@ -66,6 +65,10 @@ type Streamer struct {
 
 	// drag is the HTML5 drag Chrome handed back, if one is in flight.
 	drag *dragSession
+
+	// actionStops detach the interaction capture from the page it is on, so
+	// the bindings do not pile up one per tab switch.
+	actionStops []func()
 
 	// redactQuery strips the query string from every URL the log keeps.
 	redactQuery bool
@@ -471,6 +474,10 @@ func (s *Streamer) stream(page *rod.Page) error {
 	// The tap rides the same bound page, so it starts with the stream and dies
 	// with it. A tab switch therefore moves the log along with the pixels.
 	s.startTap(bound, string(page.TargetID))
+	// The same for what a person or an agent does. Detached first, or a tab
+	// switch would leave the previous page's binding behind.
+	s.stopActions()
+	s.startActions(bound, string(page.TargetID))
 
 	go bound.EachEvent(func(e *proto.PageScreencastFrame) {
 		// Acknowledge at once. Chrome stops the stream without this, and it

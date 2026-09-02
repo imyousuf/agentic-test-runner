@@ -3,21 +3,9 @@ package remote
 import (
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/go-rod/rod/lib/proto"
 )
-
-// typeBurst is the pause that ends one stretch of typing.
-//
-// A timeline mark per keystroke would be a wall of marks and would say
-// nothing. One mark per burst says "somebody typed here", which is the thing a
-// person is looking for.
-const typeBurst = 1500 * time.Millisecond
-
-// markedKeys are the keys worth a mark of their own. Enter is where a form is
-// sent, and that is usually the moment somebody is scrubbing to find.
-var markedKeys = map[string]bool{"Enter": true, "Tab": true, "Escape": true}
 
 // Modifier bits, as CDP defines them.
 const (
@@ -173,9 +161,9 @@ func (s *Streamer) Mouse(m MouseMsg) error {
 	if err := ev.Call(page); err != nil {
 		return fmt.Errorf("failed to dispatch the mouse event: %w", err)
 	}
-	if kind == proto.InputDispatchMouseEventTypeMousePressed {
-		s.act(Action{Kind: "click", Detail: m.Button})
-	}
+	// No mark here. The capture script sees this click as a DOM event, along
+	// with every click a viewer did not make, so marking it here too would
+	// count a viewer's clicks twice and an agent's not at all.
 	return nil
 }
 
@@ -243,32 +231,7 @@ func (s *Streamer) Key(k KeyMsg) error {
 	if err := ev.Call(page); err != nil {
 		return fmt.Errorf("failed to dispatch the key event: %w", err)
 	}
-	if kind == proto.InputDispatchKeyEventTypeKeyDown {
-		s.markKey(k)
-	}
 	return nil
-}
-
-// markKey puts a key on the timeline of any recording that is running.
-//
-// It marks a named key straight away, and it marks a stretch of typing once,
-// on the first character after a pause.
-func (s *Streamer) markKey(k KeyMsg) {
-	if markedKeys[k.Key] {
-		s.act(Action{Kind: "key", Detail: k.Key})
-		return
-	}
-	if k.Text == "" {
-		return
-	}
-	now := time.Now()
-	s.mu.Lock()
-	fresh := now.Sub(s.lastType) > typeBurst
-	s.lastType = now
-	s.mu.Unlock()
-	if fresh {
-		s.act(Action{Kind: "type"})
-	}
 }
 
 // Text inserts a string in one step. Use it for a paste.

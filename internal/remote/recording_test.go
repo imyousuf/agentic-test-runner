@@ -5,7 +5,6 @@ import (
 	"image"
 	"image/jpeg"
 	"testing"
-	"time"
 
 	"github.com/imyousuf/agentic-test-runner/internal/record"
 )
@@ -73,50 +72,3 @@ type actorSink struct{ acts []Action }
 func (a *actorSink) Frame(*Frame)      {}
 func (a *actorSink) Text([]byte)       {}
 func (a *actorSink) Action(act Action) { a.acts = append(a.acts, act) }
-
-// One mark per burst, not one per letter. A typed word would otherwise bury the
-// timeline, and the marks that matter with it.
-func TestATypingBurstBecomesOneMark(t *testing.T) {
-	s := NewStreamer(Options{})
-	sink := &actorSink{}
-	s.AddSink(sink)
-
-	for _, r := range "hello" {
-		s.markKey(KeyMsg{Key: string(r), Text: string(r)})
-	}
-	if len(sink.acts) != 1 || sink.acts[0].Kind != "type" {
-		t.Fatalf("acts = %+v, want one type", sink.acts)
-	}
-
-	// A key with a name of its own is a decision, so it is always marked.
-	s.markKey(KeyMsg{Key: "Enter"})
-	s.markKey(KeyMsg{Key: "Escape"})
-	if len(sink.acts) != 3 {
-		t.Fatalf("acts = %+v, want the two named keys as well", sink.acts)
-	}
-	if sink.acts[1].Detail != "Enter" || sink.acts[2].Detail != "Escape" {
-		t.Errorf("named keys lost their name: %+v", sink.acts[1:])
-	}
-
-	// A key that types nothing and has no name of its own says nothing.
-	s.markKey(KeyMsg{Key: "Shift"})
-	if len(sink.acts) != 3 {
-		t.Errorf("a modifier produced a mark: %+v", sink.acts)
-	}
-
-	// A new burst after the gap is a new mark.
-	s.mu.Lock()
-	s.lastType = time.Now().Add(-typeBurst - time.Second)
-	s.mu.Unlock()
-	s.markKey(KeyMsg{Key: "x", Text: "x"})
-	if len(sink.acts) != 4 || sink.acts[3].Kind != "type" {
-		t.Fatalf("acts = %+v, want a second type", sink.acts)
-	}
-
-	// The typed text is never kept. A password is typed exactly like a search.
-	for _, a := range sink.acts {
-		if a.Kind == "type" && a.Detail != "" {
-			t.Errorf("a type mark carried %q", a.Detail)
-		}
-	}
-}

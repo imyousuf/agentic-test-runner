@@ -457,25 +457,51 @@ func describeElement(evt RecordedEvent) string {
 // the page under test: with it on, every session recording and every
 // screenshot taken during a capture carries a picture of the recorder.
 func recorderScript(overlay bool) string {
+	return CaptureScript(defaultBinding, overlay)
+}
+
+// defaultBinding is the JS→Go function name "atr browser record" exposes.
+const defaultBinding = "__atrRecordEvent"
+
+/*
+CaptureScript builds the interaction capture script.
+
+The binding name is a parameter so that two consumers can capture from the same
+page at once without fighting over one global. "atr browser record" writes a
+spec; the live view's recorder puts the same interactions on a session
+timeline. They see the same DOM events because there is only one script that
+knows how to read them -- selectors, shadow DOM, click de-duplication and
+password masking are hard enough once.
+
+The events it reports are described on RecordedEvent.
+*/
+func CaptureScript(binding string, overlay bool) string {
 	flag := "false"
 	if overlay {
 		flag = "true"
 	}
-	return "const __ATR_OVERLAY__ = " + flag + ";\n" + recorderInitScript
+	script := strings.ReplaceAll(recorderInitScript, "__ATR_BINDING__", binding)
+	script = strings.ReplaceAll(script, "__ATR_ATTACHED__", "__atrAttached_"+binding)
+	// Substituted as a literal rather than declared. The script is injected
+	// twice on purpose -- once for new documents, once for the one already
+	// loaded -- and a top-level "const" made the second injection die with
+	// "Identifier ... has already been declared", which the recording then
+	// reported as an error in the page under test.
+	return strings.ReplaceAll(script, "__ATR_OVERLAY__", flag)
 }
 
 // recorderInitScript is the JavaScript IIFE injected into every page to capture
 // user interactions and render the recording overlay.
 const recorderInitScript = `(function() {
   // Guard: only activate if the Go bridge function exists
-  if (typeof window.__atrRecordEvent !== 'function') return;
+  if (typeof window.__ATR_BINDING__ !== 'function') return;
   // Guard: don't attach event listeners twice
-  if (window.__atrRecorderListenersAttached) {
+  if (window.__ATR_ATTACHED__) {
     // But DO retry overlay creation if it's missing
     if (!document.getElementById('__atr-recorder-overlay')) createOverlay();
     return;
   }
-  window.__atrRecorderListenersAttached = true;
+  window.__ATR_ATTACHED__ = true;
 
   // --- Selector Generation ---
   function generateSelector(el) {
@@ -668,7 +694,7 @@ const recorderInitScript = `(function() {
     data.url = location.href;
     data.pageTitle = document.title;
     try {
-      window.__atrRecordEvent(data);
+      window.__ATR_BINDING__(data);
     } catch(e) { /* binding may be gone during navigation */ }
     // Update overlay
     addOverlayStep(data);
