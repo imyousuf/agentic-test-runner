@@ -22,7 +22,7 @@ func newTestServer(t *testing.T, viewOnly bool) (*Server, *record.Store) {
 		t.Fatal(err)
 	}
 	streamer := NewStreamer(Options{})
-	s := NewServer(NewHub(), streamer, fstest.MapFS{}, "", viewOnly)
+	s := NewServer(NewHub(), streamer, fstest.MapFS{}, viewOnly)
 	return s.WithSession(NewSession(store, streamer, record.Limits{}, false)), store
 }
 
@@ -160,7 +160,7 @@ func TestRecordStatusIsIdleUntilSomebodyPressesRecord(t *testing.T) {
 
 func TestAServerWithNoSessionServesNoRecordingRoutes(t *testing.T) {
 	streamer := NewStreamer(Options{})
-	s := NewServer(NewHub(), streamer, fstest.MapFS{}, "", false)
+	s := NewServer(NewHub(), streamer, fstest.MapFS{}, false)
 	for _, path := range []string{"/api/recordings", "/api/record/status"} {
 		if w := do(t, s, http.MethodGet, path, ""); w.Code == http.StatusOK {
 			t.Errorf("GET %s returned 200 without a session", path)

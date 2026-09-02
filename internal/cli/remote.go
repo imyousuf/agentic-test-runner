@@ -23,10 +23,8 @@ func newRemoteCmd() *cobra.Command {
 	var (
 		port     int
 		bind     string
-		token    string
 		attach   string
 		viewOnly bool
-		noToken  bool
 		quality  int
 		maxWidth int
 		fps      int
@@ -55,38 +53,16 @@ Examples:
   # Watch without the ability to click
   atr remote --view-only`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			// Whether the operator supplied a token has to be captured before
-			// one is generated, or the non-loopback check below can never fire.
-			supplied := token != "" || os.Getenv("ATR_REMOTE_TOKEN") != ""
-			if noToken && supplied {
-				return fmt.Errorf("--no-token and --token ask for opposite things")
-			}
-			if token == "" {
-				token = os.Getenv("ATR_REMOTE_TOKEN")
-			}
-			// An empty token is what the server reads as "no authentication",
-			// so this is the whole of --no-token.
-			if token == "" && !noToken {
-				token = remote.NewToken()
-			}
-			if noToken {
-				fmt.Fprintf(os.Stderr,
-					"Warning: serving with no token. Anyone who can reach %s:%d has full "+
-						"control of the browser and its logged-in sessions. Put "+
-						"authentication in front of it, or keep the port private.\n", bind, port)
-			}
-			if !isLoopback(bind) && !supplied && !noToken {
-				return fmt.Errorf(
-					"refusing to bind %s with a generated token.\n"+
-						"A viewer gets full control of the browser and its cookies, and the token "+
-						"would travel in a URL over plaintext HTTP.\n"+
-						"Prefer an SSH tunnel to 127.0.0.1, or pass --token / ATR_REMOTE_TOKEN "+
-						"explicitly to confirm you intend this", bind)
-			}
+			// The live view authenticates nobody. On a laptop the loopback bind
+			// is the boundary; anywhere else it has to be supplied around this
+			// process, so binding wider says so out loud.
 			if !isLoopback(bind) {
 				fmt.Fprintf(os.Stderr,
-					"Warning: bound to %s. Anyone who can reach this port and the token has "+
-						"full control of the browser. Prefer an SSH tunnel.\n", bind)
+					"Warning: bound to %s with no authentication. Anyone who can reach "+
+						"port %d has full control of the browser and everything it is "+
+						"logged in to.\n"+
+						"Put a proxy or an SSH tunnel in front of it, or keep the port "+
+						"private.\n", bind, port)
 			}
 
 			cdpURL, err := remote.Discover(attach)
@@ -121,7 +97,7 @@ Examples:
 			go streamer.Watch(ctx)
 			go streamer.Heartbeat(ctx, 5*time.Second)
 
-			server := remote.NewServer(hub, streamer, assets, token, viewOnly)
+			server := remote.NewServer(hub, streamer, assets, viewOnly)
 
 			// Recording is off. The session only gives the page the ability to
 			// start one, and to browse what was recorded before.
@@ -145,13 +121,7 @@ Examples:
 
 			pages, _ := streamer.Pages()
 			fmt.Println("ATR live view")
-			// With no token there is nothing to append, and printing "?t=" would
-			// have somebody paste a URL that looks half copied.
-			if token == "" {
-				fmt.Printf("  URL:     http://%s/\n", addr)
-			} else {
-				fmt.Printf("  URL:     http://%s/?t=%s\n", addr, token)
-			}
+			fmt.Printf("  URL:     http://%s/\n", addr)
 			fmt.Printf("  Browser: %s  (attached, not owned)\n", streamer.Version())
 			fmt.Printf("  Pages:   %d\n", len(pages))
 			if viewOnly {
@@ -189,9 +159,6 @@ Examples:
 
 	cmd.Flags().IntVar(&port, "port", 7788, "HTTP port")
 	cmd.Flags().StringVar(&bind, "bind", "127.0.0.1", "Listen address")
-	cmd.Flags().StringVar(&token, "token", "", "Access token (or set ATR_REMOTE_TOKEN)")
-	cmd.Flags().BoolVar(&noToken, "no-token", false,
-		"Serve with no token; authentication becomes the host's job")
 	cmd.Flags().StringVar(&attach, "attach", "", "CDP endpoint, such as cdp://127.0.0.1:9222")
 	cmd.Flags().BoolVar(&viewOnly, "view-only", false, "Refuse input from viewers")
 	cmd.Flags().IntVar(&quality, "quality", 60, "JPEG quality, 1 to 100")
@@ -223,7 +190,9 @@ func newRemoteSetupCmd() *cobra.Command {
 		Long: `Install a service that keeps the live view running.
 
 The command writes a systemd user unit on Linux, or a launchd agent on macOS.
-It also generates an access token and stores it with owner-only permissions.
+
+The service authenticates nobody, so it binds 127.0.0.1 by default. Reach it
+from elsewhere over an SSH tunnel, or put a proxy in front of it.
 
 It does not install a browser. The browser belongs to ATR itself, and the live
 view attaches to whichever one ATR is driving.
@@ -232,7 +201,7 @@ Examples:
   atr remote setup                 # install, enable, and print the URL
   atr remote setup --check         # report the state, change nothing
   atr remote setup --port 9000     # use another port
-  atr remote setup --uninstall     # remove the service, keep the token`,
+  atr remote setup --uninstall     # remove the service`,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			switch {
 			case check:
@@ -242,17 +211,7 @@ Examples:
 				fmt.Printf("  File:      %s\n", path)
 				fmt.Printf("  Installed: %t\n", installed)
 				fmt.Printf("  Running:   %t\n", running)
-				token, tokenPath, found, err := remote.LookupToken()
-				if err != nil {
-					return err
-				}
-				if !found {
-					fmt.Printf("  Token:     none yet (%s)\n", tokenPath)
-					fmt.Println("  URL:       run \"atr remote setup\" to generate one")
-					return nil
-				}
-				fmt.Printf("  Token:     %s\n", tokenPath)
-				fmt.Printf("  URL:       http://%s:%d/?t=%s\n", bind, port, token)
+				fmt.Printf("  URL:       http://%s:%d/\n", bind, port)
 				return nil
 
 			case uninstall:
@@ -262,7 +221,6 @@ Examples:
 				}
 				fmt.Println("Removed the live view service.")
 				fmt.Printf("  File: %s\n", path)
-				fmt.Println("  The token is kept, so a later setup gives the same URL.")
 				return nil
 			}
 
@@ -274,7 +232,6 @@ Examples:
 			fmt.Println("ATR live view installed")
 			fmt.Printf("  Platform: %s\n", result.Platform)
 			fmt.Printf("  Service:  %s\n", result.ServicePath)
-			fmt.Printf("  Token:    %s\n", result.TokenPath)
 			fmt.Printf("  URL:      %s\n", result.URL)
 			for _, note := range result.Notes {
 				fmt.Printf("\n%s\n", note)

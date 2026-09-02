@@ -2,17 +2,13 @@ package remote
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/subtle"
 	"encoding/binary"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io/fs"
 	"net"
 	"net/http"
 	"net/url"
-	"strings"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -35,26 +31,28 @@ type Server struct {
 	streamer *Streamer
 	session  *Session // nil when this server cannot record or browse recordings
 	assets   fs.FS
-	token    string
 	viewOnly bool
 	upgrader websocket.Upgrader
 }
 
-// NewToken makes a random token for a session that did not supply one.
-func NewToken() string {
-	buf := make([]byte, 16)
-	if _, err := rand.Read(buf); err != nil {
-		return "atr-live-view"
-	}
-	return hex.EncodeToString(buf)
-}
+/*
+NewServer builds the live view.
 
-func NewServer(hub *Hub, streamer *Streamer, assets fs.FS, token string, viewOnly bool) *Server {
+It authenticates nobody. The live view used to mint a token and put it in the
+URL, and that cost more than it bought: the token changed on every restart, so
+the URL people had bookmarked and the cookie their browser was holding both
+went stale at once, and the symptom was a page that worked a minute ago
+answering 401.
+
+Authentication belongs to whoever is running this. On a laptop that is the
+loopback bind. Anywhere else it is a reverse proxy, an SSO gateway, an SSH
+tunnel, or a port that is simply not published.
+*/
+func NewServer(hub *Hub, streamer *Streamer, assets fs.FS, viewOnly bool) *Server {
 	s := &Server{
 		hub:      hub,
 		streamer: streamer,
 		assets:   assets,
-		token:    token,
 		viewOnly: viewOnly,
 	}
 	s.upgrader = websocket.Upgrader{
@@ -89,35 +87,6 @@ func (s *Server) checkOrigin(r *http.Request) bool {
 	return host == "127.0.0.1" || host == "localhost" || host == "[::1]" || host == "::1"
 }
 
-const cookieName = "atr_remote"
-
-func (s *Server) matches(value string) bool {
-	return subtle.ConstantTimeCompare([]byte(value), []byte(s.token)) == 1
-}
-
-// authorized reports whether the request carries the token. The token can
-// arrive in three ways, and all three are needed: the header suits an API
-// client, the query parameter suits the first click on a printed URL, and the
-// cookie suits everything the page loads afterwards, because a stylesheet
-// request carries no query string.
-func (s *Server) authorized(r *http.Request) bool {
-	if s.token == "" {
-		return true
-	}
-	if h := r.Header.Get("Authorization"); strings.HasPrefix(h, "Bearer ") {
-		if s.matches(strings.TrimPrefix(h, "Bearer ")) {
-			return true
-		}
-	}
-	if s.matches(r.URL.Query().Get("t")) {
-		return true
-	}
-	if c, err := r.Cookie(cookieName); err == nil && s.matches(c.Value) {
-		return true
-	}
-	return false
-}
-
 // Handler builds the routes.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
@@ -128,24 +97,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/ws", s.handleWS)
 	mux.Handle("/", http.FileServer(http.FS(s.assets)))
 
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !s.authorized(r) {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-		// Hand the page a cookie, so its stylesheet and script requests are
-		// authorised too.
-		if s.token != "" && s.matches(r.URL.Query().Get("t")) {
-			http.SetCookie(w, &http.Cookie{
-				Name:     cookieName,
-				Value:    s.token,
-				Path:     "/",
-				HttpOnly: true,
-				SameSite: http.SameSiteStrictMode,
-			})
-		}
-		mux.ServeHTTP(w, r)
-	})
+	return mux
 }
 
 func writeJSON(w http.ResponseWriter, code int, body any) {
@@ -174,7 +126,7 @@ func (s *Server) handleSelect(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleNavigate(w http.ResponseWriter, r *http.Request) {
 	// The WebSocket path is not the only way in: a read-only server has to
-	// refuse here too, or the token alone is enough to drive the browser.
+	// refuse here too, or reaching the port at all is enough to drive it.
 	if s.viewOnly {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": ErrViewOnly.Error()})
 		return

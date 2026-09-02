@@ -106,9 +106,8 @@ export function useLiveView() {
   }, []);
 
   useEffect(() => {
-    const token = new URLSearchParams(location.search).get('t') ?? '';
     const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
-    const ws = new WebSocket(`${scheme}://${location.host}/ws?t=${encodeURIComponent(token)}`);
+    const ws = new WebSocket(`${scheme}://${location.host}/ws`);
     ws.binaryType = 'arraybuffer';
     socket.current = ws;
 

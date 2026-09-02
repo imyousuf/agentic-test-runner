@@ -190,7 +190,6 @@ atr remote [flags]
 |---|---|---|
 | `--port` | `7788` | The HTTP port. |
 | `--bind` | `127.0.0.1` | The listen address. |
-| `--token` | from `ATR_REMOTE_TOKEN` | The access token. One is generated when empty. |
 | `--attach` | discovered | A CDP endpoint. |
 | `--start` | `false` | Launch a browser when none runs. |
 | `--view-only` | `false` | Drop all input on the server. |
@@ -230,7 +229,6 @@ atr remote setup [flags]
 | `--uninstall` | `false` | Remove the service. Keep the token. |
 
 Setup installs a systemd user unit on Linux, or a launchd agent on macOS. It also writes a
-token to `~/.atr/remote.env` with mode 0600, so the URL does not change between restarts.
 
 Setup does not look for a browser, and it does not install one. The browser belongs to ATR
 itself. Setup also never runs `sudo`: a Linux user service needs lingering to survive a
@@ -278,7 +276,6 @@ control of that browser.
 atr remote setup --check                  # the URL, the token, and the service state
 systemctl --user restart atr-remote       # Linux, after the browser restarts
 journalctl --user -u atr-remote -f        # Linux, follow the log
-grep ATR_REMOTE_TOKEN ~/.atr/remote.env      # recover the token
 ```
 
 ### When something looks wrong
@@ -397,25 +394,28 @@ No server-side keymap edit is needed. This is far simpler than X11.
 
 A viewer gets full control of a browser and its cookies.
 
+**The live view authenticates nobody.** It used to mint a token and put it in
+the URL. That cost more than it bought: the token changed on every restart, so
+the URL people had bookmarked and the cookie their browser was holding both
+went stale at once, and the symptom was a page that worked a minute ago
+answering 401.
+
+The boundary is now where the process can be reached from:
+
 - Bind `127.0.0.1` by default. Reach it through an SSH tunnel.
-- Require a token. Generate one at start when none is given, and print it in the URL.
-- Accept the token as a `Bearer` header, or once as a WebSocket query parameter.
-- Refuse a non-loopback bind when the token is empty.
-- Check the `Origin` header on the upgrade.
-- `--view-only` drops input on the server, not in the client.
-- Accept the token as a `Bearer` header, a query parameter, or a cookie.
-- Refuse a non-loopback bind unless the operator supplied a token explicitly. A
-  generated token is easy to miss in a service log, and it travels in a URL over
-  plaintext HTTP.
-- Check the `Origin` header on the upgrade.
+- A non-loopback bind warns, loudly, on the way up. It is allowed: anywhere
+  that needs it is a deployment, and a deployment supplies its own
+  authentication -- a reverse proxy, an SSO gateway, or a private network.
+- Check the `Origin` header on the upgrade, so a page on another origin cannot
+  open the socket from a browser that can reach the port.
 - `--view-only` refuses *input to the page* -- mouse, wheel, key, text, and
   navigate -- in the `Streamer`, so the REST endpoints and the WebSocket both
-  inherit it rather than each keeping their own list.
+  inherit it rather than each keeping their own list. It is now the only guard
+  inside ATR.
 - Switching the streamed tab and setting the foreground policy are viewer
   controls and remain available in view-only mode. Selecting a tab does call
   `Page.bringToFront`, so a read-only viewer can still change which tab is in
   the foreground of the session it is watching.
-- Store the token owner-only: `~/.atr/remote.env` and the launchd plist are both `0600`.
 
 ## 11. Package layout
 

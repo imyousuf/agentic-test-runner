@@ -196,25 +196,3 @@ func buildATR(t *testing.T) string {
 	}
 	return exe
 }
-
-// --no-token is how a hosted deployment says "authentication is mine". It has
-// to be reachable, and it has to refuse the contradiction, because a token
-// silently winning over --no-token is an unguarded browser nobody meant.
-func TestRemoteNoTokenFlag(t *testing.T) {
-	cmd := newRemoteCmd()
-	if cmd.Flags().Lookup("no-token") == nil {
-		t.Fatal("atr remote has no --no-token")
-	}
-
-	out := &bytes.Buffer{}
-	cmd.SetOut(out)
-	cmd.SetErr(out)
-	cmd.SetArgs([]string{"--no-token", "--token", "sekret"})
-	err := cmd.Execute()
-	if err == nil {
-		t.Fatal("--no-token together with --token was accepted")
-	}
-	if !strings.Contains(err.Error(), "opposite") {
-		t.Errorf("unclear message: %v", err)
-	}
-}

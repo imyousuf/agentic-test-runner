@@ -8,60 +8,19 @@ import (
 	"testing/fstest"
 )
 
-func testServer(t *testing.T, token string, viewOnly bool) *Server {
+func testServer(t *testing.T, viewOnly bool) *Server {
 	t.Helper()
 	hub := NewHub()
 	streamer := NewStreamer(Options{ViewOnly: viewOnly})
 	streamer.AddSink(hub)
 	assets := fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("ok")}}
-	return NewServer(hub, streamer, assets, token, viewOnly)
-}
-
-// The token is the only thing standing between a viewer and full control of the
-// browser, so every accepted and rejected form is worth pinning down.
-func TestAuthorizedAcceptsEveryTokenForm(t *testing.T) {
-	s := testServer(t, "sekret", false)
-
-	cases := []struct {
-		name string
-		wire func(*http.Request)
-		want bool
-	}{
-		{"no credential", func(*http.Request) {}, false},
-		{"query", func(r *http.Request) { r.URL.RawQuery = "t=sekret" }, true},
-		{"wrong query", func(r *http.Request) { r.URL.RawQuery = "t=nope" }, false},
-		{"bearer", func(r *http.Request) { r.Header.Set("Authorization", "Bearer sekret") }, true},
-		{"wrong bearer", func(r *http.Request) { r.Header.Set("Authorization", "Bearer nope") }, false},
-		{"bare header", func(r *http.Request) { r.Header.Set("Authorization", "sekret") }, false},
-		{"cookie", func(r *http.Request) { r.AddCookie(&http.Cookie{Name: cookieName, Value: "sekret"}) }, true},
-		{"wrong cookie", func(r *http.Request) { r.AddCookie(&http.Cookie{Name: cookieName, Value: "nope"}) }, false},
-		{"prefix of token", func(r *http.Request) { r.URL.RawQuery = "t=sek" }, false},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			r := httptest.NewRequest(http.MethodGet, "/", nil)
-			tc.wire(r)
-			if got := s.authorized(r); got != tc.want {
-				t.Fatalf("authorized = %v, want %v", got, tc.want)
-			}
-		})
-	}
-}
-
-// An empty token disables auth entirely, which is the documented behaviour for
-// a loopback bind with no token configured.
-func TestAuthorizedAllowsEverythingWithoutAToken(t *testing.T) {
-	s := testServer(t, "", false)
-	if !s.authorized(httptest.NewRequest(http.MethodGet, "/", nil)) {
-		t.Fatal("an empty token must not gate requests")
-	}
+	return NewServer(hub, streamer, assets, viewOnly)
 }
 
 // checkOrigin is what stops a page on another site from driving the browser
 // through the viewer's own credentials.
 func TestCheckOriginRejectsForeignPages(t *testing.T) {
-	s := testServer(t, "sekret", false)
+	s := testServer(t, false)
 
 	cases := map[string]bool{
 		"":                              true, // a non-browser client sends no Origin
@@ -89,7 +48,7 @@ func TestCheckOriginRejectsForeignPages(t *testing.T) {
 // --view-only has to be enforced on the server. Enforcing it only in the
 // WebSocket dispatch left /api/navigate able to drive the browser.
 func TestViewOnlyRefusesNavigateOverREST(t *testing.T) {
-	s := testServer(t, "sekret", true)
+	s := testServer(t, true)
 
 	rec := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/api/navigate?t=sekret&url=http://evil.example/", nil)
@@ -104,7 +63,7 @@ func TestViewOnlyRefusesNavigateOverREST(t *testing.T) {
 // The same request on a normal server must reach the streamer, so the test
 // above is proving the view-only guard rather than an unrelated rejection.
 func TestNavigateReachesTheStreamerWhenNotViewOnly(t *testing.T) {
-	s := testServer(t, "sekret", false)
+	s := testServer(t, false)
 
 	rec := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/api/navigate?t=sekret&url=http://example.com/", nil)
@@ -154,37 +113,32 @@ func TestStreamerInputIsNotRefusedWhenWritable(t *testing.T) {
 	}
 }
 
-// An unauthorised request must never reach a handler.
-func TestUnauthorizedRequestsAreRejected(t *testing.T) {
-	s := testServer(t, "sekret", false)
+/*
+The live view authenticates nobody, on purpose: a token that changed on every
+restart broke the URL people had bookmarked and the cookie their browser held,
+both at once.
 
-	for _, path := range []string{"/", "/api/pages", "/api/navigate?url=http://x/", "/ws"} {
+What that leaves has to be true, so it is pinned here. Everything is served,
+and --view-only is still enforced -- it is the only guard left, so it cannot
+quietly depend on a credential that no longer exists.
+*/
+func TestEverythingIsServedWithoutACredential(t *testing.T) {
+	s := testServer(t, false)
+	for _, path := range []string{"/", "/api/pages"} {
 		rec := httptest.NewRecorder()
 		s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
-		if rec.Code != http.StatusUnauthorized {
-			t.Fatalf("%s = %d, want 401", path, rec.Code)
+		if rec.Code == http.StatusUnauthorized {
+			t.Errorf("%s answered 401; nothing authenticates any more", path)
 		}
 	}
 }
 
-// The cookie is what authorises the stylesheet and script requests that follow
-// the first click on the printed URL.
-func TestQueryTokenHandsOutACookie(t *testing.T) {
-	s := testServer(t, "sekret", false)
-
+func TestViewOnlyStillHoldsWithoutACredential(t *testing.T) {
+	s := testServer(t, true)
 	rec := httptest.NewRecorder()
-	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/?t=sekret", nil))
-
-	for _, c := range rec.Result().Cookies() {
-		if c.Name == cookieName {
-			if c.Value != "sekret" {
-				t.Fatalf("cookie value = %q", c.Value)
-			}
-			if !c.HttpOnly || c.SameSite != http.SameSiteStrictMode {
-				t.Fatalf("cookie must be HttpOnly and SameSite=Strict: %+v", c)
-			}
-			return
-		}
+	s.Handler().ServeHTTP(rec,
+		httptest.NewRequest(http.MethodPost, "/api/navigate?url=https://example.com", nil))
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("navigate on a view-only server = %d, want 403", rec.Code)
 	}
-	t.Fatal("no auth cookie was set")
 }

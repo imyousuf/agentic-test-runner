@@ -562,8 +562,7 @@ watches.
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--port <n>` | `7788` | HTTP port |
-| `--bind <addr>` | `127.0.0.1` | Listen address. A non-loopback bind requires an explicit `--token` |
-| `--token <s>` | generated | Access token (or set `ATR_REMOTE_TOKEN`) |
+| `--bind <addr>` | `127.0.0.1` | Listen address. Nothing authenticates, so a non-loopback bind warns |
 | `--attach <url>` | discovered | CDP endpoint, such as `cdp://127.0.0.1:9222` |
 | `--view-only` | `false` | Refuse input from viewers |
 | `--quality <n>` | `60` | JPEG quality, 1 to 100 |
@@ -581,7 +580,7 @@ ssh -L 7788:127.0.0.1:7788 myserver
 ### atr remote setup
 
 Install a service that keeps the live view running: a systemd user unit on Linux, or a
-launchd agent on macOS. It generates an access token and stores it in `~/.atr/remote.env`
+launchd agent on macOS. It binds 127.0.0.1 by default
 with owner-only permissions, so the URL is stable across restarts.
 
 It does not install or start a browser — the browser belongs to ATR, and the live view

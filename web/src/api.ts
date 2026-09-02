@@ -1,20 +1,7 @@
 import type { Manifest, RecordingSummary } from './protocol';
 
-/**
- * token comes from the URL the CLI printed. The server also sets a cookie on
- * that first request, so most calls would work without it; the query parameter
- * keeps working if the cookie is ever refused.
- */
-export const token = new URLSearchParams(location.search).get('t') ?? '';
-
-/** withToken appends the token to a same-origin path. */
-export function withToken(path: string): string {
-  if (!token) return path;
-  return path + (path.includes('?') ? '&' : '?') + 't=' + encodeURIComponent(token);
-}
-
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(withToken(path), init);
+  const res = await fetch(path, init);
   const text = await res.text();
   let body: unknown = null;
   try {
@@ -77,24 +64,24 @@ export const api = {
    * complete line. An empty string means the recording has no journal.
    */
   devtools: (id: string) =>
-    fetch(withToken(`/api/recordings/${id}/devtools.jsonl`)).then((r) =>
+    fetch(`/api/recordings/${id}/devtools.jsonl`).then((r) =>
       r.ok ? r.text() : '',
     ),
 
-  frameURL: (id: string, file: string) => withToken(`/api/recordings/${id}/frames/${file}`),
+  frameURL: (id: string, file: string) => `/api/recordings/${id}/frames/${file}`,
 
-  mp4URL: (id: string) => withToken(`/api/recordings/${id}/recording.mp4`),
+  mp4URL: (id: string) => `/api/recordings/${id}/recording.mp4`,
 
   /** A plain href, so the browser downloads it rather than buffering it here. */
   exportURL: (id: string, withMP4 = false) =>
-    withToken(`/api/recordings/${id}/export.zip`) + (withMP4 ? '&mp4=1' : ''),
+    `/api/recordings/${id}/export.zip` + (withMP4 ? '?mp4=1' : ''),
 
   /**
    * The zip goes up as the raw body. There is one file and no other field, so
    * multipart would only add a boundary to parse on both sides.
    */
   importZip: async (file: File, force = false) => {
-    const res = await fetch(withToken('/api/recordings/import') + (force ? '&force=1' : ''), {
+    const res = await fetch('/api/recordings/import' + (force ? '?force=1' : ''), {
       method: 'POST',
       body: file,
     });
