@@ -528,6 +528,84 @@ The agent **cannot type passwords**. If a sudo / polkit / authentication prompt 
 
 ---
 
+## atr remote
+
+Serve a live view of the browser that ATR drives, as a web page. Chrome streams the
+page over the DevTools Protocol, so no X server, VNC, or desktop packages are needed —
+it works against a headless browser on a server.
+
+`atr view` is a registered alias.
+
+```bash
+# Watch the browser that "atr browser start" launched
+atr remote
+
+# Another port, attached to a browser by endpoint
+atr remote --port 9000 --attach cdp://127.0.0.1:9222
+
+# Watch without the ability to click
+atr remote --view-only
+```
+
+The command prints a URL containing an access token:
+
+```
+ATR live view
+  URL:     http://127.0.0.1:7788/?t=8f2c...
+  Browser: Chrome/151.0.7922.170  (attached, not owned)
+  Pages:   2
+```
+
+Closing the view leaves the browser running, and ATR keeps driving it while a viewer
+watches.
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--port <n>` | `7788` | HTTP port |
+| `--bind <addr>` | `127.0.0.1` | Listen address. Nothing authenticates, so a non-loopback bind warns |
+| `--attach <url>` | discovered | CDP endpoint, such as `cdp://127.0.0.1:9222` |
+| `--view-only` | `false` | Refuse input from viewers |
+| `--quality <n>` | `60` | JPEG quality, 1 to 100 |
+| `--max-width <n>` | `1600` | Largest frame width |
+| `--fps <n>` | `20` | Target frame rate |
+
+**Security:** a viewer gets full control of that browser and its cookies. The default
+bind is loopback only. Reach a remote machine through an SSH tunnel rather than opening
+the port:
+
+```bash
+ssh -L 7788:127.0.0.1:7788 myserver
+```
+
+### atr remote setup
+
+Install a service that keeps the live view running: a systemd user unit on Linux, or a
+launchd agent on macOS. It binds 127.0.0.1 by default
+with owner-only permissions, so the URL is stable across restarts.
+
+It does not install or start a browser — the browser belongs to ATR, and the live view
+attaches to whichever one ATR is driving.
+
+```bash
+atr remote setup                 # install, enable, and print the URL
+atr remote setup --check         # report the state, change nothing
+atr remote setup --port 9000     # use another port
+atr remote setup --uninstall     # remove the service, keep the token
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--port <n>` | `7788` | HTTP port for the service |
+| `--bind <addr>` | `127.0.0.1` | Listen address for the service |
+| `--fps <n>` | `20` | Target frame rate |
+| `--check` | `false` | Report the state and change nothing |
+| `--uninstall` | `false` | Remove the service, keep the token |
+
+See [Browser Live View](remote-live-view.md) for the protocol, the foreground rule, and
+troubleshooting.
+
+---
+
 ## atr mcp
 
 Run ATR as an MCP (Model Context Protocol) server, exposing browser automation tools to MCP-compatible clients like Claude CLI or Gemini CLI.

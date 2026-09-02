@@ -1,0 +1,943 @@
+/* ── Tokens ─────────────────────────────────────────────────────────── */
+
+:root {
+  color-scheme: light dark;
+
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 24px;
+  --s-6: 32px;
+
+  --r-1: 6px;
+  --r-2: 10px;
+  --r-3: 14px;
+  --r-pill: 999px;
+
+  --t-xs: 11px;
+  --t-sm: 12px;
+  --t-md: 14px;
+  --t-lg: 16px;
+  --t-xl: 20px;
+
+  --fast: 120ms ease;
+}
+
+/* ── Theme: light is the base set ───────────────────────────────────── */
+
+:root {
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --surface-2: #eef0f4;
+  --surface-3: #e4e8ee;
+  --line: #dfe3e8;
+  --text: #1a1d21;
+  --dim: #5f6672;
+  --accent: #0f7b7b;
+  --accent-ink: #ffffff;
+  --accent-soft: #e2f1f1;
+  --danger: #c2352f;
+  --danger-soft: #fdecea;
+  --ok: #1f8b45;
+  --warn: #8a6100;
+  --warn-soft: #fdf3d8;
+  --mat: #e9ecf0;
+  --shadow: 0 1px 2px rgb(16 24 40 / 6%), 0 4px 14px rgb(16 24 40 / 8%);
+}
+
+/* ── Theme: dark ────────────────────────────────────────────────────── */
+
+/* Two selectors pull in the same set: the system asks for dark, or the user
+   did. A hand-picked light theme wins over the system. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --bg: #0e0f11;
+    --surface: #17181b;
+    --surface-2: #1f2126;
+    --surface-3: #282b31;
+    --line: #2a2d33;
+    --text: #e8eaed;
+    --dim: #9aa0a6;
+    --accent: #4ec9c9;
+    --accent-ink: #06211f;
+    --accent-soft: #16302f;
+    --danger: #ff6b6b;
+    --danger-soft: #33191a;
+    --ok: #4ac26b;
+    --warn: #ffd479;
+    --warn-soft: #3a2f11;
+    --mat: #0a0b0d;
+    --shadow: 0 1px 2px rgb(0 0 0 / 40%), 0 4px 14px rgb(0 0 0 / 30%);
+  }
+}
+
+:root[data-theme='dark'] {
+  --bg: #0e0f11;
+  --surface: #17181b;
+  --surface-2: #1f2126;
+  --surface-3: #282b31;
+  --line: #2a2d33;
+  --text: #e8eaed;
+  --dim: #9aa0a6;
+  --accent: #4ec9c9;
+  --accent-ink: #06211f;
+  --accent-soft: #16302f;
+  --danger: #ff6b6b;
+  --danger-soft: #33191a;
+  --ok: #4ac26b;
+  --warn: #ffd479;
+  --warn-soft: #3a2f11;
+  --mat: #0a0b0d;
+  --shadow: 0 1px 2px rgb(0 0 0 / 40%), 0 4px 14px rgb(0 0 0 / 30%);
+}
+
+/* ── Base ───────────────────────────────────────────────────────────── */
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: var(--t-md) / 1.45 system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.dim { color: var(--dim); }
+.small { font-size: var(--t-sm); }
+.warn { color: var(--warn); }
+.grow { flex: 1; }
+.num { font-variant-numeric: tabular-nums; }
+
+/* ── Buttons ────────────────────────────────────────────────────────── */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-1);
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  line-height: 1.3;
+  white-space: nowrap;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background var(--fast), border-color var(--fast), color var(--fast);
+}
+
+.btn:hover { background: var(--surface-3); }
+.btn:disabled { opacity: 0.5; cursor: default; }
+.btn:disabled:hover { background: var(--surface-2); }
+
+.btn-primary {
+  border-color: transparent;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 600;
+}
+
+.btn-primary:hover { background: var(--accent); filter: brightness(1.08); }
+
+.btn-danger { color: var(--danger); }
+.btn-danger:hover { background: var(--danger-soft); border-color: var(--danger); }
+
+.btn-icon { width: 32px; height: 32px; padding: 0; justify-content: center; }
+
+.btn.on { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+
+/* A segmented control: one border around the group, hairlines between. */
+.seg {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: var(--r-1);
+  overflow: hidden;
+}
+
+.seg > button {
+  padding: 6px 10px;
+  border: none;
+  border-left: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--dim);
+  font: inherit;
+  cursor: pointer;
+  transition: background var(--fast), color var(--fast);
+}
+
+.seg > button:first-child { border-left: none; }
+.seg > button:hover { background: var(--surface-3); color: var(--text); }
+.seg > button.on { background: var(--accent); color: var(--accent-ink); font-weight: 600; }
+
+/* ── Fields ─────────────────────────────────────────────────────────── */
+
+.field {
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-1);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+
+.field:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.field::placeholder { color: var(--dim); }
+
+/* ── App shell ──────────────────────────────────────────────────────── */
+
+.app { display: flex; flex-direction: column; height: 100vh; }
+
+.bar {
+  display: flex;
+  gap: var(--s-2);
+  align-items: center;
+  padding: var(--s-2) var(--s-3);
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}
+
+/* The URL box is its own form, so it carries the flex the input used to. */
+.bar-url {
+  display: flex;
+  gap: var(--s-2);
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+  max-width: 800px;
+}
+
+.bar .url {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 14px;
+  border-radius: var(--r-pill);
+}
+
+/* ── Tabs ───────────────────────────────────────────────────────────── */
+
+.tabs {
+  display: flex;
+  gap: 2px;
+  padding: var(--s-2) var(--s-3) 0;
+  background: var(--surface);
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.tab {
+  display: inline-flex;
+  align-items: center;
+  max-width: 240px;
+  border: 1px solid var(--line);
+  border-bottom: none;
+  border-radius: var(--r-1) var(--r-1) 0 0;
+  background: var(--surface-2);
+  color: var(--dim);
+}
+
+/* The name is the button that picks the tab. It takes the padding, so the
+   whole label is a target and only the glyph beside it closes anything. */
+.tab-pick {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  flex: 1;
+  min-width: 0;
+  padding: 6px 4px 6px 10px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* Small, quiet, and red only under the pointer. A close control that shouts
+   invites the click it is trying to make deliberate. */
+.tab-close {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  margin-right: 6px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-1);
+  background: none;
+  color: var(--dim);
+  font: inherit;
+  font-size: var(--t-xs);
+  line-height: 1;
+  opacity: 0.55;
+  cursor: pointer;
+  transition: background var(--fast), color var(--fast), opacity var(--fast);
+}
+
+.tab-close:hover {
+  background: var(--danger-soft);
+  color: var(--danger);
+  opacity: 1;
+}
+
+.tab-close:focus-visible { opacity: 1; }
+
+/* The tab is a flex row, so the ellipsis belongs on the label rather than on
+   the button around it. */
+.tab-label {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* flex: none, or a long title squeezes the icon to nothing. */
+.tab-icon {
+  width: 14px;
+  height: 14px;
+  flex: none;
+}
+
+.tab.active { background: var(--surface); color: var(--text); }
+.tab.active .tab-close { opacity: 0.8; }
+
+/* Square, borderless and aligned with the tab row rather than sitting in it.
+   It is not a tab, so it does not get a tab's shape. */
+.tab-new {
+  flex: none;
+  align-self: stretch;
+  width: 30px;
+  margin-left: 2px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-1) var(--r-1) 0 0;
+  background: none;
+  color: var(--dim);
+  font: inherit;
+  font-size: var(--t-lg);
+  line-height: 1;
+  cursor: pointer;
+  transition: background var(--fast), color var(--fast);
+}
+
+.tab-new:hover { background: var(--surface-2); color: var(--text); }
+
+/* ── Stage and canvas ───────────────────────────────────────────────── */
+
+.stage {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: auto;
+  padding: var(--s-4);
+  background: var(--bg);
+}
+
+/* The canvas holds a screenshot of some other page. A white page on a white
+   background loses its edge, so it keeps a mat, a border and a shadow. */
+.viewport {
+  display: block;
+  background: var(--mat);
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  box-shadow: var(--shadow);
+}
+
+/* Fit scales the frame up as well as down, and it keeps the aspect ratio. The
+   box stays exactly the size of the drawn image, because Viewport maps a click
+   through the canvas rectangle.
+
+   The width has to win on a wide stage and the height on a tall one. A plain
+   max-height cannot do that: it clamps the height and leaves the width alone,
+   which stretches the picture. So the stage becomes a size container, and the
+   width is the smaller of the two limits. FrameCanvas publishes --ar. */
+.stage.fit { container-type: size; }
+
+.stage.fit .viewport { width: min(100cqw, 100cqh * var(--ar, 1.6)); height: auto; }
+
+/* 1:1 shows the frame at its own pixel size, and the stage scrolls. */
+.stage.actual .viewport {
+  width: auto;
+  height: auto;
+  max-width: none;
+  max-height: none;
+  margin: auto;
+}
+
+.viewport:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+
+/* ── Status bar ─────────────────────────────────────────────────────── */
+
+.status {
+  display: flex;
+  gap: var(--s-3);
+  align-items: center;
+  padding: var(--s-2) var(--s-3);
+  background: var(--surface);
+  border-top: 1px solid var(--line);
+  color: var(--dim);
+  font-size: var(--t-sm);
+}
+
+.status .pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  margin-left: 0;
+  padding: 2px 10px;
+  border-radius: var(--r-pill);
+  background: var(--surface-2);
+  color: inherit;
+  font-size: inherit;
+}
+
+/* The interesting end of a URL is the right one, so it truncates on the left. */
+.status .url-now {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  direction: rtl;
+  text-align: right;
+}
+
+.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.dot.ok { background: var(--ok); }
+.dot.bad { background: var(--danger); }
+
+/* ── Banners ────────────────────────────────────────────────────────── */
+
+.banner {
+  padding: var(--s-2) var(--s-4);
+  background: var(--warn-soft);
+  color: var(--warn);
+  border-bottom: 1px solid var(--line);
+}
+
+.banner.error { background: var(--danger-soft); color: var(--danger); }
+
+/* ── Recording ──────────────────────────────────────────────────────── */
+
+.rec { display: flex; gap: var(--s-2); align-items: center; }
+
+.rec-btn.on { border-color: var(--danger); background: var(--danger-soft); color: var(--danger); }
+
+.rec-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--danger);
+  display: inline-block;
+}
+
+.rec-btn.on .rec-dot { animation: pulse 1.2s ease-in-out infinite; }
+
+@keyframes pulse { 50% { opacity: 0.25; } }
+
+.rec-meta { color: var(--dim); font-variant-numeric: tabular-nums; }
+
+/* The recording badge, over the picture it is keeping.
+
+   It floats rather than taking a row of its own, because a bar that appears
+   when recording starts would push the picture down and resize the stage. It
+   is dark in both themes and it never asks the page's colours for anything:
+   it has to read the same over a white page and a black one. */
+.rec-overlay {
+  position: absolute;
+  top: var(--s-4);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2;
+  display: flex;
+  gap: var(--s-3);
+  align-items: center;
+  max-width: calc(100% - var(--s-5));
+  padding: 6px var(--s-3);
+  border: 1px solid rgb(255 255 255 / 14%);
+  border-radius: var(--r-pill);
+  background: rgb(20 21 24 / 82%);
+  backdrop-filter: blur(6px);
+  color: #f2f4f7;
+  font-size: var(--t-sm);
+  box-shadow: var(--shadow);
+}
+
+.rec-overlay .rec-dot { animation: pulse 1.2s ease-in-out infinite; }
+.rec-overlay .rec-label { font-weight: 600; white-space: nowrap; }
+.rec-overlay .rec-meta { color: rgb(242 244 247 / 70%); white-space: nowrap; }
+.rec-overlay .rec-note { color: rgb(242 244 247 / 70%); white-space: nowrap; }
+
+.rec-stop {
+  padding: 2px var(--s-2);
+  border-color: rgb(255 255 255 / 22%);
+  background: rgb(255 255 255 / 10%);
+  color: #fff;
+}
+
+.rec-stop:hover { background: var(--danger); border-color: var(--danger); }
+.rec-stop:disabled:hover { background: rgb(255 255 255 / 10%); }
+
+/* A recording another process owns. It pulses like ours, because it is just
+   as real, but nothing here can stop it, so it carries no button. */
+.rec-overlay.theirs { border-style: dashed; }
+
+.rec-badge {
+  margin-left: var(--s-2);
+  padding: 1px 8px;
+  border-radius: var(--r-pill);
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: var(--t-sm);
+  font-weight: 400;
+}
+
+/* ── Library ────────────────────────────────────────────────────────── */
+
+.library { padding: var(--s-5) var(--s-5) var(--s-6); overflow: auto; }
+
+.library-head { display: flex; align-items: center; gap: var(--s-3); margin-bottom: var(--s-4); }
+.library-head h1 { flex: 1; margin: 0; font-size: var(--t-xl); }
+
+.rec-list { list-style: none; margin: 0; padding: 0; }
+
+.rec-list li {
+  display: flex;
+  gap: var(--s-3);
+  align-items: center;
+  padding: var(--s-3) var(--s-2);
+  border-bottom: 1px solid var(--line);
+  border-radius: var(--r-1);
+}
+
+/* The whole row opens the player, so it has to look like a target. */
+.rec-list li.openable { cursor: pointer; transition: background var(--fast); }
+.rec-list li.openable:hover { background: var(--surface-2); }
+.rec-list li.openable:hover .rec-title { color: var(--accent); }
+.rec-list li.openable:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+.rec-list li.busy { opacity: 0.5; pointer-events: none; }
+
+.rec-main { flex: 1; min-width: 0; }
+.rec-title { font-size: var(--t-lg); font-weight: 600; }
+.rec-main form { display: flex; gap: var(--s-2); }
+.rec-main form .field { flex: 1; }
+
+.rec-actions { display: flex; gap: var(--s-2); flex-wrap: wrap; }
+
+/* ── Player ─────────────────────────────────────────────────────────── */
+
+.player { display: flex; flex-direction: column; height: 100vh; }
+
+.player-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: var(--s-2) var(--s-3);
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}
+
+.player-head h1 { margin: 0; font-size: var(--t-lg); }
+
+.timeline { position: relative; padding: var(--s-2) var(--s-4) 0; background: var(--surface); }
+.timeline input[type='range'] { width: 100%; margin: 0; accent-color: var(--accent); }
+
+.ticks { position: relative; height: 8px; margin: 0 8px; }
+
+.tick {
+  position: absolute;
+  top: 0;
+  width: 2px;
+  height: 8px;
+  background: var(--accent);
+  transform: translateX(-1px);
+}
+
+.tick.stall { background: var(--warn); }
+.tick.resume { background: var(--ok); }
+
+/* ── Activity scrubber ──────────────────────────────────────────────── */
+
+/* The bar draws the change score per moment, so its shape is the shape of
+   the session. Everything inside is positioned by played time, not by
+   recording time, because a cut stretch is narrower than it really was. */
+.scrub {
+  position: relative;
+  height: 58px;
+  border-radius: var(--r-1);
+  background: var(--surface-2);
+  cursor: pointer;
+  overflow: hidden;
+  touch-action: none;
+}
+
+.scrub:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* The mark row sits above the bars and owns its own band, so a mark is never
+   drawn on top of the shape it is meant to explain. */
+.scrub-marks {
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 16px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+
+/* The pip is 6 px, but the button around it is 16 px. A target the size of
+   the drawing is a target nobody can hit. */
+.mark {
+  position: absolute;
+  top: 0;
+  width: 16px;
+  height: 15px;
+  margin-left: -8px;
+  padding: 0;
+  border: 0;
+  background: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.mark-pip {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--dim);
+  transition: transform var(--fast);
+}
+
+.mark:hover .mark-pip,
+.mark:focus-visible .mark-pip { transform: scale(1.6); }
+
+/* A shape per kind, so the row is readable without hovering every mark. */
+.mark.nav .mark-pip,
+.mark.tab .mark-pip { background: var(--accent); border-radius: 1px; width: 3px; height: 11px; }
+.mark.key .mark-pip { background: var(--warn); }
+.mark.click .mark-pip { background: var(--text); }
+.mark.type .mark-pip { background: var(--text); border-radius: 1px; width: 9px; height: 3px; }
+.mark.stall .mark-pip { background: var(--warn); }
+.mark.resume .mark-pip { background: var(--ok); }
+
+/* A failure is what somebody scrubbing a session is looking for, so it is the
+   only mark that is both red and taller than the row it sits in. */
+.mark.error .mark-pip,
+.mark.netfail .mark-pip {
+  background: var(--danger);
+  border-radius: 1px;
+  width: 3px;
+  height: 13px;
+}
+
+.mark.warn .mark-pip { background: var(--warn); width: 5px; height: 5px; }
+
+.scrub-bars {
+  position: absolute;
+  inset: 16px 0 0;
+  display: flex;
+  align-items: flex-end;
+  gap: 0;
+  pointer-events: none;
+}
+
+.scrub-bars span {
+  flex: 1 1 0;
+  min-height: 0;
+  background: var(--accent);
+  opacity: 0.75;
+}
+
+/* Played time is tinted rather than filled, so the bars stay readable behind
+   it. A solid fill would hide the half of the session already watched. */
+.scrub-played {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--accent);
+  opacity: 0.14;
+  pointer-events: none;
+}
+
+/* A cut stretch keeps its place. The hatching says "time was removed here",
+   and the button opens it. */
+.scrub-idle {
+  position: absolute;
+  inset: 16px auto 0 auto;
+  padding: 0;
+  border: 0;
+  border-left: 1px solid var(--line);
+  border-right: 1px solid var(--line);
+  background: repeating-linear-gradient(
+    135deg,
+    var(--surface-3) 0 3px,
+    transparent 3px 6px
+  );
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  color: var(--dim);
+  font: inherit;
+  font-size: var(--t-xs);
+  cursor: zoom-in;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.scrub-idle:not(.cut) { cursor: default; opacity: 0.55; }
+.scrub-idle:hover.cut { background: var(--surface-3); }
+.scrub-idle-label { pointer-events: none; padding: 0 var(--s-1); }
+
+.scrub-head {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--text);
+  pointer-events: none;
+}
+
+/* ── Icons ──────────────────────────────────────────────────────────── */
+
+/* The transport controls used to be text, and system-ui on Linux has no glyph
+   for ⏮, ⏭ or ⏸, so they drew as empty boxes. These are SVG, they take their
+   colour from the button, and they look the same everywhere. */
+.icon { display: block; flex: none; }
+
+/* On its own in a 32 px button an icon at text size looks lost. */
+.btn-icon .icon { width: 16px; height: 16px; }
+
+/* A segment holds an icon the same way a button does. */
+.seg > button { display: inline-flex; align-items: center; justify-content: center; }
+
+.controls {
+  display: flex;
+  gap: var(--s-2);
+  align-items: center;
+  flex-wrap: wrap;
+  padding: var(--s-2) var(--s-4) var(--s-3);
+  background: var(--surface);
+}
+
+.controls .btn-primary { min-width: 92px; justify-content: center; }
+.controls label { display: flex; gap: var(--s-1); align-items: center; color: var(--dim); }
+.controls label.on { color: var(--accent); }
+
+/* ── DevTools dock ──────────────────────────────────────────────────── */
+
+/* The picture and the dock share the row. The stage keeps container-type:size,
+   which only works if its width comes from the layout rather than from what is
+   inside it, so it is a flex item here and the dock is its sibling. */
+.work { flex: 1; min-height: 0; display: flex; }
+.work > .stage { flex: 1; min-width: 0; }
+
+/* The anchor for the recording overlay. It wraps the stage alone, so the badge
+   stays centred on the picture when the dock opens beside it. */
+.stage-wrap { position: relative; flex: 1; min-width: 0; display: flex; }
+.stage-wrap > .stage { flex: 1; min-width: 0; }
+
+.dock {
+  position: relative;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--surface);
+  border-left: 1px solid var(--line);
+  font-size: var(--t-sm);
+}
+
+/* A URL and a stack are as long as they are, so the dock is draggable rather
+   than a width somebody else picked. The grip is 4 px of drawing in a 10 px
+   target, because a hit area the size of a border is a hit area nobody hits. */
+.dock-grip {
+  position: absolute;
+  inset: 0 auto 0 -5px;
+  width: 10px;
+  z-index: 3;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.dock-grip:hover { background: linear-gradient(90deg, transparent 3px, var(--accent) 3px 7px, transparent 7px); }
+
+.dock-head {
+  display: flex;
+  gap: var(--s-2);
+  align-items: center;
+  padding: var(--s-2);
+  border-bottom: 1px solid var(--line);
+}
+
+.dock-head .seg { flex: 1; }
+.dock-head .seg > button { flex: 1; gap: var(--s-1); }
+
+.dock-bar {
+  display: flex;
+  gap: var(--s-2);
+  align-items: center;
+  flex-wrap: wrap;
+  padding: var(--s-2);
+  border-bottom: 1px solid var(--line);
+}
+
+.dock-bar input[type='search'] {
+  flex: 1;
+  min-width: 120px;
+  padding: 4px var(--s-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-1);
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+}
+
+.seg-sm > button { padding: 3px var(--s-2); font-size: var(--t-xs); }
+
+.dock-body { flex: 1; min-height: 0; overflow: auto; }
+
+.dock-foot {
+  padding: var(--s-2);
+  border-top: 1px solid var(--line);
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.pad { padding: var(--s-4); }
+
+/* A count on a control. It is small, round and quiet unless it is bad. */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 6px;
+  margin-left: var(--s-1);
+  border-radius: var(--r-pill);
+  background: var(--surface-3);
+  color: var(--dim);
+  font-size: var(--t-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.pill.bad { background: var(--danger-soft); color: var(--danger); }
+
+/* On the selected segment the pill sits on the accent, so it takes its colours
+   from that rather than staying grey on teal. */
+.seg > button.on .pill {
+  background: rgb(255 255 255 / 22%);
+  color: var(--accent-ink);
+}
+
+.tag {
+  padding: 1px var(--s-2);
+  border-radius: var(--r-1);
+  background: var(--surface-2);
+  color: var(--dim);
+  font-size: var(--t-xs);
+}
+
+.tag.bad { background: var(--danger-soft); color: var(--danger); }
+
+/* Every row is one line of monospace, because a log is read by scanning down a
+   column, and a wrapped line breaks the column. Whatever does not fit is in the
+   panel the row opens. */
+.log { list-style: none; margin: 0; padding: 0; }
+
+.log-row { border-bottom: 1px solid var(--line); }
+
+/* The clickable line is a button, so it is reachable by tab and by Enter. It
+   has to be stripped back to a row first: a button brings its own font, its own
+   padding and a centred text alignment. */
+.log-line {
+  display: flex;
+  gap: var(--s-2);
+  align-items: baseline;
+  width: 100%;
+  padding: 3px var(--s-2) 3px 0;
+  border: 0;
+  border-left: 3px solid transparent;
+  background: none;
+  color: inherit;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: var(--t-xs);
+  text-align: left;
+  cursor: pointer;
+}
+
+.log-line:hover { background: var(--surface-2); }
+.log-line:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+/* The row that matches the picture on the screen. */
+.log-row.now .log-line { background: var(--accent-soft); }
+
+/* Colour and a tag, never colour alone. */
+.log-row.error .log-line { color: var(--danger); border-left-color: var(--danger); }
+.log-row.warning .log-line { color: var(--warn); border-left-color: var(--warn); }
+.log-row.debug .log-line { color: var(--dim); }
+
+.log-at { flex: none; color: var(--dim); }
+.log-lvl { flex: none; width: 3ch; font-weight: 600; }
+
+.log-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* The panel a row opens. Everything here is allowed to wrap, because it is here
+   precisely because it did not fit on one line. */
+.log-open {
+  padding: var(--s-2) var(--s-3) var(--s-3) calc(3px + var(--s-2));
+  background: var(--surface-2);
+  border-top: 1px dashed var(--line);
+}
+
+.log-open p { margin: 0 0 var(--s-1); }
+
+.log-full {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: var(--t-xs);
+  overflow-wrap: anywhere;
+}
+
+.log-bad { color: var(--danger); }
+.log-kv { color: var(--dim); font-size: var(--t-xs); overflow-wrap: anywhere; }
+
+.log-stack {
+  margin: var(--s-1) 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--dim);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: var(--t-xs);
+}
+
+.net-status { flex: none; width: 3ch; text-align: right; color: var(--dim); }
+.net-status.bad { color: var(--danger); font-weight: 600; }
+.net-status.open { color: var(--warn); }
+.net-method { flex: none; width: 4ch; color: var(--dim); }
+.net-meta { flex: none; color: var(--dim); }
+
+/* A button that reads as a link, for an action inside a sentence. */
+.link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* ── Motion ─────────────────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

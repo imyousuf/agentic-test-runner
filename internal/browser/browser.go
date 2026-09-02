@@ -101,7 +101,25 @@ type NetworkRequest struct {
 }
 
 // New creates a new browser instance with the given configuration.
+// defaultViewport is used when a caller builds a BrowserConfig by hand and
+// leaves the viewport at zero.
+//
+// It exists because NoDefaultDevice took away rod's. rod used to emulate
+// devices.LaptopWithMDPIScreen on every page, so a zero viewport silently
+// became 1280x800; without that, a headless page falls back to whatever size
+// Chrome starts with, and an in-page overlay such as the HUD can end up
+// covering the control a test is trying to click. Viper supplies this for the
+// CLI, but a struct literal bypasses viper.
+const (
+	defaultViewportWidth  = 1280
+	defaultViewportHeight = 800
+)
+
 func New(cfg config.BrowserConfig) (*Browser, error) {
+	if cfg.Viewport.Width <= 0 || cfg.Viewport.Height <= 0 {
+		cfg.Viewport.Width = defaultViewportWidth
+		cfg.Viewport.Height = defaultViewportHeight
+	}
 	return &Browser{
 		config:          cfg,
 		pages:           make([]*rod.Page, 0),
@@ -230,8 +248,10 @@ func (b *Browser) Launch(ctx context.Context) error {
 	// Store the control URL for external access (e.g., MCP servers)
 	b.controlURL = controlURL
 
-	// Connect to browser
-	browser := rod.New().ControlURL(controlURL)
+	// NoDefaultDevice: rod otherwise emulates devices.LaptopWithMDPIScreen on
+	// every page it touches, so merely listing tabs pins them to 1280x800 and
+	// overrides whatever "atr browser viewport" was told to use.
+	browser := rod.New().ControlURL(controlURL).NoDefaultDevice()
 	if b.config.SlowMotion > 0 {
 		browser = browser.SlowMotion(b.config.SlowMotion)
 	}
@@ -500,7 +520,8 @@ func (b *Browser) Connect(ctx context.Context, cdpEndpoint string) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	browser := rod.New().ControlURL(cdpEndpoint)
+	// NoDefaultDevice: see Launch. Attaching must not resize the caller's tabs.
+	browser := rod.New().ControlURL(cdpEndpoint).NoDefaultDevice()
 	if b.config.SlowMotion > 0 {
 		browser = browser.SlowMotion(b.config.SlowMotion)
 	}

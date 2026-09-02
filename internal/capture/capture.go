@@ -9,8 +9,17 @@ import (
 
 // Capturer handles browser state capture for failure analysis.
 type Capturer struct {
-	browser *browser.Browser
-	options CaptureOptions
+	browser       *browser.Browser
+	options       CaptureOptions
+	recordingID   string
+	recordingPath string
+}
+
+// SetRecording names the session recording that covers this run, so every
+// captured context can point at it.
+func (c *Capturer) SetRecording(id, path string) {
+	c.recordingID = id
+	c.recordingPath = path
 }
 
 // New creates a new Capturer with the given browser and options.
@@ -89,15 +98,20 @@ func (c *Capturer) CaptureFailure(stepDesc, errorMsg string) *FailureContext {
 		}
 	}
 
+	ctx.RecordingID = c.recordingID
+	ctx.RecordingPath = c.recordingPath
+
 	return ctx
 }
 
 // CaptureSuccess captures minimal browser state for successful steps.
 func (c *Capturer) CaptureSuccess() *FailureContext {
 	return &FailureContext{
-		Timestamp: time.Now(),
-		URL:       c.browser.CurrentURL(),
-		Title:     c.browser.PageTitle(),
+		Timestamp:     time.Now(),
+		URL:           c.browser.CurrentURL(),
+		Title:         c.browser.PageTitle(),
+		RecordingID:   c.recordingID,
+		RecordingPath: c.recordingPath,
 	}
 }
 
