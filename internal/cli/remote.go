@@ -26,6 +26,7 @@ func newRemoteCmd() *cobra.Command {
 		token    string
 		attach   string
 		viewOnly bool
+		noToken  bool
 		quality  int
 		maxWidth int
 		fps      int
@@ -57,13 +58,24 @@ Examples:
 			// Whether the operator supplied a token has to be captured before
 			// one is generated, or the non-loopback check below can never fire.
 			supplied := token != "" || os.Getenv("ATR_REMOTE_TOKEN") != ""
+			if noToken && supplied {
+				return fmt.Errorf("--no-token and --token ask for opposite things")
+			}
 			if token == "" {
 				token = os.Getenv("ATR_REMOTE_TOKEN")
 			}
-			if token == "" {
+			// An empty token is what the server reads as "no authentication",
+			// so this is the whole of --no-token.
+			if token == "" && !noToken {
 				token = remote.NewToken()
 			}
-			if !isLoopback(bind) && !supplied {
+			if noToken {
+				fmt.Fprintf(os.Stderr,
+					"Warning: serving with no token. Anyone who can reach %s:%d has full "+
+						"control of the browser and its logged-in sessions. Put "+
+						"authentication in front of it, or keep the port private.\n", bind, port)
+			}
+			if !isLoopback(bind) && !supplied && !noToken {
 				return fmt.Errorf(
 					"refusing to bind %s with a generated token.\n"+
 						"A viewer gets full control of the browser and its cookies, and the token "+
@@ -133,7 +145,13 @@ Examples:
 
 			pages, _ := streamer.Pages()
 			fmt.Println("ATR live view")
-			fmt.Printf("  URL:     http://%s/?t=%s\n", addr, token)
+			// With no token there is nothing to append, and printing "?t=" would
+			// have somebody paste a URL that looks half copied.
+			if token == "" {
+				fmt.Printf("  URL:     http://%s/\n", addr)
+			} else {
+				fmt.Printf("  URL:     http://%s/?t=%s\n", addr, token)
+			}
 			fmt.Printf("  Browser: %s  (attached, not owned)\n", streamer.Version())
 			fmt.Printf("  Pages:   %d\n", len(pages))
 			if viewOnly {
@@ -172,6 +190,8 @@ Examples:
 	cmd.Flags().IntVar(&port, "port", 7788, "HTTP port")
 	cmd.Flags().StringVar(&bind, "bind", "127.0.0.1", "Listen address")
 	cmd.Flags().StringVar(&token, "token", "", "Access token (or set ATR_REMOTE_TOKEN)")
+	cmd.Flags().BoolVar(&noToken, "no-token", false,
+		"Serve with no token; authentication becomes the host's job")
 	cmd.Flags().StringVar(&attach, "attach", "", "CDP endpoint, such as cdp://127.0.0.1:9222")
 	cmd.Flags().BoolVar(&viewOnly, "view-only", false, "Refuse input from viewers")
 	cmd.Flags().IntVar(&quality, "quality", 60, "JPEG quality, 1 to 100")
