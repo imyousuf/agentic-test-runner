@@ -5,6 +5,7 @@ import { Library } from './Library';
 import { Player } from './Player';
 import { RecordButton } from './RecordButton';
 import { RecordOverlay } from './RecordOverlay';
+import { TabIcon } from './TabIcon';
 import { ThemeButton } from './ThemeButton';
 import { useLiveView } from './useLiveView';
 import { useRoute } from './useRoute';
@@ -76,7 +77,8 @@ export function App() {
                 className="tab-pick"
                 onClick={() => send({ t: 'selectPage', id: page.id })}
               >
-                {name}
+                <TabIcon url={page.url} />
+                <span className="tab-label">{name}</span>
               </button>
               {/* Closing the only tab closes the browser, so it is not offered.
                   The server refuses it as well; this just avoids a dead ✕. */}
