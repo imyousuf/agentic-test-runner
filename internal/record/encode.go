@@ -17,7 +17,13 @@ import (
 // demuxer carries an explicit duration per frame and ffmpeg writes a variable
 // frame rate file. The frames also change size when the window is resized, so
 // every one is scaled and padded into a single canvas.
+// Encode exports with the defaults. Most callers want those.
 func Encode(ctx context.Context, s *Store, id string) (string, error) {
+	return EncodeWith(ctx, s, id, DefaultEncodeOptions())
+}
+
+// EncodeWith exports with the options given.
+func EncodeWith(ctx context.Context, s *Store, id string, opts EncodeOptions) (string, error) {
 	if c := checkFFmpeg(); !c.OK {
 		return "", c.Err
 	}
@@ -35,7 +41,7 @@ func Encode(ctx context.Context, s *Store, id string) (string, error) {
 	}
 
 	listPath := filepath.Join(dir, "concat.txt")
-	if err := os.WriteFile(listPath, ConcatList(m), 0o644); err != nil {
+	if err := os.WriteFile(listPath, ConcatList(m, opts), 0o644); err != nil {
 		return "", fmt.Errorf("failed to write %s: %w", listPath, err)
 	}
 	defer func() { _ = os.Remove(listPath) }()
@@ -63,13 +69,38 @@ func Encode(ctx context.Context, s *Store, id string) (string, error) {
 	return out, nil
 }
 
+/*
+IdleShownMs is how long a still stretch is held in an exported MP4.
+
+It is the web player's IDLE_SHOWN_MS, so a recording watched in the browser and
+the same recording exported run at the same pace, and neither is a surprise
+after the other.
+*/
+const IdleShownMs = 500
+
+/*
+EncodeOptions tune the export.
+
+SkipIdle is on by default because a session recording is mostly waiting. A
+frame's duration in the concat list is the gap to the next frame, so a page
+that sat still for half a minute became half a minute of one motionless
+picture, and an hour of work exported to an hour of video that nobody watches
+to the end.
+*/
+type EncodeOptions struct {
+	SkipIdle bool
+}
+
+// DefaultEncodeOptions is what "atr record encode" uses when asked for nothing.
+func DefaultEncodeOptions() EncodeOptions { return EncodeOptions{SkipIdle: true} }
+
 // ConcatList builds the body of concat.txt.
 //
 // The last file is listed twice, and the second entry carries no duration.
 // The concat demuxer ends the stream at the start of the final entry, so
 // without the repeat the last frame is dropped. The spike measured exactly
 // that: six frames became five, and 15.96 s became 14.96 s.
-func ConcatList(m *Manifest) []byte {
+func ConcatList(m *Manifest, opts EncodeOptions) []byte {
 	var b strings.Builder
 	b.WriteString("ffconcat version 1.0\n")
 
@@ -84,11 +115,57 @@ func ConcatList(m *Manifest) []byte {
 		if d < 1.0/60 {
 			d = 1.0 / 60
 		}
+		if opts.SkipIdle && idleAfter(m, i) {
+			if max := float64(IdleShownMs) / 1000; d > max {
+				d = max
+			}
+		}
 		fmt.Fprintf(&b, "file '%s/%s'\n", framesDir, f.File)
 		fmt.Fprintf(&b, "duration %.3f\n", d)
 	}
 	fmt.Fprintf(&b, "file '%s/%s'\n", framesDir, frames[len(frames)-1].File)
 	return []byte(b.String())
+}
+
+/*
+idleAfter reports whether nothing happened between frame i and the next one.
+
+Read from the score, not from the length of the gap. A gap is only evidence of
+stillness if the recorder had a reason to skip it, and a page that repaints
+every two seconds produces the same gap as a page doing nothing -- capping by
+length alone sped the first one up to match the second, which is the opposite
+of the point.
+
+A version 1 recording carries no scores. There the gap is the only evidence
+there is, so the player's fallback applies: a pause longer than FallbackGapMs
+counts as stillness.
+*/
+func idleAfter(m *Manifest, i int) bool {
+	if i+1 >= len(m.Frames) {
+		return false
+	}
+	next := m.Frames[i+1]
+	if m.Version >= 2 && hasScores(m) {
+		threshold := m.Options.ChangeThreshold
+		if threshold <= 0 {
+			threshold = DefaultThreshold
+		}
+		return next.Score < threshold
+	}
+	return next.AtMs-m.Frames[i].AtMs > FallbackGapMs
+}
+
+// FallbackGapMs is what counts as a pause in a recording with no scores. It is
+// the web player's FALLBACK_GAP_MS.
+const FallbackGapMs = 2000
+
+func hasScores(m *Manifest) bool {
+	for _, f := range m.Frames {
+		if f.Score > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // canvasSize picks one size that holds every frame. H.264 needs even numbers.

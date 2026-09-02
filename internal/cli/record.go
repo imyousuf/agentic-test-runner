@@ -350,14 +350,21 @@ func newRecordEncodeCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "encode <id>",
 		Short: "Export a recording as an MP4",
-		Args:  cobra.ExactArgs(1),
+		Long: `Export a recording as an MP4.
+
+The still stretches are cut, the same way the player cuts them, because a
+session recording is mostly waiting and an hour of work exports to an hour of
+video nobody watches to the end. Pass --skip-idle=false for real time.`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			output, _ := cmd.Flags().GetString("output")
+			skipIdle, _ := cmd.Flags().GetBool("skip-idle")
 			store, err := record.NewStore(output)
 			if err != nil {
 				return err
 			}
-			path, err := record.Encode(cmd.Context(), store, args[0])
+			path, err := record.EncodeWith(cmd.Context(), store, args[0],
+				record.EncodeOptions{SkipIdle: skipIdle})
 			if err != nil {
 				return err
 			}
@@ -366,6 +373,7 @@ func newRecordEncodeCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringP("output", "o", "", "Recordings directory (default: ~/.atr/recordings)")
+	cmd.Flags().Bool("skip-idle", true, "Cut the stretches where the page did not change")
 	return cmd
 }
 

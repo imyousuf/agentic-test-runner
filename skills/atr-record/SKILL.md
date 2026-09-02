@@ -68,7 +68,7 @@ library in a fortnight, which is usually you.
 | `atr record stop [id]` | Stop and wait until playable; no id means the newest |
 | `atr record status` | What is running. Exits 1 when nothing is |
 | `atr record list` | Every recording |
-| `atr record encode <id>` | Export an MP4 (the only part needing ffmpeg) |
+| `atr record encode <id>` | Export an MP4, still stretches cut (the only part needing ffmpeg). `--skip-idle=false` for real time |
 | `atr record repair <id>` | Rebuild the manifest of an interrupted recording |
 | `atr record rm <id>...` | Delete |
 | `atr record doctor` | Check dependencies. Exits 0 when recording will work |

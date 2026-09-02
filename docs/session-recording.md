@@ -470,7 +470,7 @@ atr record start --foreground   record until Ctrl+C instead
 atr record stop [id]            stop, and wait until the manifest is on disk
 atr record status               what is recording now; exits 1 when nothing is
 atr record list                 the same list the API returns
-atr record encode <id>          write recording.mp4
+atr record encode <id>          write recording.mp4, still stretches cut
 atr record repair <id>          rebuild manifest.json from frames.jsonl
 atr record rm <id>
 ```
