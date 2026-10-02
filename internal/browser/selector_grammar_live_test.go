@@ -266,6 +266,17 @@ var grammarAPIs = []struct {
 		}
 		return nil
 	}},
+	{"Drag", func(t *testing.T, f grammarForm) error {
+		if err := testBrowser.Drag(context.Background(), f.button, f.input); err != nil {
+			return err
+		}
+		got := pageValue(t, `document.getElementById("events").textContent`)
+		if !strings.Contains(got, "dragstart:place;") || !strings.Contains(got, "drop:note;") ||
+			strings.Contains(got, "decoy-button") {
+			return fmt.Errorf("events = %q, want the Place order button dragged onto the note field", got)
+		}
+		return nil
+	}},
 }
 
 func TestEveryTargetTakingAPIAcceptsTheSameGrammar(t *testing.T) {

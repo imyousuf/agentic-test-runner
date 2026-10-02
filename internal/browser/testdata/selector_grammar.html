@@ -31,6 +31,8 @@
       el.addEventListener("click", () => record("click:" + id));
       el.addEventListener("dblclick", () => record("dblclick:" + id));
       el.addEventListener("mouseover", () => record("hover:" + id));
+      el.addEventListener("dragstart", () => record("dragstart:" + id));
     }
+    document.getElementById("note").addEventListener("drop", () => record("drop:note"));
   </script>
 </body>
