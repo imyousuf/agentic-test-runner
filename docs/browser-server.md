@@ -204,11 +204,6 @@ accept the same three spellings `click` and `wait` do. (`click` and `wait` also
 take a UID, visible text, an aria-label or a data-testid; the others take a
 selector only.)
 
-One exception: the repeatable `--selector` flag of `computed-styles` and
-`computed-styles-diff` sends its values to the daemon joined by commas, so a
-selector that itself contains a comma — `contains(., "a")` in an XPath, say —
-is cut in two there. Pass such a selector positionally, one command each.
-
 | Flag | Description |
 |------|-------------|
 | `--timeout <ms>` | Timeout in milliseconds (default: 5000) |
@@ -524,8 +519,8 @@ The server exposes a REST API at `http://localhost:<port>/api/v1`:
 | `/url` | GET | Get current URL |
 | `/title` | GET | Get page title |
 | `/eval` | POST | Execute JavaScript |
-| `/computed-styles` | GET | Get computed CSS styles |
-| `/computed-styles-diff` | GET | Compare styles across pages |
+| `/computed-styles` | GET, POST | Get computed CSS styles; POST takes the request as JSON, with a batch as `"selectors": [...]` |
+| `/computed-styles-diff` | GET, POST | Compare styles across pages; POST as above |
 | `/text` | GET | Extract text content |
 | `/clean-snapshot` | GET | Get cleaned DOM subtree |
 | `/font-check` | GET | Check font load status |
