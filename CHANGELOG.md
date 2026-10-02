@@ -112,6 +112,13 @@ CLI need no changes.
   together with `--no-compile` is refused as a conflict of flags rather than as
   a stale script. A compiled script whose hash line was only pushed out of its
   header is not hand-written, and is compiled again as before. (#31)
+- **A wait ends when the run does.** `atr.waitFor`, `atr.waitForText`,
+  `atr.expectExists` and `atr.expectText` took the run's context and dropped
+  it, so a wait asked for longer than the run had left held the run for the
+  whole of it — a script with two seconds remaining sat in a sixty-second wait
+  for all sixty, and Ctrl-C had to wait with it. They stop at the caller's
+  deadline or cancellation now, and report the run's own timeout rather than a
+  missing element.
 - `atr.waitFor` on a selector the browser cannot parse is a script fault, as
   it already was for `atr.click` and `atr.exists`. It was reported as a
   timeout, which is retried — every retry failing the same way — before

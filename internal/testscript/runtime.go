@@ -356,6 +356,17 @@ func kindName(k FailureKind) string {
 	}
 }
 
+// checkCancelled aborts a host call when the run was cancelled, and only
+// then. A wait that ends because the run was interrupted has not timed out,
+// and the two are reported differently: a timeout is retried, a cancellation
+// is somebody asking for the run to stop. A run that merely ran out of time is
+// left to the caller, whose own message says what it was waiting for.
+func (r *runtime) checkCancelled() {
+	if errors.Is(r.ctx.Err(), context.Canceled) {
+		r.checkCtx()
+	}
+}
+
 // checkCtx aborts a host call when the run's deadline has passed. Host calls
 // are not interruptible once they enter Go, so every one of them checks on
 // the way in.

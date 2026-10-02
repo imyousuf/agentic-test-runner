@@ -433,6 +433,7 @@ func (r *runtime) jsWaitFor(target string, opts map[string]any) {
 		if errors.Is(err, ErrInvalidSelector) {
 			r.throwErr(err, target, fmt.Sprintf("waiting for %q", target))
 		}
+		r.checkCancelled()
 		r.throw(KindTimeout, target, "waiting for %q: %v (gave up after %s)", target, err, waitedSince(started))
 	}
 }
@@ -453,7 +454,8 @@ func (r *runtime) jsWaitForText(text string, opts map[string]any) {
 	r.checkCtx()
 	r.curTarget = text
 	timeout := durationOf(opts["timeout"], defaultWaitTimeout)
-	if err := r.browser.WaitForText(text, timeout); err != nil {
+	if err := r.browser.WaitForText(r.ctx, text, timeout); err != nil {
+		r.checkCancelled()
 		r.throw(KindTimeout, text, "waiting for text %q: %v", text, err)
 	}
 }
@@ -511,6 +513,11 @@ func (r *runtime) jsExpectMissing(target string, opts map[string]any) {
 			r.throw(fatal, target, "looking for %q: %v", target, err)
 		}
 		if !present {
+			// Unless the lookup was cut short by the run itself. The browser
+			// reports a lookup that ran out of time as "not found", and the
+			// run's deadline now ends a lookup too — so a run that expired
+			// mid-look would otherwise be told the thing had gone, and pass.
+			r.checkCtx()
 			return
 		}
 		if !time.Now().Before(deadline) {
@@ -715,6 +722,13 @@ func (r *runtime) jsExists(target string) bool {
 	present, fatal := existsOutcome(err)
 	if fatal != "" {
 		r.throw(fatal, target, "checking whether %q exists: %v", target, err)
+	}
+	if !present {
+		// "Absent" is only an answer if the lookup had its time. One the run's
+		// deadline cut short has seen nothing, and whatever the script does
+		// with a false from it — an assertion, a branch that fails — would be
+		// the run's impatience reported as the application's behaviour.
+		r.checkCtx()
 	}
 	return present
 }

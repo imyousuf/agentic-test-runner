@@ -317,29 +317,48 @@ func (b *Browser) Drag(ctx context.Context, fromTarget, toTarget string) error {
 }
 
 // WaitForElement waits for an element to appear.
+//
+// It waits for timeout or until the caller's context ends, whichever comes
+// first. The context used to be taken and dropped, so the timeout alone ended
+// the wait: a script with two seconds of its run left sat in a sixty-second
+// wait for all sixty, and the run reported its own timeout a minute late.
 func (b *Browser) WaitForElement(ctx context.Context, target string, timeout time.Duration) error {
 	page, err := b.CurrentPage()
 	if err != nil {
 		return err
 	}
 
-	page = page.Timeout(timeout)
+	page = bindDeadline(page, ctx).Timeout(timeout)
 	_, err = b.findElementWithin(page, target, timeout)
 	return err
 }
 
 // WaitForElementVisible waits for an element to appear and be visible.
-// It retries until the element is both present and visible, or the timeout expires.
+// It retries until the element is both present and visible, the timeout
+// expires, or the caller's context ends.
 func (b *Browser) WaitForElementVisible(ctx context.Context, target string, timeout time.Duration) error {
 	page, err := b.CurrentPage()
 	if err != nil {
 		return err
 	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	page = bindDeadline(page, ctx)
 
 	deadline := time.Now().Add(timeout)
 	poll := 200 * time.Millisecond
 
 	for {
+		// The caller going away ends the wait, and is reported as what it is:
+		// a cancelled wait is not an element that failed to show.
+		if err := ctx.Err(); err != nil {
+			if errors.Is(err, context.DeadlineExceeded) {
+				return fmt.Errorf("element not visible before the caller's deadline: %s", target)
+			}
+			return err
+		}
+
 		remaining := time.Until(deadline)
 		if remaining <= 0 {
 			return fmt.Errorf("element not visible within timeout: %s", target)
@@ -364,7 +383,11 @@ func (b *Browser) WaitForElementVisible(ctx context.Context, target string, time
 		if errors.Is(err, ErrInvalidSelector) {
 			return err
 		}
-		time.Sleep(poll)
+
+		select {
+		case <-ctx.Done():
+		case <-time.After(poll):
+		}
 	}
 }
 
