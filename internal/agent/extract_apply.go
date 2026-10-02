@@ -67,9 +67,12 @@ func (a *Agent) RefactorOperations(ctx context.Context, req RefactorRequest) (*R
 		return out, nil
 	}
 
-	scripts, err := loadScripts(req.Specs)
+	scripts, handWritten, err := loadScripts(req.Specs)
 	if err != nil {
 		return out, err
+	}
+	if len(handWritten) > 0 {
+		logf("leaving %s alone: hand-written scripts are not hoisted", strings.Join(shortNames(handWritten), ", "))
 	}
 	if len(scripts) < 2 {
 		return out, nil
@@ -407,19 +410,29 @@ func ensureTrailingNewline(s string) string {
 
 // loadScripts reads the compiled script beside each spec, skipping the specs
 // that have not been compiled yet.
-func loadScripts(specs []string) (map[string]string, error) {
-	out := map[string]string{}
+//
+// Hand-written scripts are skipped too, and returned by path so the caller can
+// say so. Hoisting rewrites the scripts it is shown; a script with no spec
+// hash is one ATR has promised not to rewrite, and the way to keep that is for
+// it never to be a candidate — not compared for repetition, not sent to the
+// agent, and so not a path ResolveAgainst will accept a rewrite of.
+func loadScripts(specs []string) (scripts map[string]string, handWritten []string, err error) {
+	scripts = map[string]string{}
 	for _, spec := range specs {
 		stored, err := testscript.Load(spec)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if stored == nil {
 			continue
 		}
-		out[stored.Path] = stored.Source
+		if stored.HandWritten() {
+			handWritten = append(handWritten, stored.Path)
+			continue
+		}
+		scripts[stored.Path] = stored.Source
 	}
-	return out, nil
+	return scripts, handWritten, nil
 }
 
 func readLibrary(anySpec string) (string, error) {

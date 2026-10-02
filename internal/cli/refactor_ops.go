@@ -147,9 +147,13 @@ func reportOverlaps(specs []string) error {
 		if err != nil {
 			return exitWith(ExitInfra, err)
 		}
-		if stored != nil {
-			scripts[stored.Path] = stored.Source
+		// Hand-written scripts are not hoisted, so repetition involving one
+		// is not something a run without --dry-run would act on. Reporting it
+		// here would promise a refactor that never comes.
+		if stored == nil || stored.HandWritten() {
+			continue
 		}
+		scripts[stored.Path] = stored.Source
 	}
 
 	overlaps, err := testscript.FindOverlaps(scripts)

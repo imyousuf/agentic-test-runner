@@ -97,7 +97,10 @@ Edit the spec and the next run recompiles. Reflow whitespace and it does not —
 the hash is over normalised text, so `sha256sum` on the raw file will never
 match it. A script that has never completed a run carries
 `// atr-unverified` and is recompiled rather than trusted. Deleting the hash
-line marks a script hand-written and off-limits to the compiler.
+line marks a script hand-written and off-limits to the compiler: it is replayed
+as it is, under `--no-compile` too, and never recompiled, repaired or hoisted.
+A failure is still triaged and the reason reported, but a proposed rewrite is
+discarded. `--recompile` is the one way to replace it with a compiled script.
 
 A compile drives the spec **more than once** — once to learn the application,
 then again to verify what it wrote — so a destructive spec needs a rebuildable

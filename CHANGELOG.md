@@ -100,6 +100,18 @@ CLI need no changes.
   lookup now polls until the caller's budget is spent, in one round trip per
   poll. `expectExists`, `expectMissing` and `waitFor` report the time they
   actually waited instead of the timeout they were handed. (#30)
+- **A hand-written script is left alone.** Removing the `atr-spec-sha256`
+  line is the documented way to keep a script as your own, but a plain run read
+  "no hash" as "the spec changed": it spent a compile and overwrote the file,
+  and `--no-compile` refused to run it at all, calling it stale. A script with
+  no hash line is now replayed as it stands in both modes, whatever the spec
+  says. Nothing writes to it: not a compile, not a repair (the diagnosis is
+  still reported; the proposed rewrite is discarded), not a library stamp, and
+  not the hoist, which no longer considers it. `--recompile` remains the
+  explicit way to replace one, and says that it is doing so. `--recompile`
+  together with `--no-compile` is refused as a conflict of flags rather than as
+  a stale script. A compiled script whose hash line was only pushed out of its
+  header is not hand-written, and is compiled again as before. (#31)
 - `atr.waitFor` on a selector the browser cannot parse is a script fault, as
   it already was for `atr.click` and `atr.exists`. It was reported as a
   timeout, which is retried — every retry failing the same way — before
