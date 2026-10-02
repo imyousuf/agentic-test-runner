@@ -87,6 +87,12 @@ func printBehaviorOutcome(testFile string, outcome *agent.RunOutcome) {
 		switch {
 		case f.Kind.IsTestFailure():
 			fmt.Println("  → the application did not behave as the spec requires")
+		case f.Kind.Repairable() && outcome.HandWritten:
+			// Re-running will not help: nothing rewrites a hand-written
+			// script, so the same advice as for a compiled one would send
+			// its author round in a circle.
+			fmt.Println("  → the script no longer matches the page; it is hand-written, so ATR will not rewrite it —")
+			fmt.Println("    fix it by hand, or pass --recompile to replace it with a compiled one")
 		case f.Kind.Repairable():
 			fmt.Println("  → the script no longer matches the page; re-run to let the agent repair it")
 		case f.Kind == testscript.KindConfig:
@@ -167,5 +173,14 @@ func needsLiveApp(specPath, spec string) bool {
 		return false
 	}
 	stored, err := testscript.Load(specPath)
-	return err != nil || stored == nil || !stored.Fresh(spec)
+	if err != nil || stored == nil {
+		return true
+	}
+	// A hand-written script is replayed whatever the spec says, so it needs a
+	// live application no more than any other replay does. It is never Fresh,
+	// which is why it has to be asked about first.
+	if stored.HandWritten() {
+		return false
+	}
+	return !stored.Fresh(spec)
 }

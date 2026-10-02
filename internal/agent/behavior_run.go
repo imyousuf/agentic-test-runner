@@ -142,6 +142,10 @@ type RunOutcome struct {
 	ValuesPath string
 	// Compiled is true if this run generated the script.
 	Compiled bool
+	// HandWritten is true when the script that ran carries no spec hash, which
+	// is how a person marks one as theirs. Such a script is replayed as it
+	// stands: this run did not compile it and may not rewrite it.
+	HandWritten bool
 	// Repaired is true if the script was rewritten during this run.
 	Repaired bool
 	// CompileDuration is how long the compile took, zero when the script was
@@ -287,7 +291,11 @@ func (a *Agent) RunBehavior(ctx context.Context, req RunRequest) (*RunOutcome, e
 		// an assertion failure means the script is right and the application
 		// is broken, so every run while the app stayed broken would pay for a
 		// full model compile.
-		if result.Failure == nil || result.Failure.Kind != testscript.KindScript {
+		//
+		// A hand-written script is never stamped, so there is nothing to
+		// write and nothing to promise: it has no library header, which would
+		// otherwise read as "the library changed" on every run it ever makes.
+		if !outcome.HandWritten && (result.Failure == nil || result.Failure.Kind != testscript.KindScript) {
 			// Under --no-compile the checkout is CI's, not ours: a restamp
 			// there would leave the working tree dirty on a machine nobody is
 			// watching. Say what would have been written instead.
@@ -385,6 +393,15 @@ func (a *Agent) RunBehavior(ctx context.Context, req RunRequest) (*RunOutcome, e
 			return outcome, nil
 
 		case VerdictRepaired:
+			// A hand-written script is never rewritten, whatever the flags
+			// say. The diagnosis is kept — it is worth having — but applying
+			// it would overwrite a file a person owns, and save it under a
+			// spec hash that makes it ATR's to recompile from then on.
+			if outcome.HandWritten {
+				logf("the agent proposed a repair, but %s is hand-written and ATR does not rewrite it — %s",
+					testscript.ScriptPath(req.SpecPath), triage.Reason)
+				return outcome, nil
+			}
 			// --no-compile forbids rewriting a committed script as firmly as
 			// --no-repair does: CI asked for a replay, and a script rewritten
 			// on a machine nobody is watching is a change nobody reviewed.
@@ -501,6 +518,13 @@ func lintScript(req RunRequest, source string, outcome *RunOutcome, logf func(st
 	for _, f := range blocking {
 		reasons = append(reasons, f.String())
 	}
+	// The usual advice is to say more in the spec and compile again. For a
+	// hand-written script that would replace the file with a compiled one,
+	// which is the opposite of what its author asked for.
+	if outcome.HandWritten {
+		return fmt.Errorf("%s: %w\n  %s is hand-written, so ATR will not rewrite it: add an assertion that can fail (or pass --lint=warn to accept it as it is)",
+			strings.Join(reasons, "\n  "), ErrScriptCannotFail, testscript.ScriptPath(req.SpecPath))
+	}
 	return fmt.Errorf("%s: %w\n  say in %s what must be true for the test to have passed, then re-run with --recompile (or --lint=warn to accept it as it is)",
 		strings.Join(reasons, "\n  "), ErrScriptCannotFail, req.SpecPath)
 }
@@ -515,9 +539,31 @@ func (a *Agent) loadOrCompile(ctx context.Context, req RunRequest, outcome *RunO
 
 	switch {
 	case req.Recompile:
-		logf("recompiling on request")
+		// The one way to hand a hand-written script back to the compiler:
+		// asked for by name, so it is done — and said, because it replaces a
+		// file somebody wrote.
+		if stored != nil && stored.HandWritten() {
+			logf("recompiling on request; this replaces the hand-written script at %s", stored.Path)
+		} else {
+			logf("recompiling on request")
+		}
 	case stored == nil:
 		logf("no compiled script yet; compiling")
+	case stored.HandWritten():
+		// No spec hash is how a person says "this one is mine", and the
+		// promise is that ATR leaves it alone. It is replayed as it stands,
+		// with or without --no-compile: there is no hash to hold the spec
+		// against, so nothing here can be stale, and a script nobody can
+		// recompile is the last one a replay-only run should refuse.
+		//
+		// Checked before the two cases below because both are true of it. It
+		// is never Fresh, which used to be read as "the spec changed" — a
+		// model compile, and the file overwritten. And it may still carry an
+		// atr-unverified note, which would send it the same way.
+		logf("%s has no atr-spec-sha256 line, so it is hand-written; replaying it as it is", stored.Path)
+		outcome.ScriptPath = stored.Path
+		outcome.HandWritten = true
+		return stored.Source, nil
 	case stored.Unverified:
 		logf("the compiled script has never completed a run; recompiling")
 	case !stored.Fresh(req.Spec):
@@ -539,6 +585,12 @@ func (a *Agent) loadOrCompile(ctx context.Context, req RunRequest, outcome *RunO
 	if req.NoCompile {
 		if stored == nil {
 			return "", fmt.Errorf("no compiled script for %s and --no-compile is set; run without it once to compile", req.SpecPath)
+		}
+		// Asked for outright, so no state of the script explains the refusal:
+		// the two flags are what disagree. Without this the message below
+		// calls a perfectly current script stale.
+		if req.Recompile {
+			return "", fmt.Errorf("--recompile asks for a compile of %s and --no-compile forbids one; pass one or the other", req.SpecPath)
 		}
 		if stored.Unverified {
 			return "", fmt.Errorf("%s has never completed a run and --no-compile is set; run without it once to prove it", stored.Path)

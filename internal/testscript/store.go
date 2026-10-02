@@ -31,7 +31,7 @@ const specHeader = "// atr-spec-sha256: "
 //
 // This is a marker of its own rather than the absence of a hash, because the
 // absence of a hash already means something else — it is how a human marks a
-// script as hand-written and off-limits to the compiler.
+// script as hand-written and off-limits to the compiler. See HandWritten.
 const unverifiedHeader = "// atr-unverified: compiled but not yet run"
 
 // libHeader records the hash of the shared library a script was compiled
@@ -111,10 +111,50 @@ func (s *Stored) LibraryChanged(libHash string) bool {
 
 // Fresh reports whether the script was compiled from this exact spec.
 //
-// A script with no header is never fresh: it was hand-written or produced by
-// an older version, and the safe assumption is that it may not match.
+// A script with no header is never fresh, and that is the whole of what this
+// says about it: there is nothing to hold the spec against. It is not thereby
+// stale. Not-fresh was once read as "the spec changed", which sent a
+// hand-written script to the compiler to be overwritten — so a caller deciding
+// what to do with a script asks HandWritten first.
 func (s *Stored) Fresh(spec string) bool {
 	return s.SpecHash != "" && !s.Unverified && s.SpecHash == SpecHash(spec)
+}
+
+// HandWritten reports whether a person has taken this script over.
+//
+// The marker is the missing spec hash line and nothing else. Every script ATR
+// writes carries one, so its absence can only be someone's doing, and what it
+// asks for is to be left alone: replayed as it stands, and never compiled
+// over, repaired, stamped or hoisted.
+//
+// Nothing else in the header is consulted. A script that kept its
+// atr-unverified note but lost its hash is hand-written too — reading that
+// note as "compile again" would overwrite the file by the one route its owner
+// has just closed.
+//
+// Missing means missing from the whole file, which is a narrower thing than
+// SpecHash being empty. SpecHash is read from the comment block at the top, so
+// a licence comment, a 'use strict' or a byte-order mark above that block
+// leaves it empty while the line is still there. That is a compiled script ATR
+// can no longer vouch for, not one somebody has claimed, and treating it as
+// claimed would replay it for ever: a later spec edit would never take effect
+// and CI would stay green. It stays what it was before — not fresh, so
+// compiled again. An empty file is nobody's script either.
+func (s *Stored) HandWritten() bool {
+	return strings.TrimSpace(s.Source) != "" && !hasSpecHashLine(s.Source)
+}
+
+// hasSpecHashLine reports whether any line of a script is a spec hash line,
+// wherever in the file it sits.
+func hasSpecHashLine(source string) bool {
+	marker := strings.TrimSpace(specHeader)
+	for _, line := range strings.Split(source, "\n") {
+		line = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "\ufeff"))
+		if strings.HasPrefix(line, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 // Load reads the compiled script for a spec, if one exists.
@@ -173,6 +213,15 @@ func Stamp(specPath, libHash string) error {
 	}
 
 	body := string(data)
+
+	// A hand-written script is not stamped, and not written to at all. It
+	// used to be rewritten with the same bytes — no header was added, but the
+	// file was replaced, which is still ATR's hand in a file it had promised
+	// to leave alone, and would have dropped an atr-unverified note with it.
+	if !hasSpecHashLine(body) {
+		return nil
+	}
+
 	if !strings.Contains(body, unverifiedHeader) &&
 		parseHeader(body, libHeader) == libHash {
 		return nil
@@ -198,9 +247,9 @@ func Stamp(specPath, libHash string) error {
 		kept = append(kept, line)
 	}
 
-	// A script compiled before the library existed has no header to rewrite.
-	// A hand-written one has no spec header either, and that is the marker
-	// saying ATR should leave it alone — so it gets nothing added to it.
+	// A script compiled before the library existed has no header to rewrite,
+	// so it gets one — provided its own header is where a header belongs. (A
+	// hand-written script never reaches here.)
 	if !stamped && libHash != "" && parseHeader(body, specHeader) != "" {
 		kept = insertAfterSpecHeader(kept, libHeader+libHash)
 	}

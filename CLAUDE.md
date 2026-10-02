@@ -103,6 +103,15 @@ model in the loop; the agent returns only to triage a failure.
 - Compiled scripts are **committed**, and carry an `atr-spec-sha256` header.
   A spec edit invalidates them; a whitespace-only edit does not, because a
   reformat should not cost tokens.
+- A script with **no** `atr-spec-sha256` line anywhere in it is hand-written,
+  and `Stored.HandWritten()` is the question to ask — not `Fresh()`, which is
+  false for it and used to be read as "the spec changed", and not
+  `SpecHash == ""`, which is also true of a compiled script whose header was
+  pushed down by a licence comment (that one is compiled again). Every route that
+  writes a script has to ask first: `loadOrCompile` replays it (under
+  `--no-compile` too), the repair path keeps the diagnosis and drops the
+  rewrite, `Stamp` does not touch the file, and the hoist never loads it as a
+  candidate. `--recompile` is the only thing that replaces one.
 
 2. **Behavior Testing** (`atr run --behavior tests/login.test.txt`) — Parses `.test.txt` files with natural language test steps, launches a browser, and the agent drives browser tools to execute the steps and report pass/fail.
 

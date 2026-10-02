@@ -548,12 +548,27 @@ regression must not be hidden by a flaky neighbour.
 
 ## Editing
 
-Edit the **spec**, not the script — the next run recompiles from it. If you
-edit the script by hand it keeps working, but its header no longer matches the
-spec, so the following run will regenerate and overwrite your changes. To keep
-a hand-written script, remove the `atr-spec-sha256` line; ATR will then treat
-it as stale and refuse to run it under `--no-compile` rather than silently
-replacing it.
+Edit the **spec**, not the script — the next run recompiles from it. A script
+you edit by hand keeps its header, so ATR still treats it as its own: it is
+replayed while the spec stays as it was, compiled over the next time the spec
+changes, and rewritten if a repair is ever applied to it.
+
+To keep a hand-written script, remove the `atr-spec-sha256` line. That line is
+the only marker. Without it the script is yours, and ATR replays it exactly as
+it stands — on a plain run and under `--no-compile` alike, and whatever the
+spec says, since there is no hash to hold the spec against. It is never
+compiled over, never rewritten by a repair, never stamped with a library hash
+and never hoisted into `_shared.js`. A failure is still triaged, so you learn
+whether the page moved or the application broke; the agent's reason is
+reported, and any rewrite it proposes is discarded. `--recompile` is the one
+way to hand the script back: it replaces the file with a freshly compiled one,
+and says so.
+
+"No hash line" means none anywhere in a file that has something in it. A script
+whose hash line has merely been pushed out of the header — by a licence comment
+or a `'use strict'` added above it — is not hand-written; it is a compiled
+script ATR can no longer vouch for, and it is compiled again, as an empty file
+is.
 
 A script therefore has three states, and they mean different things:
 
@@ -561,7 +576,7 @@ A script therefore has three states, and they mean different things:
 |--------|-------|------------------------|
 | hash matches the spec | verified | replays it; no model calls unless it fails |
 | hash plus `// atr-unverified` | compiled, never completed a run | compiles again |
-| no hash line | hand-written | leaves it alone; refuses under `--no-compile` |
+| no hash line | hand-written | replays it as it is, under `--no-compile` too; never compiles over it, repairs it or hoists from it |
 
 The middle state exists because a compile used to be trusted the moment the
 model stopped talking. A script that could not run was stamped anyway and
