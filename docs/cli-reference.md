@@ -235,11 +235,6 @@ A selector is CSS, XPath (anything beginning `//`), or CSS with a trailing
 `download-images` all accept the same three spellings, as a positional
 argument or through `--selector` / `--selector-all`.
 
-One exception: the repeatable `--selector` flag of `computed-styles` and
-`computed-styles-diff` (batch mode) sends its values to the daemon joined by
-commas, so a selector that itself contains a comma is cut in two there. Pass
-such a selector positionally instead.
-
 #### scroll flags
 
 | Flag | Description |

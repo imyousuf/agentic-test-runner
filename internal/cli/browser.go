@@ -522,11 +522,7 @@ Use repeated --selector flags to batch-query multiple selectors in one call.`,
 				if len(args) > 0 {
 					return fmt.Errorf("cannot use both positional selector and --selector flags")
 				}
-				path := "/computed-styles?selectors=" + url.QueryEscape(strings.Join(selectors, ","))
-				if properties != "" {
-					path += "&properties=" + url.QueryEscape(properties)
-				}
-				return apiGet(path)
+				return apiPost("/computed-styles", batchStylesBody(selectors, properties))
 			}
 
 			path := "/computed-styles?"
@@ -545,8 +541,30 @@ Use repeated --selector flags to batch-query multiple selectors in one call.`,
 	}
 	cmd.Flags().StringVar(&properties, "properties", "", "Comma-separated CSS properties to return (e.g., fontSize,color,fontWeight)")
 	cmd.Flags().StringVar(&selectorAll, "selector-all", "", "Selector (CSS, XPath or :has-text()) matching multiple elements to get styles for")
-	cmd.Flags().StringArrayVar(&selectors, "selector", nil, "Selector (repeatable for batch mode; values are comma-joined, so one containing a comma must be passed positionally)")
+	cmd.Flags().StringArrayVar(&selectors, "selector", nil, "Selector: CSS, XPath or :has-text() (repeatable for batch mode)")
 	return cmd
+}
+
+// batchStylesBody is the request a batch of selectors is sent as.
+//
+// A JSON body with one selector per element, never a query parameter. The
+// batch used to be joined with commas into one parameter and split on commas
+// by the daemon, which cut any selector containing one in two —
+// contains(., "x") in an XPath, a CSS selector list — and reported the halves
+// as unmatched.
+func batchStylesBody(selectors []string, properties string) map[string]any {
+	body := map[string]any{"selectors": selectors}
+	if properties != "" {
+		// Property names contain no commas, so this list can be split.
+		var names []string
+		for _, name := range strings.Split(properties, ",") {
+			if name = strings.TrimSpace(name); name != "" {
+				names = append(names, name)
+			}
+		}
+		body["properties"] = names
+	}
+	return body
 }
 
 func newBrowserComputedStylesDiffCmd() *cobra.Command {
@@ -578,15 +596,16 @@ Use repeated --selector flags to batch-diff multiple selectors with an overall s
 				if len(args) > 0 {
 					return fmt.Errorf("cannot use both positional selector and --selector flags")
 				}
-				path := "/computed-styles-diff?selectors=" + url.QueryEscape(strings.Join(selectors, ","))
-				path += "&against=" + pageIdx
-				if properties != "" {
-					path += "&properties=" + url.QueryEscape(properties)
+				index, err := strconv.Atoi(pageIdx)
+				if err != nil {
+					return fmt.Errorf("--against must be a page index (e.g., 0, 1, or page:0): %w", err)
 				}
+				body := batchStylesBody(selectors, properties)
+				body["against"] = index
 				if selectorTarget != "" {
-					path += "&selector_target=" + url.QueryEscape(selectorTarget)
+					body["selector_target"] = selectorTarget
 				}
-				return apiGet(path)
+				return apiPost("/computed-styles-diff", body)
 			}
 
 			if len(args) < 1 {
@@ -607,7 +626,7 @@ Use repeated --selector flags to batch-diff multiple selectors with an overall s
 	cmd.Flags().StringVar(&against, "against", "0", "Page index to compare against (e.g., 0, page:0)")
 	cmd.Flags().StringVar(&properties, "properties", "", "Comma-separated CSS properties to compare")
 	cmd.Flags().StringVar(&selectorTarget, "selector-target", "", "Selector on target page (defaults to source selector)")
-	cmd.Flags().StringArrayVar(&selectors, "selector", nil, "Selector (repeatable for batch mode; values are comma-joined, so one containing a comma must be passed positionally)")
+	cmd.Flags().StringArrayVar(&selectors, "selector", nil, "Selector: CSS, XPath or :has-text() (repeatable for batch mode)")
 	return cmd
 }
 

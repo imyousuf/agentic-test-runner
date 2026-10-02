@@ -157,6 +157,15 @@ CLI need no changes.
 - **Drag works.** `atr browser drag`, `POST /drag` and the `browser_drag` tool
   failed for every pair of elements with `from.getBoundingClientRect is not a
   function`: both elements were found and then handed to the page as JSON.
+- **A batch of selectors may contain commas.** The repeatable `--selector`
+  flag of `atr browser computed-styles` and `computed-styles-diff` joined its
+  values with commas and the daemon split them on commas, so a selector
+  containing one — `contains(., "x")` in an XPath, a CSS selector list — was
+  cut in two and both halves reported as unmatched. The batch is sent as a
+  JSON body now: `POST /computed-styles` and `POST /computed-styles-diff` take
+  the request as JSON, with `selectors` and `properties` as arrays. The `GET`
+  form with `selectors=a,b` still works. A newer CLI against an older daemon gets `method not allowed`
+  rather than a wrong answer.
 - `atr.waitFor` on a selector the browser cannot parse is a script fault, as
   it already was for `atr.click` and `atr.exists`. It was reported as a
   timeout, which is retried — every retry failing the same way — before

@@ -722,44 +722,71 @@ func (s *Server) handleDownloadImages(w http.ResponseWriter, r *http.Request) {
 	writeSuccess(w, resp)
 }
 
-// handleComputedStylesDiff handles GET /api/v1/computed-styles-diff
+// handleComputedStylesDiff handles GET and POST /api/v1/computed-styles-diff.
+//
+// GET takes the request as query parameters, with a batch of selectors joined
+// by commas. POST takes it as a JSON body, where a batch is an array. The body
+// is the form to use for a batch: a selector may itself contain a comma —
+// contains(., "x") in an XPath, a CSS selector list — and joined into one
+// parameter and split again it arrives in pieces that each match nothing.
 func (s *Server) handleComputedStylesDiff(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
+	var req ops.ComputedStylesDiffRequest
+
+	switch r.Method {
+	case http.MethodGet:
+		q := r.URL.Query()
+
+		againstStr := q.Get("against")
+		if againstStr == "" {
+			writeError(w, http.StatusBadRequest, "against (page index) is required")
+			return
+		}
+		againstIdx, err := strconv.Atoi(againstStr)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "against must be a page index number")
+			return
+		}
+
+		req = ops.ComputedStylesDiffRequest{
+			Against:        againstIdx,
+			SelectorTarget: q.Get("selector_target"),
+			Selector:       q.Get("selector"),
+			Selectors:      splitQueryList(q.Get("selectors")),
+		}
+		if p := q.Get("properties"); p != "" {
+			req.Properties = strings.Split(p, ",")
+		}
+		// A batch wins over a single selector, as it always has.
+		if len(req.Selectors) > 0 {
+			req.Selector = ""
+		}
+
+	case http.MethodPost:
+		// The page index is decoded through a pointer: 0 is a real page, so
+		// an index that was left out must not quietly mean it.
+		var body struct {
+			ops.ComputedStylesDiffRequest
+			Against *int `json:"against"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			writeError(w, http.StatusBadRequest, invalidStylesBody(err))
+			return
+		}
+		if body.Against == nil {
+			writeError(w, http.StatusBadRequest, "against (page index) is required")
+			return
+		}
+		req = body.ComputedStylesDiffRequest
+		req.Against = *body.Against
+
+	default:
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-	q := r.URL.Query()
 
-	againstStr := q.Get("against")
-	if againstStr == "" {
-		writeError(w, http.StatusBadRequest, "against (page index) is required")
+	if req.Selector == "" && len(req.Selectors) == 0 {
+		writeError(w, http.StatusBadRequest, "selector or selectors is required")
 		return
-	}
-	againstIdx, err := strconv.Atoi(againstStr)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "against must be a page index number")
-		return
-	}
-
-	req := ops.ComputedStylesDiffRequest{
-		Against:        againstIdx,
-		SelectorTarget: q.Get("selector_target"),
-	}
-	if p := q.Get("properties"); p != "" {
-		req.Properties = strings.Split(p, ",")
-	}
-	if sels := q.Get("selectors"); sels != "" {
-		split := strings.Split(sels, ",")
-		for i := range split {
-			split[i] = strings.TrimSpace(split[i])
-		}
-		req.Selectors = split
-	} else {
-		req.Selector = q.Get("selector")
-		if req.Selector == "" {
-			writeError(w, http.StatusBadRequest, "selector or selectors is required")
-			return
-		}
 	}
 
 	res, err := ops.ComputedStylesDiff(r.Context(), s.browser, req)
@@ -817,27 +844,63 @@ func (s *Server) handleScroll(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleComputedStyles handles GET /api/v1/computed-styles
+// invalidStylesBody says what was wrong with a computed-styles body.
+//
+// With the decoder's own words, because the likeliest mistake is one it names:
+// the query form takes its lists comma-joined in a string, and a body carrying
+// "properties": "fontSize,color" over from it needs to be told that a list is
+// an array here.
+func invalidStylesBody(err error) string {
+	return "invalid request body (selectors and properties are JSON arrays): " + err.Error()
+}
+
+// splitQueryList reads a comma-joined query parameter as a list.
+//
+// Only the query form of a batch goes through this, and it is kept for
+// callers that already send one. It cannot carry a selector that contains a
+// comma; a JSON body can.
+func splitQueryList(value string) []string {
+	if value == "" {
+		return nil
+	}
+	parts := strings.Split(value, ",")
+	for i := range parts {
+		parts[i] = strings.TrimSpace(parts[i])
+	}
+	return parts
+}
+
+// handleComputedStyles handles GET and POST /api/v1/computed-styles.
+//
+// GET takes the request as query parameters; POST takes the same request as a
+// JSON body, which is the form to use for a batch of selectors. See
+// handleComputedStylesDiff.
 func (s *Server) handleComputedStyles(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
+	var req ops.ComputedStylesRequest
+
+	switch r.Method {
+	case http.MethodGet:
+		q := r.URL.Query()
+		req = ops.ComputedStylesRequest{
+			Selector:    q.Get("selector"),
+			SelectorAll: q.Get("selector_all"),
+			Selectors:   splitQueryList(q.Get("selectors")),
+		}
+		if p := q.Get("properties"); p != "" {
+			req.Properties = strings.Split(p, ",")
+		}
+
+	case http.MethodPost:
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, invalidStylesBody(err))
+			return
+		}
+
+	default:
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-	q := r.URL.Query()
-	req := ops.ComputedStylesRequest{
-		Selector:    q.Get("selector"),
-		SelectorAll: q.Get("selector_all"),
-	}
-	if p := q.Get("properties"); p != "" {
-		req.Properties = strings.Split(p, ",")
-	}
-	if sels := q.Get("selectors"); sels != "" {
-		split := strings.Split(sels, ",")
-		for i := range split {
-			split[i] = strings.TrimSpace(split[i])
-		}
-		req.Selectors = split
-	}
+
 	if req.Selector == "" && req.SelectorAll == "" && len(req.Selectors) == 0 {
 		writeError(w, http.StatusBadRequest, "selector, selector_all, or selectors is required")
 		return
