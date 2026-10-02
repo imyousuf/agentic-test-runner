@@ -106,10 +106,7 @@ func TestActionsThroughHasTextWaitForALateElement(t *testing.T) {
 	})
 
 	// A read with no deadline of its own gets the default search budget of
-	// three seconds. rod polls with a backoff — about 0.2s, 0.6s and 1.4s in,
-	// then not again until 3s — for any selector. The button is put between
-	// the second and third of those, with room either side: the cadence is
-	// not what is under test here.
+	// three seconds, and the button arrives well inside it.
 	t.Run("GetTextContent", func(t *testing.T) {
 		start := openLateButton(t, "ms=800")
 
