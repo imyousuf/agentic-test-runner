@@ -219,8 +219,15 @@ The AI finds elements using multiple strategies:
 2. **Test ID**: `[data-testid="submit-btn"]`
 3. **Name attribute**: `[name="email"]`
 4. **Placeholder**: `[placeholder="Enter email"]`
-5. **Text content**: Element containing "Sign In"
+5. **Text content**: the element whose text is "Sign In" exactly; failing
+   that, a button or link containing it; failing that, the smallest element on
+   the page showing it
 6. **CSS selector**: Direct selector like `#submit`
+
+All of these are tried on every look, so a target is found by whichever applies
+as soon as the element is there. Text given in part is matched as written
+against what the page shows — the title and the source of inline scripts are
+not searched — and only once the exact readings have had a head start.
 
 **Best Practice**: Use `aria-label` or `data-testid` for reliable element targeting.
 

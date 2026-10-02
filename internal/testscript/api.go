@@ -454,9 +454,11 @@ func (r *runtime) jsWaitForText(text string, opts map[string]any) {
 	r.checkCtx()
 	r.curTarget = text
 	timeout := durationOf(opts["timeout"], defaultWaitTimeout)
+	started := time.Now()
 	if err := r.browser.WaitForText(r.ctx, text, timeout); err != nil {
 		r.checkCancelled()
-		r.throw(KindTimeout, text, "waiting for text %q: %v", text, err)
+		// The error already says what was being waited for.
+		r.throw(KindTimeout, text, "%v (gave up after %s)", err, waitedSince(started))
 	}
 }
 

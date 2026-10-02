@@ -126,6 +126,34 @@ CLI need no changes.
   reported missing, and the last second of any wait was blind. A lookup now
   looks at least every half second and once more just before it gives up.
   `atr.waitForText` is paced the same way.
+- **Plain targets work in every call, not only in a click.** A target that is
+  not a selector — visible text, an aria-label, a data-testid, a name, a
+  placeholder — is read each of those ways, and each way used to wait a slice
+  of the budget before the next was tried. The slices added up to more than the
+  budget, so the later ways never had a turn: `atr.exists("Sign in")` was
+  false with the button on the page, `atr.expectExists("Welcome")` reported a
+  heading that was there all along as an assertion failure, and
+  `atr.expectMissing("Sign in")` passed. A click on visible text worked, after
+  two seconds spent on the four attributes tried before it. Every way is now
+  tried on every look. The ways that match text in part join half way through
+  the budget (after a second at most), so that an exact match a render away is
+  not beaten by a partial one already on the page.
+- **Text in part is read from what the page shows, as written.** It used to
+  match the source of inline scripts, and — being read as a regular expression
+  — almost anything: a selector that had not rendered yet was a pattern that
+  matched some word on most pages. It is now matched literally against what the
+  body renders and the values its fields show, and resolves to the smallest
+  element showing it, where it used to resolve to the root element, so a click
+  on it landed in the middle of the viewport. A target written as a selector
+  (`a[href="/logout"]`, `dialog`) is never matched as part of some text. Exact
+  text no longer matches the `<title>`, which cannot be clicked: that click
+  waited thirty seconds. A target that relied on being a pattern
+  (`Sign (in|up)`) no longer matches.
+- **`atr.waitForText` waits for the text to be shown.** It matched the source
+  of inline scripts, so on a page whose script contains the words it will later
+  display — most pages — the wait returned at once.
+- A snapshot UID is `e` and a number and nothing else. Text beginning that
+  way, such as `e2e suite`, was read as element 2.
 - `atr.waitFor` on a selector the browser cannot parse is a script fault, as
   it already was for `atr.click` and `atr.exists`. It was reported as a
   timeout, which is retried — every retry failing the same way — before

@@ -400,7 +400,7 @@ func (b *Browser) Snapshot(verbose bool) ([]ElementInfo, error) {
 	}
 
 	// Get all interactive elements
-	elements, err := page.Elements("button, input, select, textarea, a, [role], [aria-label], [data-testid]")
+	elements, err := page.Elements(snapshotSelector)
 	if err != nil {
 		return nil, err
 	}
@@ -639,7 +639,14 @@ func tryFind(page *rod.Page, timeout time.Duration, fn func(*rod.Page) (*rod.Ele
 	// The lookup's pacing is left behind with its deadline. An element carries
 	// the sleeper of the page it was found through, and uses it for its own
 	// waits — to become interactable, to stop moving. Those keep rod's.
-	return el.Context(page.Timeout(elementActionTimeout).GetContext()).Sleeper(rod.DefaultSleeper), nil
+	return actionBound(page, el), nil
+}
+
+// actionBound returns el ready to be acted on: bound to page's own context
+// with an action-sized deadline, rather than to whatever was left of the
+// search that found it. See tryFind.
+func actionBound(page *rod.Page, el *rod.Element) *rod.Element {
+	return el.Context(page.Timeout(elementActionTimeout).GetContext()).Sleeper(rod.DefaultSleeper)
 }
 
 func (b *Browser) findElement(page *rod.Page, target string) (*rod.Element, error) {
@@ -649,17 +656,6 @@ func (b *Browser) findElement(page *rod.Page, target string) (*rod.Element, erro
 // findElementWithin is findElement with the budget stated outright, for
 // callers that have been given an explicit timeout to honour.
 func (b *Browser) findElementWithin(page *rod.Page, target string, budget time.Duration) (*rod.Element, error) {
-	// Each strategy in the fallback chain gets a slice of the budget rather
-	// than a fixed 500ms, so that a generous caller is generous all the way
-	// down. At the default budget this works out at the same 500ms as before.
-	perAttempt := budget / 6
-	if perAttempt < 500*time.Millisecond {
-		perAttempt = 500 * time.Millisecond
-	}
-	if perAttempt > minElementSearchTimeout {
-		perAttempt = minElementSearchTimeout
-	}
-
 	// XPath and :has-text() are resolved by the same code the selector reads
 	// use, so the two paths cannot come to accept different grammars again.
 	if isXPath(target) {
@@ -672,108 +668,24 @@ func (b *Browser) findElementWithin(page *rod.Page, target string, budget time.D
 		return findByHasText(page, target, base, want, budget)
 	}
 
-	// CSS selectors: unambiguous prefixes or structural analysis
-	if strings.HasPrefix(target, "#") || strings.HasPrefix(target, ".") ||
-		strings.HasPrefix(target, "[") || looksLikeCSSSelector(target) {
+	// A target the caller clearly meant as CSS is CSS and nothing else: it is
+	// waited for, a miss is the answer, and one that does not parse is
+	// reported as malformed.
+	if unambiguousCSS(target) {
 		el, err := tryFind(page, budget, func(p *rod.Page) (*rod.Element, error) {
 			return p.Element(target)
 		})
-		if err != nil && unambiguousCSS(target) {
-			// Only a selector the caller clearly meant as CSS is reported as
-			// malformed. A guessed one falls through to the strategies below,
-			// so prose containing a colon is still matched as text.
-			if invalid := invalidSelector(target, err); errors.Is(invalid, ErrInvalidSelector) {
-				return nil, invalid
-			}
+		if invalid := invalidSelector(target, err); errors.Is(invalid, ErrInvalidSelector) {
+			return nil, invalid
 		}
-		if err == nil || unambiguousCSS(target) {
-			return el, asNotFound(target, err)
-		}
+		return el, asNotFound(target, err)
 	}
 
-	// Try by UID (e.g., "e0", "e1")
-	if strings.HasPrefix(target, "e") {
-		if el, err := tryFind(page, perAttempt, func(p *rod.Page) (*rod.Element, error) {
-			elements, err := p.Elements("button, input, select, textarea, a, [role], [aria-label], [data-testid]")
-			if err != nil {
-				return nil, err
-			}
-			var idx int
-			if _, err := fmt.Sscanf(target, "e%d", &idx); err == nil && idx >= 0 && idx < len(elements) {
-				return elements[idx], nil
-			}
-			return nil, fmt.Errorf("UID %s not found", target)
-		}); err == nil {
-			return el, nil
-		}
-	}
-
-	// Try by aria-label
-	if el, err := tryFind(page, perAttempt, func(p *rod.Page) (*rod.Element, error) {
-		return p.Element(fmt.Sprintf(`[aria-label="%s"]`, target))
-	}); err == nil {
-		return el, nil
-	}
-
-	// Try by data-testid
-	if el, err := tryFind(page, perAttempt, func(p *rod.Page) (*rod.Element, error) {
-		return p.Element(fmt.Sprintf(`[data-testid="%s"]`, target))
-	}); err == nil {
-		return el, nil
-	}
-
-	// Try by name attribute
-	if el, err := tryFind(page, perAttempt, func(p *rod.Page) (*rod.Element, error) {
-		return p.Element(fmt.Sprintf(`[name="%s"]`, target))
-	}); err == nil {
-		return el, nil
-	}
-
-	// Try by placeholder
-	if el, err := tryFind(page, perAttempt, func(p *rod.Page) (*rod.Element, error) {
-		return p.Element(fmt.Sprintf(`[placeholder="%s"]`, target))
-	}); err == nil {
-		return el, nil
-	}
-
-	// Try by XPath exact text match — precise, avoids matching containers
-	if el, err := tryFind(page, perAttempt, func(p *rod.Page) (*rod.Element, error) {
-		return p.ElementX(fmt.Sprintf(`//*[normalize-space(text())="%s"]`, target))
-	}); err == nil {
-		return el, nil
-	}
-
-	// Try by text content for buttons and links only (not container roles)
-	if el, err := tryFind(page, perAttempt, func(p *rod.Page) (*rod.Element, error) {
-		return p.ElementR("button, a", target)
-	}); err == nil {
-		return el, nil
-	}
-
-	// Try by label text (for form fields associated via for/id)
-	if el, err := tryFind(page, perAttempt, func(p *rod.Page) (*rod.Element, error) {
-		// Find label with matching text, then get its associated input via "for" attribute
-		label, err := p.ElementR("label", "^"+regexp.QuoteMeta(target)+"$")
-		if err != nil {
-			return nil, err
-		}
-		forAttr, err := label.Attribute("for")
-		if err != nil || forAttr == nil || *forAttr == "" {
-			return nil, fmt.Errorf("label has no for attribute")
-		}
-		return p.Element("#" + *forAttr)
-	}); err == nil {
-		return el, nil
-	}
-
-	// Final attempt: any element containing the text via regex
-	if el, err := tryFind(page, perAttempt, func(p *rod.Page) (*rod.Element, error) {
-		return p.ElementR("*", target)
-	}); err == nil {
-		return el, nil
-	}
-
-	return nil, fmt.Errorf("%w: %s", ErrElementNotFound, target)
+	// Anything else is a plain target, read every way it can be — including
+	// as a selector, when it happens to look like one. That is only a guess,
+	// so prose containing a colon is still matched as text and a guess that
+	// does not parse is never called malformed.
+	return findPlainTarget(page, target, budget)
 }
 
 // GetElementScreenshot captures a screenshot of a specific element.

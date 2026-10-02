@@ -1,0 +1,22 @@
+<!doctype html>
+<title>Strict first</title>
+<body>
+  <!-- On the page from the start, and it contains the word the button will
+       carry. A lookup that takes whatever matches first takes this. -->
+  <h2 id="saved-heading">Saved filters</h2>
+  <div id="slot"></div>
+  <div id="events"></div>
+  <script>
+    const delay = Number(new URLSearchParams(location.search).get("ms") || 400);
+    document.addEventListener("click", (e) => {
+      document.getElementById("events").textContent += "click:" + (e.target.id || e.target.tagName.toLowerCase()) + ";";
+    });
+    window.arm = () => setTimeout(() => {
+      const button = document.createElement("button");
+      button.id = "save";
+      button.type = "button";
+      button.textContent = "Save";
+      document.getElementById("slot").appendChild(button);
+    }, delay);
+  </script>
+</body>
