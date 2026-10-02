@@ -149,6 +149,9 @@ CLI need no changes.
   text no longer matches the `<title>`, which cannot be clicked: that click
   waited thirty seconds. A target that relied on being a pattern
   (`Sign (in|up)`) no longer matches.
+- **`atr.waitForText` waits for the text to be shown.** It matched the source
+  of inline scripts, so on a page whose script contains the words it will later
+  display — most pages — the wait returned at once.
 - A snapshot UID is `e` and a number and nothing else. Text beginning that
   way, such as `e2e suite`, was read as element 2.
 - `atr.waitFor` on a selector the browser cannot parse is a script fault, as

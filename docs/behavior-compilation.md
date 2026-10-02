@@ -286,6 +286,10 @@ its whole text whether or not the element is rendered, which is what lets
 `atr.waitFor(text, {visible: true})` find something and then wait for it to
 appear.
 
+`atr.waitForText` likewise waits for the page to *show* the text. A page's own
+scripts usually contain the words they will later display, and those do not
+count.
+
 All three spellings are waited for alike, and so is a plain target. One that
 has not rendered yet is polled for until the call's budget runs out. The
 budget is the `timeout` a wait or an `expect…` was given; for an action it is up

@@ -12,7 +12,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -1634,19 +1633,20 @@ func (b *Browser) WaitForText(ctx context.Context, text string, timeout time.Dur
 	}
 	page = bindDeadline(page, ctx)
 
-	// ElementR rather than MustElementR: the Must form panics when the text
-	// never appears, which is the ordinary outcome of a wait that times out.
+	// The text has to be on the page: in what the body renders, or in the
+	// value a field is showing. This used to ask rod for any element whose
+	// text matched, and the text of an element that is not rendered is its
+	// source — so a wait for "Order placed" was satisfied, immediately, by the
+	// inline script that would one day display it. A wait that returns before
+	// the thing it waits for is worse than no wait: the step after it runs
+	// against a page that is not ready, and fails somewhere else.
 	//
-	// ElementR matches a regular expression, and every caller of this passes
-	// text a person typed. Quoting it keeps ordinary punctuation — "Sign up
-	// (free)", "20% off" — from being read as syntax and reported as text
-	// that never appeared, or as an invalid-pattern error nobody expected.
-	el, err := page.Timeout(timeout).Sleeper(lookupSleeper).ElementR("*", regexp.QuoteMeta(text))
+	// The text is matched as written. It was a regular expression once, and
+	// every caller passes text a person typed, where ordinary punctuation —
+	// "Sign up (free)", "20% off" — is not syntax.
+	_, err = page.Timeout(timeout).Sleeper(lookupSleeper).ElementByJS(rod.Eval(visibleTextQuery, text))
 	if err != nil {
 		return fmt.Errorf("waiting for text %q: %w", text, err)
-	}
-	if el == nil {
-		return fmt.Errorf("text not found: %s", text)
 	}
 	return nil
 }
