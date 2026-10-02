@@ -227,7 +227,8 @@ The AI finds elements using multiple strategies:
 All of these are tried on every look, so a target is found by whichever applies
 as soon as the element is there. Text given in part is matched as written
 against what the page shows — the title and the source of inline scripts are
-not searched — and only once the exact readings have had a head start.
+not searched — and, for an action, only once the exact readings have had a head
+start.
 
 **Best Practice**: Use `aria-label` or `data-testid` for reliable element targeting.
 

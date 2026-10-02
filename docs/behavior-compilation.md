@@ -272,10 +272,12 @@ Text in part is the loose end of that list, and is handled as one:
 - It is matched as written — not as a pattern — against what the page shows:
   the text the body renders and the values its fields show, never the title or
   the source of a script. It resolves to the smallest element showing it.
-- It joins a lookup half way through the budget, and after a second at most.
-  Until then only the exact readings are tried, so a click on `Save` goes to
-  the Save button that is a render away rather than to the "Saved filters"
-  heading already there.
+- For an action — a click, a fill, a hover — it joins the lookup half way
+  through the budget, and after a second at most. Until then only the exact
+  readings are tried, so a click on `Save` goes to the Save button that is a
+  render away rather than to the "Saved filters" heading already there. A wait
+  or an existence check asks only whether the target is on the page, not which
+  element it is, and looks every way from the first look.
 - A target written as a selector — one with selector punctuation, or made only
   of lower-case element names such as `dialog` or `ul li` — is never matched in
   part. A selector that matches nothing yet is waited for, not looked for
