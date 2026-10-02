@@ -358,6 +358,12 @@ func (b *Browser) WaitForElementVisible(ctx context.Context, target string, time
 				return nil
 			}
 		}
+		// A selector that does not parse will not parse on the next poll
+		// either. Polling it to the deadline spends the whole timeout to
+		// report "not visible", which hides what is actually wrong.
+		if errors.Is(err, ErrInvalidSelector) {
+			return err
+		}
 		time.Sleep(poll)
 	}
 }

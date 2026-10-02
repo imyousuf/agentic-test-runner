@@ -426,6 +426,13 @@ func (r *runtime) jsWaitFor(target string, opts map[string]any) {
 		err = r.browser.WaitForElement(r.ctx, target, timeout)
 	}
 	if err != nil {
+		// A selector the browser cannot parse is not a wait that ran out: it
+		// can never match, so there was nothing to wait for. Reported as a
+		// timeout it is retried — every retry failing the same way — and only
+		// then triaged, when the fault was in the script all along.
+		if errors.Is(err, ErrInvalidSelector) {
+			r.throwErr(err, target, fmt.Sprintf("waiting for %q", target))
+		}
 		r.throw(KindTimeout, target, "waiting for %q: %v (gave up after %s)", target, err, waitedSince(started))
 	}
 }

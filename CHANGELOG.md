@@ -100,6 +100,11 @@ CLI need no changes.
   lookup now polls until the caller's budget is spent, in one round trip per
   poll. `expectExists`, `expectMissing` and `waitFor` report the time they
   actually waited instead of the timeout they were handed. (#30)
+- `atr.waitFor` on a selector the browser cannot parse is a script fault, as
+  it already was for `atr.click` and `atr.exists`. It was reported as a
+  timeout, which is retried — every retry failing the same way — before
+  anything looked at the script; with `{visible: true}` it also spent the whole
+  timeout first.
 - Computer click/move/drag/hover responses no longer leak the internal
   `NoDisplay` sentinel (`-1`) through the `display` field. The field is now
   omitted entirely when the request didn't specify a display, and round-trips

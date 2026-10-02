@@ -219,3 +219,34 @@ func TestAFailedWaitReportsHowLongItActuallyWaited(t *testing.T) {
 		})
 	}
 }
+
+// A wait on a selector that cannot parse is not a wait that timed out. It can
+// never match, so retrying it — which is what a timeout asks for — only
+// spends the retries before anything looks at the script.
+func TestWaitForOnAnUnparseableSelectorIsAScriptFault(t *testing.T) {
+	for _, target := range []string{`#a[[[bad`, `//h1[@id=`, `h1[[[bad:has-text("Welcome")`} {
+		t.Run(target, func(t *testing.T) {
+			for _, opts := range []string{`{timeout: 5000}`, `{timeout: 5000, visible: true}`} {
+				start := time.Now()
+				res := run(t, `atr.step(1, "Wait on a broken selector", () => {
+					atr.waitFor(`+js(target)+`, `+opts+`);
+				});`)
+				elapsed := time.Since(start)
+
+				if res.Passed {
+					t.Fatalf("%s: expected the step to fail", opts)
+				}
+				if res.Failure.Kind != KindScript {
+					t.Errorf("%s: kind = %q, want %q (%s)", opts, res.Failure.Kind, KindScript, res.Failure.Message)
+				}
+				if res.Failure.Kind.Retryable() {
+					t.Errorf("%s: a selector that cannot parse is being retried; it can never match", opts)
+				}
+				// Nothing to wait for, so nothing waited.
+				if elapsed > 2*time.Second {
+					t.Errorf("%s: took %v to refuse a selector that does not parse", opts, elapsed.Round(time.Millisecond))
+				}
+			}
+		})
+	}
+}
