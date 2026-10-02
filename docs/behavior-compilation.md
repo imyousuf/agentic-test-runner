@@ -249,6 +249,16 @@ below), `atr.text`, `atr.html`, `atr.url`, `atr.title`, `atr.snapshot`,
 
 **Pages** — `atr.newPage`, `atr.listPages`, `atr.selectPage`, `atr.closePage`
 
+**Targets** — every call that takes a target accepts the same grammar: CSS,
+XPath (anything beginning `//`), or CSS with a trailing `:has-text("...")`,
+which picks the first element matching the CSS part whose text contains that
+string, ignoring case. An element's text is what it shows — or, for a field,
+its value or else its placeholder, and for a select its chosen option. The reads
+(`atr.text`, `atr.expectText`, `atr.scroll`) take exactly what the actions and
+waits take, so a script can read through the XPath it has just clicked with.
+The actions and waits also accept plain visible text, an aria-label, a
+data-testid or a snapshot UID; the reads take a selector only.
+
 **Inputs** — `values.get(key[, fallback])`, `values.int`, `values.bool`,
 `values.has`, `values.keys()`. Values may contain `$(command)` and `${VAR}`,
 expanded at read time.

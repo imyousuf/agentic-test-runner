@@ -6,11 +6,20 @@
   <script>
     // Appears well after the old hardcoded 3s lookup budget, and well within
     // a caller that says it is willing to wait longer.
-    const delay = Number(new URLSearchParams(location.search).get("ms") || 4500);
-    setTimeout(() => {
+    const params = new URLSearchParams(location.search);
+    const delay = Number(params.get("ms") || 4500);
+
+    // With manual=1 the clock does not start until the test calls arm(). A
+    // test that measures how long a lookup waited needs the delay to run from
+    // the moment it starts looking, not from whenever the page happened to
+    // finish loading.
+    window.arm = () => setTimeout(() => {
       const input = document.createElement("input");
       input.id = "username";
       document.getElementById("slot").appendChild(input);
     }, delay);
+    if (params.get("manual") !== "1") {
+      window.arm();
+    }
   </script>
 </body>

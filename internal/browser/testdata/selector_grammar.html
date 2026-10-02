@@ -1,0 +1,36 @@
+<!doctype html>
+<title>Selector grammar</title>
+<body>
+  <h1>Selector grammar</h1>
+
+  <!-- A decoy first, and the same shape as the real one: a resolver that
+       ignored its selector and took the first panel would otherwise pass. -->
+  <section class="panel" data-name="decoy"
+           style="width:200px;height:60px;overflow:auto;color:rgb(9, 9, 9)">
+    <p>Decoy panel</p>
+    <div style="height:400px"></div>
+  </section>
+
+  <section class="panel" data-name="orders"
+           style="width:240px;height:60px;overflow:auto;color:rgb(1, 2, 3)">
+    <p>Orders panel</p>
+    <img src="test_pixel.png" alt="pixel" width="4" height="4">
+    <div style="height:400px"></div>
+  </section>
+
+  <button id="decoy-button" type="button">Cancel order</button>
+  <button id="place" type="button">Place order</button>
+  <input id="note" type="text" aria-label="Order note" placeholder="Leave a note">
+
+  <div id="events"></div>
+  <script>
+    const events = document.getElementById("events");
+    const record = (what) => { events.textContent += what + ";"; };
+    for (const id of ["decoy-button", "place"]) {
+      const el = document.getElementById(id);
+      el.addEventListener("click", () => record("click:" + id));
+      el.addEventListener("dblclick", () => record("dblclick:" + id));
+      el.addEventListener("mouseover", () => record("hover:" + id));
+    }
+  </script>
+</body>

@@ -228,8 +228,8 @@ func Snapshot(_ context.Context, b *browser.Browser, req SnapshotRequest) (Snaps
 // raw bytes (base64 over the wire) or written to disk depends on the surface;
 // the ops layer always carries both possibilities.
 type ScreenshotRequest struct {
-	Selector    string `json:"selector"     jsonschema_description:"CSS selector to screenshot a single element"`
-	SelectorAll string `json:"selector_all" jsonschema_description:"CSS selector matching multiple elements; each captured separately"`
+	Selector    string `json:"selector"     jsonschema_description:"Selector of a single element to screenshot: CSS, XPath or :has-text()"`
+	SelectorAll string `json:"selector_all" jsonschema_description:"Selector (CSS, XPath or :has-text()) matching multiple elements; each captured separately"`
 	FullPage    bool   `json:"full_page"    jsonschema_description:"Capture full scrollable page (or full element height when used with selector)"`
 	OutputDir   string `json:"output_dir"   jsonschema_description:"Directory for saved files (multi-element mode); defaults to OS temp dir"`
 	TimeoutMs   int    `json:"timeout_ms"   jsonschema_description:"Per-element timeout in milliseconds for selector_all mode (default 30000)"`
@@ -397,7 +397,7 @@ func Errors(_ context.Context, b *browser.Browser) (ErrorsResult, error) {
 
 // WaitRequest waits for an element to appear (and optionally become visible).
 type WaitRequest struct {
-	Selector  string `json:"selector"   jsonschema:"required" jsonschema_description:"CSS selector to wait for"`
+	Selector  string `json:"selector"   jsonschema:"required" jsonschema_description:"Element to wait for: CSS, XPath, :has-text(), UID, text, aria-label, or data-testid"`
 	TimeoutMs int    `json:"timeout"                          jsonschema_description:"Timeout in milliseconds (default 5000)"`
 	Visible   bool   `json:"visible"                          jsonschema_description:"Also require the element to be visible"`
 }
@@ -435,8 +435,8 @@ func Wait(ctx context.Context, b *browser.Browser, req WaitRequest) (WaitResult,
 // ComputedStylesRequest queries computed CSS styles. Exactly one of Selector,
 // SelectorAll, or Selectors is required.
 type ComputedStylesRequest struct {
-	Selector    string   `json:"selector"     jsonschema_description:"CSS selector for a single element"`
-	SelectorAll string   `json:"selector_all" jsonschema_description:"CSS selector matching multiple elements"`
+	Selector    string   `json:"selector"     jsonschema_description:"Selector of a single element: CSS, XPath or :has-text()"`
+	SelectorAll string   `json:"selector_all" jsonschema_description:"Selector (CSS, XPath or :has-text()) matching multiple elements"`
 	Selectors   []string `json:"selectors"    jsonschema_description:"Batch list of selectors to query in one call"`
 	Properties  []string `json:"properties"   jsonschema_description:"CSS property names to return (default: a built-in layout/typography set)"`
 }
@@ -494,7 +494,7 @@ func ComputedStyles(_ context.Context, b *browser.Browser, req ComputedStylesReq
 // ComputedStylesDiffRequest compares computed styles between pages. Exactly one
 // of Selector or Selectors is required.
 type ComputedStylesDiffRequest struct {
-	Selector       string   `json:"selector"        jsonschema_description:"CSS selector on current page"`
+	Selector       string   `json:"selector"        jsonschema_description:"Selector on current page: CSS, XPath or :has-text()"`
 	Selectors      []string `json:"selectors"       jsonschema_description:"Batch list of selectors"`
 	Against        int      `json:"against"         jsonschema:"required" jsonschema_description:"Page index to compare against"`
 	Properties     []string `json:"properties"      jsonschema_description:"CSS properties to compare (default: built-in set)"`
@@ -555,7 +555,7 @@ func ComputedStylesDiff(_ context.Context, b *browser.Browser, req ComputedStyle
 
 // ScrollRequest scrolls within an element's scroll container.
 type ScrollRequest struct {
-	Selector string `json:"selector"  jsonschema:"required" jsonschema_description:"CSS selector of scrollable element"`
+	Selector string `json:"selector"  jsonschema:"required" jsonschema_description:"Selector of scrollable element: CSS, XPath or :has-text()"`
 	X        int    `json:"x"                                jsonschema_description:"Horizontal scroll position in pixels"`
 	Y        int    `json:"y"                                jsonschema_description:"Vertical scroll position in pixels"`
 	ToBottom bool   `json:"to_bottom"                        jsonschema_description:"Scroll to the bottom of the element"`
@@ -597,7 +597,7 @@ func Scroll(_ context.Context, b *browser.Browser, req ScrollRequest) (ScrollRes
 
 // TextRequest extracts text from an element.
 type TextRequest struct {
-	Selector string `json:"selector" jsonschema:"required" jsonschema_description:"CSS selector to extract text from"`
+	Selector string `json:"selector" jsonschema:"required" jsonschema_description:"Selector to extract text from: CSS, XPath or :has-text()"`
 	Mode     string `json:"mode"                           jsonschema_description:"Extraction mode: structured (default), flat, links, headings"`
 }
 
@@ -666,7 +666,7 @@ func FontCheck(_ context.Context, b *browser.Browser, req FontCheckRequest) (Fon
 
 // DownloadImagesRequest downloads images within an element scope.
 type DownloadImagesRequest struct {
-	Selector           string `json:"selector"            jsonschema:"required" jsonschema_description:"CSS selector enclosing the images"`
+	Selector           string `json:"selector"            jsonschema:"required" jsonschema_description:"Selector enclosing the images: CSS, XPath or :has-text()"`
 	OutputDir          string `json:"output_dir"                                jsonschema_description:"Directory for saved images (default: OS temp dir)"`
 	FallbackScreenshot bool   `json:"fallback_screenshot"                       jsonschema_description:"Screenshot the matching elements when no <img> tags are found"`
 }
@@ -695,7 +695,7 @@ func DownloadImages(_ context.Context, b *browser.Browser, req DownloadImagesReq
 
 // CleanSnapshotRequest captures a cleaned DOM subtree.
 type CleanSnapshotRequest struct {
-	Selector  string `json:"selector"   jsonschema:"required" jsonschema_description:"CSS selector identifying the subtree root"`
+	Selector  string `json:"selector"   jsonschema:"required" jsonschema_description:"Selector identifying the subtree root: CSS, XPath or :has-text()"`
 	Depth     int    `json:"depth"                            jsonschema_description:"Maximum tree depth (0 = unlimited)"`
 	MaxLength int    `json:"max_length"                       jsonschema_description:"Maximum output characters (default 5000)"`
 	SVGFull   bool   `json:"svg_full"                         jsonschema_description:"Include full SVG path data instead of collapsing to tag-only"`

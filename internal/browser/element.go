@@ -569,21 +569,16 @@ func (b *Browser) findElementWithin(page *rod.Page, target string, budget time.D
 		perAttempt = minElementSearchTimeout
 	}
 
-	// XPath selectors
-	if strings.HasPrefix(target, "//") {
-		el, err := tryFind(page, budget, func(p *rod.Page) (*rod.Element, error) {
-			return p.ElementX(target)
-		})
-		return el, asNotFound(target, err)
+	// XPath and :has-text() are resolved by the same code the selector reads
+	// use, so the two paths cannot come to accept different grammars again.
+	if isXPath(target) {
+		return findByXPath(page, target, budget)
 	}
 
 	// :has-text() is not CSS, so it has to be resolved before querySelector
 	// ever sees it.
 	if base, want, ok := splitHasText(target); ok {
-		el, err := tryFind(page, budget, func(p *rod.Page) (*rod.Element, error) {
-			return resolveHasText(p, base, want)
-		})
-		return el, asNotFound(target, err)
+		return findByHasText(page, target, base, want, budget)
 	}
 
 	// CSS selectors: unambiguous prefixes or structural analysis
@@ -707,9 +702,16 @@ func (b *Browser) GetElementScreenshot(target string) ([]byte, error) {
 	return el.Screenshot(proto.PageCaptureScreenshotFormatPng, 0)
 }
 
-// findElementByCSS finds an element using a CSS selector directly, without
-// the multi-strategy fallback chain. Use this when the caller knows the
-// target is explicitly a CSS selector.
+// findBySelector finds an element by an explicit selector — CSS, XPath or
+// :has-text() — without the multi-strategy fallback chain. Use this when the
+// caller knows the target is a selector rather than a UID or visible text.
+//
+// The grammar is findElement's, minus the guessing: every API that takes a
+// target accepts the same three spellings. This used to take CSS and
+// :has-text() only, so an XPath that atr.click resolved was refused as an
+// invalid selector by atr.text — the compile prompt promises "CSS or XPath",
+// the model reads through the XPath it has just clicked with, and the first
+// replay of a correct script failed as a script fault.
 //
 // Budget and failure reporting match findElement deliberately. This used to
 // spend a fixed three seconds whatever the caller allowed, and to return rod's
@@ -717,21 +719,54 @@ func (b *Browser) GetElementScreenshot(target string) ([]byte, error) {
 // retryable but not repairable. So a renamed id behind atr.text was retried
 // until the run gave up instead of being handed to the repair path, while the
 // identical rename behind atr.click was repaired.
-func (b *Browser) findElementByCSS(page *rod.Page, selector string) (*rod.Element, error) {
+func (b *Browser) findBySelector(page *rod.Page, selector string) (*rod.Element, error) {
+	budget := searchTimeout(page.GetContext())
+
+	if isXPath(selector) {
+		return findByXPath(page, selector, budget)
+	}
 	if base, want, ok := splitHasText(selector); ok {
-		el, err := tryFind(page, searchTimeout(page.GetContext()), func(p *rod.Page) (*rod.Element, error) {
-			return resolveHasText(p, base, want)
-		})
-		return el, asNotFound(selector, err)
+		return findByHasText(page, selector, base, want, budget)
 	}
 
-	el, err := tryFind(page, searchTimeout(page.GetContext()), func(p *rod.Page) (*rod.Element, error) {
+	el, err := tryFind(page, budget, func(p *rod.Page) (*rod.Element, error) {
 		return p.Element(selector)
 	})
 	if invalid := invalidSelector(selector, err); errors.Is(invalid, ErrInvalidSelector) {
 		return nil, invalid
 	}
 	return el, asNotFound(selector, err)
+}
+
+// isXPath reports whether a target is written as XPath. The one test for it,
+// so that what counts as XPath is the same wherever a target is resolved.
+func isXPath(target string) bool {
+	return strings.HasPrefix(target, "//")
+}
+
+// findByXPath resolves an XPath, waiting up to budget for it to match.
+//
+// An expression the browser cannot parse is reported as ErrInvalidSelector,
+// the same as malformed CSS: it can never match, so it is a defect in the
+// script rather than something to wait out. Left as rod's raw evaluation error
+// it classified as environmental, and an environmental failure is retried.
+func findByXPath(page *rod.Page, target string, budget time.Duration) (*rod.Element, error) {
+	el, err := tryFind(page, budget, func(p *rod.Page) (*rod.Element, error) {
+		return p.ElementX(target)
+	})
+	if invalid := invalidSelector(target, err); errors.Is(invalid, ErrInvalidSelector) {
+		return nil, invalid
+	}
+	return el, asNotFound(target, err)
+}
+
+// findByHasText resolves a :has-text() target that splitHasText has already
+// taken apart.
+func findByHasText(page *rod.Page, target, base, want string, budget time.Duration) (*rod.Element, error) {
+	el, err := tryFind(page, budget, func(p *rod.Page) (*rod.Element, error) {
+		return resolveHasText(p, base, want)
+	})
+	return el, asNotFound(target, err)
 }
 
 // GetElementScreenshotByCSS captures a screenshot of a specific element
@@ -745,7 +780,7 @@ func (b *Browser) GetElementScreenshotByCSS(selector string) ([]byte, error) {
 
 	defer b.hideHud(page)()
 
-	el, err := b.findElementByCSS(page, selector)
+	el, err := b.findBySelector(page, selector)
 	if err != nil {
 		return nil, err
 	}
@@ -812,7 +847,7 @@ func (b *Browser) ScrollElement(selector string, x, y int, toBottom, toTop bool)
 		}, nil
 	}
 
-	el, err := b.findElementByCSS(page, selector)
+	el, err := b.findBySelector(page, selector)
 	if err != nil {
 		return nil, err
 	}
@@ -1024,7 +1059,7 @@ func (b *Browser) GetElementFullHeightScreenshot(selector string) ([]byte, error
 		return nil, err
 	}
 
-	el, err := b.findElementByCSS(page, selector)
+	el, err := b.findBySelector(page, selector)
 	if err != nil {
 		return nil, err
 	}
@@ -1087,7 +1122,7 @@ func (b *Browser) GetTextContent(selector string, mode string) (*TextResult, err
 		return nil, err
 	}
 
-	el, err := b.findElementByCSS(page, selector)
+	el, err := b.findBySelector(page, selector)
 	if err != nil {
 		return nil, err
 	}
@@ -1254,7 +1289,7 @@ type DownloadedImage struct {
 	Error  string `json:"error,omitempty"`
 }
 
-// DownloadImages downloads images found within elements matching a CSS selector.
+// DownloadImages downloads images found within the element a selector names.
 // It finds all <img> elements within scope and fetches their src via the browser.
 // If fallbackScreenshot is true and no <img> tags are found, it screenshots each matching element.
 func (b *Browser) DownloadImages(selector string, fallbackScreenshot bool) ([]DownloadedImage, error) {
@@ -1263,29 +1298,29 @@ func (b *Browser) DownloadImages(selector string, fallbackScreenshot bool) ([]Do
 		return nil, err
 	}
 
-	// First, try to find <img> elements within the selector scope
-	imgResult, err := page.Eval(`(sel) => {
-		const container = document.querySelector(sel);
-		if (!container) return { error: "selector not found" };
-		const imgs = container.querySelectorAll('img');
+	// The scope is resolved the way every other selector read resolves its
+	// element. It used to be handed to document.querySelector in the page,
+	// which made this the one read that took CSS only — and half of it at
+	// that, since the screenshot fallback below already took :has-text().
+	container, err := b.findBySelector(page, selector)
+	if err != nil {
+		return nil, err
+	}
+
+	imgResult, err := container.Eval(`function() {
 		const results = [];
-		for (const img of imgs) {
+		for (const img of this.querySelectorAll('img')) {
 			if (img.src) {
 				results.push({ src: img.src, alt: img.alt || '' });
 			}
 		}
-		return { imgs: results, containerCount: container.querySelectorAll(sel === container.tagName.toLowerCase() ? '*' : sel).length };
-	}`, selector)
+		return results;
+	}`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find images: %w", err)
 	}
 
-	raw := imgResult.Value.Map()
-	if errVal := raw["error"]; errVal.Val() != nil {
-		return nil, fmt.Errorf("%s: %s", errVal.Str(), selector)
-	}
-
-	imgs := raw["imgs"].Arr()
+	imgs := imgResult.Value.Arr()
 
 	if len(imgs) > 0 {
 		// Download each image via browser fetch (avoids CORS issues)
@@ -1488,7 +1523,7 @@ func (b *Browser) GetBatchComputedStyles(selectors []string, properties []string
 	for _, sel := range selectors {
 		result := BatchStyleResult{Selector: sel}
 
-		el, err := b.findElementByCSS(page, sel)
+		el, err := b.findBySelector(page, sel)
 		if err != nil {
 			result.Matched = false
 			results = append(results, result)
@@ -1680,7 +1715,7 @@ func (b *Browser) GetCleanSnapshot(selector string, opts CleanSnapshotOptions) (
 		return "", nil, err
 	}
 
-	el, err := b.findElementByCSS(page, selector)
+	el, err := b.findBySelector(page, selector)
 	if err != nil {
 		return "", nil, fmt.Errorf("no element found for selector: %q", selector)
 	}
@@ -1926,7 +1961,7 @@ func (b *Browser) GetComputedStyles(selector string, properties []string) (map[s
 		return nil, err
 	}
 
-	el, err := b.findElementByCSS(page, selector)
+	el, err := b.findBySelector(page, selector)
 	if err != nil {
 		return nil, err
 	}
