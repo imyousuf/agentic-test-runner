@@ -147,17 +147,23 @@ func TestWrittenAsSelector(t *testing.T) {
 
 func TestInPartAfter(t *testing.T) {
 	tests := []struct {
-		budget time.Duration
-		want   time.Duration
+		budget  time.Duration
+		purpose lookupPurpose
+		want    time.Duration
 	}{
-		{200 * time.Millisecond, 0},                      // too short to divide
-		{500 * time.Millisecond, 250 * time.Millisecond}, // an existence check
-		{3 * time.Second, time.Second},                   // the default budget
-		{15 * time.Second, time.Second},                  // the longest
+		// An action: the exact readings get a head start.
+		{200 * time.Millisecond, toActOn, 0},                      // too short to divide
+		{500 * time.Millisecond, toActOn, 250 * time.Millisecond}, // half a short budget
+		{3 * time.Second, toActOn, time.Second},                   // the default budget
+		{15 * time.Second, toActOn, time.Second},                  // the longest
+
+		// A presence check: there is no element to get wrong.
+		{500 * time.Millisecond, toSeeIfPresent, 0},
+		{10 * time.Second, toSeeIfPresent, 0},
 	}
 	for _, tt := range tests {
-		if got := inPartAfter(tt.budget); got != tt.want {
-			t.Errorf("inPartAfter(%v) = %v, want %v", tt.budget, got, tt.want)
+		if got := inPartAfter(tt.budget, tt.purpose); got != tt.want {
+			t.Errorf("inPartAfter(%v, %v) = %v, want %v", tt.budget, tt.purpose, got, tt.want)
 		}
 	}
 }

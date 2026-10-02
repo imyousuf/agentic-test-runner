@@ -53,7 +53,7 @@ type plainTarget struct {
 	target string
 	wantID string
 	// inPart is true for the readings that match part of some longer text.
-	// They join a lookup half way through its budget, not at the start.
+	// An action holds them back while the exact readings have a head start.
 	inPart bool
 }
 
@@ -72,15 +72,10 @@ func TestEveryPlainTargetIsFoundInsideAnExistenceCheck(t *testing.T) {
 				t.Fatalf("%q is on the page and was not found in a 500ms wait (%v): %v",
 					tt.target, elapsed.Round(time.Millisecond), err)
 			}
-			// It is there already, so an exact reading finds it on the first
-			// look. Text in part is held back for half the wait, and found in
-			// the second half.
-			if !tt.inPart && elapsed > 200*time.Millisecond {
-				t.Errorf("took %v to find something already on the page", elapsed.Round(time.Millisecond))
-			}
-			if tt.inPart && elapsed < 200*time.Millisecond {
-				t.Errorf("matched text in part after %v, with no head start for an exact match", elapsed.Round(time.Millisecond))
-			}
+			// It is there already, so the first look finds it, whichever way
+			// it is named: a wait asks only whether the target is there, and
+			// holds nothing back. (How quickly is measured against the
+			// machine's own pace, in TestAPresenceCheckFindsTextInPartAtOnce.)
 		})
 	}
 }
@@ -440,37 +435,62 @@ func TestAnExactMatchThatIsARenderAwayBeatsAPartialOneAlreadyThere(t *testing.T)
 	}
 }
 
-// The head start is a head start and no more: text in part is still found,
-// once nothing better has turned up.
-func TestTextInPartIsFoundAfterItsHeadStart(t *testing.T) {
-	tests := []struct {
-		name     string
-		timeout  time.Duration
-		earliest time.Duration
-		latest   time.Duration
-	}{
-		// Half the budget, for a short one. The wait's own half second is the
-		// upper bound: it either found the text in time or it did not.
-		{"inside an existence check", 500 * time.Millisecond, 200 * time.Millisecond, time.Second},
-		// And never more than a second, for a long one.
-		{"inside a ten-second wait", 10 * time.Second, 900 * time.Millisecond, 3 * time.Second},
+// The head start is a head start and no more: an action on text in part still
+// finds it, once nothing better has turned up.
+func TestAnActionOnTextInPartFindsItAfterTheHeadStart(t *testing.T) {
+	resetFixture(t)
+	if err := testBrowser.Navigate(context.Background(), testFixtureURL+"/strict_first.html"); err != nil {
+		t.Fatal(err)
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+
+	// The default three-second budget: a second for the exact readings.
+	start := time.Now()
+	err := testBrowser.Hover(context.Background(), "Saved fil")
+	elapsed := time.Since(start)
+
+	if err != nil {
+		t.Fatalf("text on the page was not found (%v): %v", elapsed.Round(time.Millisecond), err)
+	}
+	if elapsed < 900*time.Millisecond {
+		t.Errorf("acted on text in part after %v, with no head start for an exact match", elapsed.Round(time.Millisecond))
+	}
+	if elapsed > 2800*time.Millisecond {
+		t.Errorf("took %v of a 3s budget to find text that was there throughout", elapsed.Round(time.Millisecond))
+	}
+}
+
+// A wait or an existence check is not an action. It asks whether the target
+// is on the page, not which element it is, so there is nothing for a head
+// start to protect — and text shown as part of something is found on the first
+// look, however short the wait.
+func TestAPresenceCheckFindsTextInPartAtOnce(t *testing.T) {
+	for _, timeout := range []time.Duration{500 * time.Millisecond, 10 * time.Second} {
+		t.Run(timeout.String(), func(t *testing.T) {
 			resetFixture(t)
 			if err := testBrowser.Navigate(context.Background(), testFixtureURL+"/strict_first.html"); err != nil {
 				t.Fatal(err)
 			}
 
+			// How long one look takes on this machine, from a target the
+			// first look has always found: the heading by its exact text.
 			start := time.Now()
-			err := testBrowser.WaitForElement(context.Background(), "Saved fil", tt.timeout)
+			if err := testBrowser.WaitForElement(context.Background(), "Saved filters", timeout); err != nil {
+				t.Fatalf("the heading was not found by its exact text: %v", err)
+			}
+			oneLook := time.Since(start)
+
+			start = time.Now()
+			err := testBrowser.WaitForElement(context.Background(), "Saved fil", timeout)
 			elapsed := time.Since(start)
 
 			if err != nil {
-				t.Fatalf("text on the page was not found in a %v wait (%v): %v", tt.timeout, elapsed.Round(time.Millisecond), err)
+				t.Fatalf("text on the page was not found in a %v wait (%v): %v", timeout, elapsed.Round(time.Millisecond), err)
 			}
-			if elapsed < tt.earliest || elapsed > tt.latest {
-				t.Errorf("found after %v, want between %v and %v", elapsed.Round(time.Millisecond), tt.earliest, tt.latest)
+			// Measured against that, not against the clock, so the bound
+			// means the same on a slow machine: no waiting, only looking.
+			if elapsed > oneLook+150*time.Millisecond {
+				t.Errorf("found after %v, where one look takes %v: text in part was held back",
+					elapsed.Round(time.Millisecond), oneLook.Round(time.Millisecond))
 			}
 		})
 	}
@@ -517,21 +537,25 @@ func TestACancelledLookupOfAPlainTargetIsNotAMiss(t *testing.T) {
 	}
 }
 
-// One look at the page is one round trip. Each reading used to be a call of
-// its own — eight or ten to a look — which a quick machine does not notice. A
-// slow one does: a look begun with time in hand ran out of budget before it
-// reached the readings at the end of the list, and inside the half second an
-// existence check allows, text in part was not found at all. That is how the
-// test above failed on a macOS runner and on no machine it was written on.
+// An existence check finds what is on the page however slow the machine.
 //
-// The page is throttled to a twentieth of its speed, which is slower than any
-// runner and makes the difference between one call and ten plain.
+// It did not. Text in part was held back for half the check's half second,
+// and a look was eight or ten round trips, one per reading — so on a slow
+// machine the one look that included text in part began a tenth of a second
+// before the deadline and did not finish. Text that was there was reported
+// absent, on a macOS runner and on no machine the code was written on.
+//
+// Two things changed. A presence check looks every way from the first look,
+// and a look is one round trip. The page is throttled to a tenth of its speed
+// here. On the machine this was written on the old code survives that and
+// fails at a twentieth; the new code is still finding everything at an
+// eightieth. A tenth leaves a slow runner the same room.
 func TestAPlainTargetIsFoundInsideAnExistenceCheckOnASlowMachine(t *testing.T) {
 	for _, tt := range plainTargets {
 		t.Run(tt.way, func(t *testing.T) {
 			page := openPlainTargets(t)
 
-			if err := (proto.EmulationSetCPUThrottlingRate{Rate: 20}).Call(page); err != nil {
+			if err := (proto.EmulationSetCPUThrottlingRate{Rate: 10}).Call(page); err != nil {
 				t.Fatalf("throttling the page: %v", err)
 			}
 			defer func() {

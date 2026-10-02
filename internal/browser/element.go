@@ -334,7 +334,7 @@ func (b *Browser) WaitForElement(ctx context.Context, target string, timeout tim
 	}
 
 	page = bindDeadline(page, ctx).Timeout(timeout)
-	_, err = b.findElementWithin(page, target, timeout)
+	_, err = b.findElementWithin(page, target, timeout, toSeeIfPresent)
 	return err
 }
 
@@ -654,12 +654,12 @@ func actionBound(page *rod.Page, el *rod.Element) *rod.Element {
 }
 
 func (b *Browser) findElement(page *rod.Page, target string) (*rod.Element, error) {
-	return b.findElementWithin(page, target, searchTimeout(page.GetContext()))
+	return b.findElementWithin(page, target, searchTimeout(page.GetContext()), toActOn)
 }
 
 // findElementWithin is findElement with the budget stated outright, for
 // callers that have been given an explicit timeout to honour.
-func (b *Browser) findElementWithin(page *rod.Page, target string, budget time.Duration) (*rod.Element, error) {
+func (b *Browser) findElementWithin(page *rod.Page, target string, budget time.Duration, purpose lookupPurpose) (*rod.Element, error) {
 	// XPath and :has-text() are resolved by the same code the selector reads
 	// use, so the two paths cannot come to accept different grammars again.
 	if isXPath(target) {
@@ -689,7 +689,7 @@ func (b *Browser) findElementWithin(page *rod.Page, target string, budget time.D
 	// as a selector, when it happens to look like one. That is only a guess,
 	// so prose containing a colon is still matched as text and a guess that
 	// does not parse is never called malformed.
-	return findPlainTarget(page, target, budget)
+	return findPlainTarget(page, target, budget, purpose)
 }
 
 // GetElementScreenshot captures a screenshot of a specific element.

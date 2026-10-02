@@ -262,15 +262,38 @@ func lookByJS(p *rod.Page, js string, args ...any) (*rod.Element, error) {
 	return el, err
 }
 
+// lookupPurpose is what a lookup is for, which decides how soon a target may
+// be matched as part of some text.
+type lookupPurpose int
+
+const (
+	// toActOn: the element found is about to be clicked, typed into or
+	// hovered over, so which element it is matters.
+	toActOn lookupPurpose = iota
+	// toSeeIfPresent: a wait or an existence check, which asks only whether
+	// the target is there.
+	toSeeIfPresent
+)
+
 // inPartHeadStart is how long the exact readings of a target are tried alone
 // before the in-part ones join them, for a lookup with time to spare.
 const inPartHeadStart = time.Second
 
-// inPartAfter is when the in-part readings join a lookup with this budget:
-// half way through it, and no later than inPartHeadStart. A lookup too short
-// to divide looks every way from the start.
-func inPartAfter(budget time.Duration) time.Duration {
-	if budget < 4*lookupLastLook {
+// inPartAfter is when the in-part readings join a lookup.
+//
+// An action gives the exact readings a head start: half its budget, and no
+// more than inPartHeadStart. A lookup too short to divide looks every way from
+// the start.
+//
+// A presence check gives none. The head start is about which element is
+// found, and a presence check does not use the element — it asks whether the
+// target is on the page, and text shown as part of something is on the page.
+// Holding that back inside the half second an existence check allows left one
+// look for it, begun a tenth of a second before the deadline; on a slow
+// machine, or a heavy page, that look did not finish, and text that was there
+// was reported absent.
+func inPartAfter(budget time.Duration, purpose lookupPurpose) time.Duration {
+	if purpose == toSeeIfPresent || budget < 4*lookupLastLook {
 		return 0
 	}
 	return min(budget/2, inPartHeadStart)
@@ -295,19 +318,20 @@ func inPartAfter(budget time.Duration) time.Duration {
 // Two things keep "every reading, every look" from being looser than the
 // slices were.
 //
-// The in-part readings are held back at first. Trying everything at once
-// makes precedence a matter of what has rendered so far: a click on "Save"
-// while the page shows "Saved filters" and the Save button is a render away
-// would land on the heading. So the exact readings get a head start, and text
-// in part is only matched once the page has had that long to produce
-// something better.
+// For an action, the in-part readings are held back at first. Trying
+// everything at once makes precedence a matter of what has rendered so far: a
+// click on "Save" while the page shows "Saved filters" and the Save button is
+// a render away would land on the heading. So the exact readings get a head
+// start, and text in part is only matched once the page has had that long to
+// produce something better. A presence check has no element to get wrong; see
+// inPartAfter.
 //
 // And a target written as a selector is never matched in part at all, for as
 // long as it stands as a selector. A selector that matches nothing yet is
 // something to wait for, not something to look for inside the page's text.
 // When the browser refuses it as a selector — "Total: 5 items" has a colon and
 // is not one — it is words like any others.
-func findPlainTarget(page *rod.Page, target string, budget time.Duration) (*rod.Element, error) {
+func findPlainTarget(page *rod.Page, target string, budget time.Duration, purpose lookupPurpose) (*rod.Element, error) {
 	query := queryFor(target)
 
 	p := page.Timeout(budget)
@@ -325,7 +349,7 @@ func findPlainTarget(page *rod.Page, target string, budget time.Duration) (*rod.
 	}
 
 	started := time.Now()
-	inPartFrom := inPartAfter(budget)
+	inPartFrom := inPartAfter(budget, purpose)
 
 	sleep := lookupSleeper()
 	for {
