@@ -111,7 +111,9 @@ model in the loop; the agent returns only to triage a failure.
   writes a script has to ask first: `loadOrCompile` replays it (under
   `--no-compile` too), the repair path keeps the diagnosis and drops the
   rewrite, `Stamp` does not touch the file, and the hoist never loads it as a
-  candidate. `--recompile` is the only thing that replaces one.
+  candidate. `--recompile` is the only thing that replaces one. Its triage
+  prompt carries `handWrittenNote`: the script, not the spec, is what the
+  failure is judged against, and no rewrite is asked for.
 
 2. **Behavior Testing** (`atr run --behavior tests/login.test.txt`) — Parses `.test.txt` files with natural language test steps, launches a browser, and the agent drives browser tools to execute the steps and report pass/fail.
 

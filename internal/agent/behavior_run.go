@@ -398,7 +398,7 @@ func (a *Agent) RunBehavior(ctx context.Context, req RunRequest) (*RunOutcome, e
 			// it would overwrite a file a person owns, and save it under a
 			// spec hash that makes it ATR's to recompile from then on.
 			if outcome.HandWritten {
-				logf("the agent proposed a repair, but %s is hand-written and ATR does not rewrite it — %s",
+				logf("the agent found the script out of step with the page; %s is hand-written, so ATR does not rewrite it — %s",
 					testscript.ScriptPath(req.SpecPath), triage.Reason)
 				return outcome, nil
 			}
@@ -666,6 +666,8 @@ func (a *Agent) triage(ctx context.Context, req RunRequest, source string, failu
 		Attempts:  attempts,
 		ValueKeys: keys.Keys(),
 		Progress:  req.Progress,
+		// Decided once, by loadOrCompile, and carried on the outcome.
+		HandWritten: outcome.HandWritten,
 	})
 }
 

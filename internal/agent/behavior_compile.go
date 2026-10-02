@@ -269,6 +269,46 @@ func libraryNote(library string) string {
 		"```javascript\n" + strings.TrimSpace(library) + "\n```\n"
 }
 
+// handWrittenNote amends the triage prompt for a script a person wrote.
+//
+// The prompt's central test is "does the application still do what the
+// specification requires", and that is the right test for a script compiled
+// from the specification. A hand-written script was not: it is replayed
+// whatever the specification says, so the two may never have agreed, or the
+// spec may have moved on since. Judged against the spec, a script that has
+// merely drifted beside a spec that asks for more is "test_failure" — and that
+// verdict is terminal: an assertion, exit 1, a regression reported for
+// something this test never checked. So the script is named as the statement
+// of what the test checks, and the spec as context.
+//
+// Nothing rewrites a hand-written script either, so the prompt stops asking
+// for a rewrite. A complete script written out to be discarded is the most
+// expensive part of the reply, and what its author can actually use is the
+// reason: what moved, and what to change.
+//
+// Appended last, so it reads as an amendment to everything above it.
+func handWrittenNote(handWritten bool) string {
+	if !handWritten {
+		return ""
+	}
+	return "\n\nThis script is hand-written: a person wrote it and maintains it, and it was\n" +
+		"not compiled from the specification. That changes two things above.\n\n" +
+		"The script, not the specification, says what this test checks. The\n" +
+		"specification is shown for context and may have moved on since the script\n" +
+		"was written. Judge the failure against what the failing step is evidently\n" +
+		"doing — its description, and the assertions the script makes. Answer\n" +
+		"\"test_failure\" only when the application no longer does something the script\n" +
+		"itself checks. Do NOT answer \"test_failure\" because the application lacks\n" +
+		"something that appears only in the specification: this test never checked\n" +
+		"it, and a difference between the two is not the application's fault. If you\n" +
+		"cannot tell what the step intends, answer \"unresolved\".\n\n" +
+		"ATR does not rewrite a hand-written script. If the page has moved and the\n" +
+		"script needs to follow it, answer \"repaired\" and stop there. Do not write a rewritten script\n" +
+		"or a properties block: nothing would apply them. Put what the author\n" +
+		"needs in the reason instead: what moved, and what the target or step\n" +
+		"should become.\n"
+}
+
 // siblingNote shows a compile what its neighbours wrote.
 //
 // Not so it copies them — each spec asserts its own thing — but so that the
@@ -476,6 +516,11 @@ type TriageRequest struct {
 	// script is stamped, and the suite has silently lost its library with
 	// every hash still valid.
 	Library string
+	// HandWritten says the script carries no spec hash: a person wrote it,
+	// and it is replayed whatever the specification says. That changes what
+	// the failure is judged against, and nothing will apply a rewrite. See
+	// handWrittenNote.
+	HandWritten bool
 }
 
 // TriageFailure examines a failed run and either repairs the script or
@@ -536,7 +581,14 @@ value is missing, the answer is "test_failure" only if the application is
 broken; otherwise say so in the reason and answer "unresolved" so a person
 can decide what the value should be.
 
-` + scriptAPIReference + libraryNote(req.Library)
+` + scriptAPIReference + libraryNote(req.Library) + handWrittenNote(req.HandWritten)
+
+	// Called what it is: the note above only makes sense if the model can see
+	// which script it is about.
+	scriptLabel := "The compiled script that failed"
+	if req.HandWritten {
+		scriptLabel = "The hand-written script that failed"
+	}
 
 	failureJSON, _ := json.MarshalIndent(req.Failure, "", "  ")
 	user := fmt.Sprintf(`Application base URL: %s
@@ -546,7 +598,7 @@ Specification (%s):
 %s
 ---
 
-The compiled script that failed:
+%s:
 ---
 %s
 ---
@@ -557,7 +609,7 @@ The failure (already classified by the runtime; %d attempt(s) made):
 %s
 
 Inspect the page and decide.`,
-		req.BaseURL, req.SpecPath, req.Spec, req.Script,
+		req.BaseURL, req.SpecPath, req.Spec, scriptLabel, req.Script,
 		describeKeys(req.ValueKeys), req.Attempts, failureJSON)
 
 	messages := []llm.Message{
@@ -571,6 +623,13 @@ Inspect the page and decide.`,
 	}
 
 	triage := parseTriage(content)
+	if triage.Verdict == VerdictRepaired && req.HandWritten {
+		// No rewrite was asked for and none will be applied: for a
+		// hand-written script this verdict is a diagnosis — the page moved —
+		// and the reason is the whole of it. Any code that came with it is
+		// dropped here rather than carried to somewhere that might save it.
+		return triage, nil
+	}
 	if triage.Verdict == VerdictRepaired {
 		script := extractCode(content)
 		if script == "" {
