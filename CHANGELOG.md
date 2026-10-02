@@ -166,6 +166,14 @@ CLI need no changes.
   the request as JSON, with `selectors` and `properties` as arrays. The `GET`
   form with `selectors=a,b` still works. A newer CLI against an older daemon gets `method not allowed`
   rather than a wrong answer.
+- **A hand-written script is triaged against itself.** When one failed, the
+  triage prompt still asked whether the application did "what the
+  specification requires" — but a hand-written script is replayed whatever the
+  spec says, so the two may not agree. A drifted script beside a spec that
+  asked for more could be given the verdict that the application was broken,
+  which is terminal and exits `1`. The prompt now says the script is what the
+  test checks and the spec is context. It also stops asking for a rewritten
+  script that nothing would apply; the reason carries what moved.
 - `atr.waitFor` on a selector the browser cannot parse is a script fault, as
   it already was for `atr.click` and `atr.exists`. It was reported as a
   timeout, which is retried — every retry failing the same way — before

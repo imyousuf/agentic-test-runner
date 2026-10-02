@@ -589,10 +589,13 @@ it stands — on a plain run and under `--no-compile` alike, and whatever the
 spec says, since there is no hash to hold the spec against. It is never
 compiled over, never rewritten by a repair, never stamped with a library hash
 and never hoisted into `_shared.js`. A failure is still triaged, so you learn
-whether the page moved or the application broke; the agent's reason is
-reported, and any rewrite it proposes is discarded. `--recompile` is the one
-way to hand the script back: it replaces the file with a freshly compiled one,
-and says so.
+whether the page moved or the application broke. It is judged against what the
+script itself checks, not against the spec — the two are not tied together, so
+something the spec asks for and the script never checked is not the
+application's fault. No rewrite is asked for; the agent's reason says what
+moved and what to change, and that is what is reported. `--recompile` is the
+one way to hand the script back: it replaces the file with a freshly compiled
+one, and says so.
 
 "No hash line" means none anywhere in a file that has something in it. A script
 whose hash line has merely been pushed out of the header — by a licence comment
