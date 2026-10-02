@@ -417,6 +417,7 @@ func (r *runtime) jsWaitFor(target string, opts map[string]any) {
 
 	timeout := durationOf(opts["timeout"], defaultWaitTimeout)
 	visible, _ := opts["visible"].(bool)
+	started := time.Now()
 
 	var err error
 	if visible {
@@ -425,8 +426,20 @@ func (r *runtime) jsWaitFor(target string, opts map[string]any) {
 		err = r.browser.WaitForElement(r.ctx, target, timeout)
 	}
 	if err != nil {
-		r.throw(KindTimeout, target, "waiting for %q: %v", target, err)
+		r.throw(KindTimeout, target, "waiting for %q: %v (gave up after %s)", target, err, waitedSince(started))
 	}
+}
+
+// waitedSince is how long a call has actually been waiting, for its failure
+// message.
+//
+// What a failed wait reports is the time it spent, never the time it was
+// given. A lookup that came straight back used to be reported as "it was not
+// there after 30s" in a run that lasted 1.7s — a sentence that sends its
+// reader looking for a slow page, and that nobody could check against the
+// run's own duration because it was not a measurement of anything.
+func waitedSince(started time.Time) time.Duration {
+	return time.Since(started).Round(time.Millisecond)
 }
 
 func (r *runtime) jsWaitForText(text string, opts map[string]any) {
@@ -453,6 +466,7 @@ func (r *runtime) jsExpectExists(target string, opts map[string]any) {
 	r.curTarget = target
 
 	timeout := durationOf(opts["timeout"], defaultWaitTimeout)
+	started := time.Now()
 	err := r.browser.WaitForElement(r.ctx, target, timeout)
 	present, fatal := existsOutcome(err)
 	if fatal != "" {
@@ -462,7 +476,7 @@ func (r *runtime) jsExpectExists(target string, opts map[string]any) {
 		// The run running out of time is not the application being wrong.
 		r.checkCtx()
 		r.throw(KindAssertion, target,
-			"expected %q to be on the page; it was not there after %s", target, timeout)
+			"expected %q to be on the page; it was not there after %s", target, waitedSince(started))
 	}
 }
 
@@ -480,7 +494,8 @@ func (r *runtime) jsExpectMissing(target string, opts map[string]any) {
 	r.curTarget = target
 
 	timeout := durationOf(opts["timeout"], defaultWaitTimeout)
-	deadline := time.Now().Add(timeout)
+	started := time.Now()
+	deadline := started.Add(timeout)
 
 	for {
 		err := r.browser.WaitForElement(r.ctx, target, existsBranchTimeout)
@@ -495,7 +510,7 @@ func (r *runtime) jsExpectMissing(target string, opts map[string]any) {
 			// The run running out of time is not the application being wrong.
 			r.checkCtx()
 			r.throw(KindAssertion, target,
-				"expected %q to be gone from the page; it was still there after %s", target, timeout)
+				"expected %q to be gone from the page; it was still there after %s", target, waitedSince(started))
 		}
 		r.checkCtx()
 		time.Sleep(expectMissingPoll)
@@ -608,7 +623,7 @@ func (r *runtime) jsExpectText(target, expected string, opts map[string]any) {
 
 	// How long it actually waited, not how long it was told to: a failure
 	// that misreports its own patience is one nobody can reason about.
-	waited := time.Since(started).Round(time.Millisecond)
+	waited := waitedSince(started)
 
 	if !everFound {
 		r.throw(KindAssertion, target,

@@ -59,47 +59,85 @@ func splitHasText(selector string) (base, text string, ok bool) {
 	return base, text, true
 }
 
+// hasTextQuery finds, in the page, the elements matching a CSS selector whose
+// text contains a string, matched case-insensitively as Playwright does.
+//
+// It runs in the page so that one lookup is one round trip. Filtering here
+// instead — Elements, then Text on each — costs a CDP call per candidate, which
+// was tolerable while a lookup ran once and is not now that it polls: div
+// :has-text() on a real page is hundreds of calls a poll, all queued on the
+// target the script's next action is waiting for. It was also two looks at a
+// page that may change between them.
+//
+// What counts as an element's text is what rod's Element.Text reads, so that
+// moving the match into the page did not change what matches: a field's value
+// or placeholder, a select's chosen option, and visible text otherwise. An
+// element with no innerText at all (SVG) falls back to its text content.
+//
+// Case is folded upwards, not downwards. JavaScript's toLowerCase is
+// context-sensitive — a capital sigma becomes a different letter at the end of
+// a word than in the middle of one — so a lower-cased needle can fail to occur
+// in the lower-cased text that contains it. toUpperCase has no such rule.
+const hasTextQuery = `(base, want, all) => {
+	const textOf = (el) => {
+		switch (el.tagName) {
+		case 'INPUT':
+		case 'TEXTAREA':
+			return el.value || el.placeholder || '';
+		case 'SELECT':
+			return Array.from(el.selectedOptions).map((o) => o.innerText).join();
+		default:
+			return el.innerText == null ? (el.textContent || '') : el.innerText;
+		}
+	};
+	const needle = want.toUpperCase();
+	const matches = (el) => textOf(el).toUpperCase().includes(needle);
+	const candidates = document.querySelectorAll(base);
+	if (all) {
+		return Array.from(candidates).filter(matches);
+	}
+	for (const el of candidates) {
+		if (matches(el)) {
+			return el;
+		}
+	}
+	return null;
+}`
+
 // resolveHasText finds the first element matching base whose text contains
-// text, matched case-insensitively as Playwright does.
+// want, waiting for one until the page's context expires.
+//
+// The waiting is the point. This used to ask once and report what it saw, so
+// an element still rendering was "not found" within milliseconds whatever the
+// caller was prepared to wait — where the same element named by CSS or XPath
+// was polled for. ElementByJS retries exactly as Element and ElementX do,
+// which is what makes the three interchangeable: the caller's deadline, read
+// off the page, is the only thing that ends the search.
+//
+// So the page handed in must carry a deadline, as every page from tryFind
+// does. The deadline arrives as a context error, which the callers translate
+// with asNotFound like any other lookup that ran out of time.
 func resolveHasText(page *rod.Page, base, want string) (*rod.Element, error) {
-	elements, err := page.Elements(base)
+	el, err := page.ElementByJS(rod.Eval(hasTextQuery, base, want, false))
 	if err != nil {
 		return nil, invalidSelector(base, err)
 	}
-
-	want = strings.ToLower(want)
-	for _, el := range elements {
-		got, err := el.Text()
-		if err != nil {
-			continue
-		}
-		if strings.Contains(strings.ToLower(got), want) {
-			return el, nil
-		}
-	}
-	return nil, fmt.Errorf("%w: %s:has-text(%q)", ErrElementNotFound, base, want)
+	return el, nil
 }
 
 // resolveHasTextAll returns every element matching base whose text contains
 // want, for the callers that operate on a set.
+//
+// It does not wait, and that is deliberate: it answers what matches now, as
+// Elements and ElementsX do for the other two spellings. A set has no moment
+// at which it is known to be complete, so the callers treat an empty one as
+// "nothing matched" whichever way the selector was written.
 func resolveHasTextAll(page *rod.Page, base, want string) ([]*rod.Element, error) {
-	elements, err := page.Elements(base)
+	elements, err := page.ElementsByJS(rod.Eval(hasTextQuery, base, want, true))
 	if err != nil {
 		return nil, invalidSelector(base, err)
 	}
-
-	want = strings.ToLower(want)
-	var out []*rod.Element
-	for _, el := range elements {
-		got, err := el.Text()
-		if err != nil {
-			continue
-		}
-		if strings.Contains(strings.ToLower(got), want) {
-			out = append(out, el)
-		}
-	}
-	return out, nil
+	return elements, nil
 }
 
 // invalidSelector reports a selector the page refused to parse.
