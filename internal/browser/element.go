@@ -12,6 +12,7 @@ import (
 	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/input"
 	"github.com/go-rod/rod/lib/proto"
+	"github.com/go-rod/rod/lib/utils"
 )
 
 var base64Std = base64.StdEncoding
@@ -556,8 +557,65 @@ func asNotFound(target string, err error) error {
 // with errors.Is rather than on message text.
 var ErrElementNotFound = errors.New("element not found")
 
+// How often a lookup that has not found its target looks again.
+const (
+	// lookupPollStart is the first retry interval. Short, because most late
+	// elements are only a render behind.
+	lookupPollStart = 100 * time.Millisecond
+	// lookupPollMax is the longest a lookup goes without looking.
+	lookupPollMax = 500 * time.Millisecond
+	// lookupLastLook is how long before its deadline a lookup takes its
+	// final look.
+	lookupLastLook = 100 * time.Millisecond
+)
+
+// lookupSleeper paces the retries of a lookup: quick at first, never more
+// than lookupPollMax apart, and with one look timed to land just before the
+// deadline.
+//
+// rod's own default backs off by doubling to a one-second ceiling, and
+// overshoots it once on the way: it looks at about 0.2s, 0.6s and 1.4s, and
+// then not again until 3s. Against the three seconds a lookup gets by default
+// that is a budget of 1.4 — whatever rendered in the second half was never
+// looked for again and was reported missing, which is drift, which is a
+// repair. And any wait at all was blind for its last second.
+//
+// One look is one round trip to the page, so a ceiling of half a second
+// costs two of those a second while something is being waited for.
+func lookupSleeper() utils.Sleeper {
+	interval := lookupPollStart
+	tookLastLook := false
+
+	return func(ctx context.Context) error {
+		wait := interval
+		if interval *= 2; interval > lookupPollMax {
+			interval = lookupPollMax
+		}
+
+		// When the deadline would arrive during this sleep, wake up short of
+		// it instead, so there is still time to look and to act on what is
+		// found. Once only: after that the deadline ends the lookup.
+		if deadline, ok := ctx.Deadline(); ok && !tookLastLook {
+			if untilLastLook := time.Until(deadline) - lookupLastLook; untilLastLook < wait {
+				wait = max(untilLastLook, 0)
+				tookLastLook = true
+			}
+		}
+
+		timer := time.NewTimer(wait)
+		defer timer.Stop()
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-timer.C:
+			return nil
+		}
+	}
+}
+
 func tryFind(page *rod.Page, timeout time.Duration, fn func(*rod.Page) (*rod.Element, error)) (*rod.Element, error) {
-	el, err := fn(page.Timeout(timeout))
+	el, err := fn(page.Timeout(timeout).Sleeper(lookupSleeper))
 	if err != nil {
 		return nil, err
 	}
@@ -577,7 +635,11 @@ func tryFind(page *rod.Page, timeout time.Duration, fn func(*rod.Page) (*rod.Ele
 	// unbounded, and rod waits for interactability: an element that never
 	// becomes interactable would block the caller forever. So the action gets
 	// its own budget instead.
-	return el.Context(page.Timeout(elementActionTimeout).GetContext()), nil
+	//
+	// The lookup's pacing is left behind with its deadline. An element carries
+	// the sleeper of the page it was found through, and uses it for its own
+	// waits — to become interactable, to stop moving. Those keep rod's.
+	return el.Context(page.Timeout(elementActionTimeout).GetContext()).Sleeper(rod.DefaultSleeper), nil
 }
 
 func (b *Browser) findElement(page *rod.Page, target string) (*rod.Element, error) {

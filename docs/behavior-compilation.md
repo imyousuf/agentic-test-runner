@@ -263,11 +263,10 @@ All three spellings are waited for alike. A target that has not rendered yet is
 polled for until the call's budget runs out, whichever way it was written. The
 budget is the `timeout` a wait or an `expect…` was given; for an action it is up
 to fifteen seconds of whatever the run has left; and a read that takes no
-timeout (`atr.text`, `atr.scroll`) gets three seconds. Polling backs off — it
-looks again at roughly 0.2s, 0.6s, 1.4s and 3s, then every second — so the last
-look can come well before the budget ends: inside a three-second budget it is
-at about 1.4s. Wait explicitly, with `atr.expectExists` or `atr.expectText`,
-for anything that may take longer than a second to appear. When a wait does fail,
+timeout (`atr.text`, `atr.scroll`) gets three seconds. A lookup looks again
+after a tenth of a second, then at widening intervals up to every half second,
+and once more just before its budget ends — so a target is found within half a
+second of appearing, however late in the budget that is. When a wait does fail,
 its message gives the time it actually waited ("it was not there after
 10.004s"), not the timeout it was handed.
 

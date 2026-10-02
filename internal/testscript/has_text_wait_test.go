@@ -61,10 +61,7 @@ func TestScriptCallsWaitForALateHasTextTarget(t *testing.T) {
 		{"hover", 1500, `atr.hover(` + target + `);`},
 		{"expectText", 1500, `atr.expectText(` + target + `, "Ready now", {timeout: 10000});`},
 		// A read takes no timeout of its own, so it gets the lookup's default
-		// three seconds — and rod polls with a backoff whose last look inside
-		// three seconds is at about 1.4s, for any selector, CSS included. 800ms
-		// falls between that look and the one before it with room either side;
-		// the cadence is not what is under test here.
+		// three seconds; the button arrives well inside that.
 		{"text", 800, `expect(atr.text(` + target + `)).toBe("Ready now");`},
 	}
 

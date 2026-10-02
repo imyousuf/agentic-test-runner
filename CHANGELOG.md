@@ -119,6 +119,13 @@ CLI need no changes.
   for all sixty, and Ctrl-C had to wait with it. They stop at the caller's
   deadline or cancellation now, and report the run's own timeout rather than a
   missing element.
+- **A lookup looks through its whole budget.** How often a waiting lookup
+  looked again was left to a backoff that looked at about 0.2s, 0.6s and 1.4s
+  and then not until 3s. The three seconds a read such as `atr.text` gets were
+  therefore really 1.4: something that rendered in the second half was
+  reported missing, and the last second of any wait was blind. A lookup now
+  looks at least every half second and once more just before it gives up.
+  `atr.waitForText` is paced the same way.
 - `atr.waitFor` on a selector the browser cannot parse is a script fault, as
   it already was for `atr.click` and `atr.exists`. It was reported as a
   timeout, which is retried — every retry failing the same way — before

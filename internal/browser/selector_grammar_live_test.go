@@ -412,9 +412,8 @@ func TestMalformedXPathIsReportedAsInvalidEverywhere(t *testing.T) {
 // new to the read path, so it gets the same proof the CSS one already has.
 func TestAReadThroughXPathWaitsForALateElement(t *testing.T) {
 	resetFixture(t)
-	// 800ms: after rod's third look (about 0.6s in) and well before its
-	// fourth (about 1.4s), which is the last one inside the default
-	// three-second budget a read gets.
+	// 800ms: well inside the three seconds a read with no deadline of its
+	// own is given.
 	if err := testBrowser.Navigate(context.Background(), testFixtureURL+"/late_element.html?manual=1&ms=800"); err != nil {
 		t.Fatal(err)
 	}

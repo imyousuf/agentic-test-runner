@@ -1641,7 +1641,7 @@ func (b *Browser) WaitForText(ctx context.Context, text string, timeout time.Dur
 	// text a person typed. Quoting it keeps ordinary punctuation — "Sign up
 	// (free)", "20% off" — from being read as syntax and reported as text
 	// that never appeared, or as an invalid-pattern error nobody expected.
-	el, err := page.Timeout(timeout).ElementR("*", regexp.QuoteMeta(text))
+	el, err := page.Timeout(timeout).Sleeper(lookupSleeper).ElementR("*", regexp.QuoteMeta(text))
 	if err != nil {
 		return fmt.Errorf("waiting for text %q: %w", text, err)
 	}
