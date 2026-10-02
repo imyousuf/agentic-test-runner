@@ -256,17 +256,44 @@ string, ignoring case. An element's text is what it shows — or, for a field,
 its value or else its placeholder, and for a select its chosen option. The reads
 (`atr.text`, `atr.expectText`, `atr.scroll`) take exactly what the actions and
 waits take, so a script can read through the XPath it has just clicked with.
-The actions and waits also accept plain visible text, an aria-label, a
-data-testid or a snapshot UID; the reads take a selector only.
+The actions and waits also accept a plain target — visible text, an
+aria-label, a data-testid, a name, a placeholder or a snapshot UID; the reads
+take a selector only.
 
-All three spellings are waited for alike. A target that has not rendered yet is
-polled for until the call's budget runs out, whichever way it was written. The
+A plain target is read every one of those ways on every look, and the first
+reading that names an element wins: as a selector if it could be one, then a
+snapshot UID, aria-label, data-testid, name, placeholder, exact text, the text
+of a button or link in part, a label (which names the field it is for), and
+last any text on the page. A snapshot UID is `e` and a number and nothing more:
+`e2e suite` is text.
+
+Text in part is the loose end of that list, and is handled as one:
+
+- It is matched as written — not as a pattern — against what the page shows:
+  the text the body renders and the values its fields show, never the title or
+  the source of a script. It resolves to the smallest element showing it.
+- It joins a lookup half way through the budget, and after a second at most.
+  Until then only the exact readings are tried, so a click on `Save` goes to
+  the Save button that is a render away rather than to the "Saved filters"
+  heading already there.
+- A target written as a selector — one with selector punctuation, or made only
+  of lower-case element names such as `dialog` or `ul li` — is never matched in
+  part. A selector that matches nothing yet is waited for, not looked for
+  inside the page's text. `Details`, capitalised, is a word.
+
+Exact text is the exception to "what the page shows": it names an element by
+its whole text whether or not the element is rendered, which is what lets
+`atr.waitFor(text, {visible: true})` find something and then wait for it to
+appear.
+
+All three spellings are waited for alike, and so is a plain target. One that
+has not rendered yet is polled for until the call's budget runs out. The
 budget is the `timeout` a wait or an `expect…` was given; for an action it is up
 to fifteen seconds of whatever the run has left; and a read that takes no
 timeout (`atr.text`, `atr.scroll`) gets three seconds. A lookup looks again
 after a tenth of a second, then at widening intervals up to every half second,
-and once more just before its budget ends — so a target is found within half a
-second of appearing, however late in the budget that is. When a wait does fail,
+and once more a tenth of a second before its budget ends — so a target is found
+within half a second of appearing, up to that last look. When a wait does fail,
 its message gives the time it actually waited ("it was not there after
 10.004s"), not the timeout it was handed.
 

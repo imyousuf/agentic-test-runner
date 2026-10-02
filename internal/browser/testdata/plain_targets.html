@@ -1,0 +1,69 @@
+<!doctype html>
+<!-- The title says what the heading says, as titles do. -->
+<title>Orders</title>
+<body>
+  <h1 id="heading">Orders</h1>
+
+  <!-- One element for each way a target that is not a selector can be read.
+       Each is reachable by exactly one of them. -->
+  <button id="by-aria" type="button" aria-label="Close dialog">×</button>
+  <div id="by-testid" data-testid="order-total">£12.00</div>
+  <input id="by-name" type="text" name="email">
+  <input id="by-placeholder" type="text" placeholder="Search orders">
+  <h2 id="by-exact-text">Order summary</h2>
+  <a id="by-link-text" href="#">View all orders placed</a>
+  <label for="by-label"><b>Quan</b>tity</label> <input id="by-label" type="number">
+  <p id="by-partial-text">Your parcel <em id="by-inline-text">has shipped</em> today</p>
+  <input id="by-value" type="text" value="typed already">
+
+  <!-- Text that is in the document and not on the page. -->
+  <p id="not-shown" style="display:none">Kept in reserve for later</p>
+
+  <!-- Text that happens to begin like a snapshot UID. -->
+  <span id="by-e-text">e2e suite</span>
+
+  <!-- Text that happens to be the name of an HTML element, with no such
+       element on the page, and one with. -->
+  <a id="details-link" href="#">Details</a>
+  <span id="address-text">Address</span>
+  <address id="the-address">1 Main Street</address>
+
+  <!-- Buttons whose text contains a word that is also an element name. -->
+  <button id="open-dialog" type="button">Open dialog</button>
+  <button id="show-summary" type="button">Show Summary</button>
+
+  <!-- Punctuation that is syntax somewhere along the way. -->
+  <button id="quoted-aria" type="button" aria-label='Say "hi"'>speech</button>
+  <span id="quoted-text">It's "fine"</span>
+  <span id="price">Price (USD)</span>
+
+  <!-- Two readings of the same word. The one read first wins, whichever
+       comes first in the document — so each pair is in the losing order. -->
+  <section id="conflicts">
+    <span id="save-text">Save</span>
+    <button id="save-aria" type="button" aria-label="Save">disk</button>
+
+    <div id="export-testid" data-testid="Export">x</div>
+    <button id="export-aria" type="button" aria-label="Export">x</button>
+
+    <input id="archive-name" type="text" name="Archive">
+    <div id="archive-testid" data-testid="Archive">x</div>
+
+    <input id="city-placeholder" type="text" placeholder="City">
+    <input id="city-name" type="text" name="City">
+
+    <span id="phone-text">Phone</span>
+    <input id="phone-placeholder" type="text" placeholder="Phone">
+
+    <button id="pay-button" type="button">Pay now please</button>
+    <span id="pay-text">Pay now</span>
+  </section>
+
+  <div id="events"></div>
+  <script>
+    // A string that exists only here, in the source: "Only ever in a script".
+    document.addEventListener("click", (e) => {
+      document.getElementById("events").textContent += "click:" + (e.target.id || e.target.tagName.toLowerCase()) + ";";
+    });
+  </script>
+</body>

@@ -79,17 +79,7 @@ func splitHasText(selector string) (base, text string, ok bool) {
 // a word than in the middle of one — so a lower-cased needle can fail to occur
 // in the lower-cased text that contains it. toUpperCase has no such rule.
 const hasTextQuery = `(base, want, all) => {
-	const textOf = (el) => {
-		switch (el.tagName) {
-		case 'INPUT':
-		case 'TEXTAREA':
-			return el.value || el.placeholder || '';
-		case 'SELECT':
-			return Array.from(el.selectedOptions).map((o) => o.innerText).join();
-		default:
-			return el.innerText == null ? (el.textContent || '') : el.innerText;
-		}
-	};
+	const textOf = ` + jsTextOf + `;
 	const needle = want.toUpperCase();
 	const matches = (el) => textOf(el).toUpperCase().includes(needle);
 	const candidates = document.querySelectorAll(base);
@@ -103,6 +93,22 @@ const hasTextQuery = `(base, want, all) => {
 	}
 	return null;
 }`
+
+// jsTextOf reads an element's text the way rod's Element.Text does: a field's
+// value or else its placeholder, a select's chosen option, and visible text
+// otherwise. An element with no innerText at all (SVG) falls back to its text
+// content. One definition, shared by every query that matches on text.
+const jsTextOf = `(el) => {
+		switch (el.tagName) {
+		case 'INPUT':
+		case 'TEXTAREA':
+			return el.value || el.placeholder || '';
+		case 'SELECT':
+			return Array.from(el.selectedOptions).map((o) => o.innerText).join();
+		default:
+			return el.innerText == null ? (el.textContent || '') : el.innerText;
+		}
+	}`
 
 // resolveHasText finds the first element matching base whose text contains
 // want, waiting for one until the page's context expires.
