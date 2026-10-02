@@ -151,6 +151,13 @@ func TestStampDoesNotWriteToAHandWrittenScript(t *testing.T) {
 				if err := os.Chtimes(path, longAgo, longAgo); err != nil {
 					t.Fatal(err)
 				}
+				// What the file's mode is here, rather than what was asked for:
+				// Windows has no executable bit to keep.
+				created, err := os.Stat(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				modeBefore := created.Mode().Perm()
 
 				if err := Stamp(specPath, libHash); err != nil {
 					t.Fatalf("Stamp: %v", err)
@@ -172,8 +179,8 @@ func TestStampDoesNotWriteToAHandWrittenScript(t *testing.T) {
 				}
 				// Replacing the file through a temporary one also resets its
 				// mode, which is how an executable script would lose its bit.
-				if info.Mode().Perm() != 0o755 {
-					t.Errorf("the file's mode changed to %v", info.Mode().Perm())
+				if info.Mode().Perm() != modeBefore {
+					t.Errorf("the file's mode changed from %v to %v", modeBefore, info.Mode().Perm())
 				}
 				if strings.Contains(string(after), specHeader) {
 					t.Error("a spec hash appeared in a hand-written script")
