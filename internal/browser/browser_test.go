@@ -1249,7 +1249,7 @@ func TestWaitForTextTakesLiteralText(t *testing.T) {
 		t.Fatalf("navigate: %v", err)
 	}
 
-	if err := testBrowser.WaitForText(phrase, 5*time.Second); err != nil {
+	if err := testBrowser.WaitForText(context.Background(), phrase, 5*time.Second); err != nil {
 		t.Errorf("WaitForText(%q) = %v, want it found", phrase, err)
 	}
 }
@@ -1259,7 +1259,7 @@ func TestWaitForTextTakesLiteralText(t *testing.T) {
 func TestWaitForTextKeepsTheRealError(t *testing.T) {
 	resetFixture(t)
 
-	err := testBrowser.WaitForText("no such text is on this page", 300*time.Millisecond)
+	err := testBrowser.WaitForText(context.Background(), "no such text is on this page", 300*time.Millisecond)
 	if err == nil {
 		t.Fatal("expected an error")
 	}

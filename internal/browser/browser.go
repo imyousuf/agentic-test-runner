@@ -1625,12 +1625,14 @@ func legacyWrapJSExpression(script string) string {
 	return "() => (" + script + ")"
 }
 
-// WaitForText waits for text to appear on the page.
-func (b *Browser) WaitForText(text string, timeout time.Duration) error {
+// WaitForText waits for text to appear on the page, for timeout or until the
+// caller's context ends, whichever comes first.
+func (b *Browser) WaitForText(ctx context.Context, text string, timeout time.Duration) error {
 	page, err := b.CurrentPage()
 	if err != nil {
 		return err
 	}
+	page = bindDeadline(page, ctx)
 
 	// ElementR rather than MustElementR: the Must form panics when the text
 	// never appears, which is the ordinary outcome of a wait that times out.

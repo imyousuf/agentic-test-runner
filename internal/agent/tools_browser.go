@@ -285,7 +285,7 @@ func (t *BrowserWaitForTool) Execute(ctx context.Context, args map[string]any) (
 		timeout = time.Duration(timeoutSec) * time.Second
 	}
 
-	if err := t.browser.WaitForText(text, timeout); err != nil {
+	if err := t.browser.WaitForText(ctx, text, timeout); err != nil {
 		return fmt.Sprintf("Text not found within timeout: %v", err), true
 	}
 
