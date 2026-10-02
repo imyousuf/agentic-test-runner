@@ -80,6 +80,16 @@ CLI need no changes.
 
 ### Fixed
 
+- **One target grammar for every call.** `atr.text`, `atr.expectText` and
+  `atr.scroll` — and the `text`, `scroll`, `screenshot`, `computed-styles`,
+  `clean-snapshot` and `download-images` commands behind them — refused an
+  XPath as an invalid selector, although `atr.click` and `atr.waitFor` took the
+  same one and the compile prompt promises "CSS or XPath". A compiled script
+  that read through the XPath it had just clicked with failed its first replay
+  as a script fault and was sent for repair. Every target-taking call now
+  resolves CSS, XPath and `:has-text()` through the same code. An XPath that
+  does not parse is reported as an invalid selector — a script fault — instead
+  of as an environment failure to be retried. (#29)
 - Computer click/move/drag/hover responses no longer leak the internal
   `NoDisplay` sentinel (`-1`) through the `display` field. The field is now
   omitted entirely when the request didn't specify a display, and round-trips

@@ -121,9 +121,17 @@ func unambiguousCSS(target string) bool {
 		strings.HasPrefix(target, "[") || strings.Contains(target, hasTextMarker)
 }
 
-// elementsMatching is Elements with :has-text() support, for the callers that
-// operate on every match rather than the first.
+// elementsMatching is Elements with XPath and :has-text() support, for the
+// callers that operate on every match rather than the first. The grammar is
+// findBySelector's.
 func elementsMatching(page *rod.Page, selector string) ([]*rod.Element, error) {
+	if isXPath(selector) {
+		elements, err := page.ElementsX(selector)
+		if err != nil {
+			return nil, invalidSelector(selector, err)
+		}
+		return elements, nil
+	}
 	if base, want, ok := splitHasText(selector); ok {
 		return resolveHasTextAll(page, base, want)
 	}

@@ -195,7 +195,19 @@ Drag from one element to another.
 atr browser wait <selector> [--timeout 5000] [--visible]
 ```
 
-Wait for an element matching the CSS selector to appear in the DOM.
+Wait for an element matching the selector to appear in the DOM.
+
+A selector is CSS, XPath (anything beginning `//`), or CSS with a trailing
+`:has-text("...")`, here and in every command below that takes one: `scroll`,
+`screenshot`, `text`, `computed-styles`, `clean-snapshot` and `download-images`
+accept the same three spellings `click` and `wait` do. (`click` and `wait` also
+take a UID, visible text, an aria-label or a data-testid; the others take a
+selector only.)
+
+One exception: the repeatable `--selector` flag of `computed-styles` and
+`computed-styles-diff` sends its values to the daemon joined by commas, so a
+selector that itself contains a comma — `contains(., "a")` in an XPath, say —
+is cut in two there. Pass such a selector positionally, one command each.
 
 | Flag | Description |
 |------|-------------|

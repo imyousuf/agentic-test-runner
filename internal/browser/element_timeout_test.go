@@ -154,7 +154,7 @@ func TestExplicitWaitIsNotCappedAtThreeSeconds(t *testing.T) {
 }
 
 // A selector that no longer matches must be reported the same way whichever
-// call went looking for it. atr.text and friends go through findElementByCSS,
+// call went looking for it. atr.text and friends go through findBySelector,
 // which used to return a raw deadline error — classified as environmental, so
 // retried rather than repaired, while the identical rename behind a click was
 // repaired.

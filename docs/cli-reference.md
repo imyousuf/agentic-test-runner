@@ -227,7 +227,18 @@ atr browser scroll -s <selector> [flags]     # Scroll within an element
 atr browser wait <selector> [flags]          # Wait for element to appear
 ```
 
-Target can be a UID (e.g., `e0`), text, aria-label, data-testid, or CSS selector.
+Target can be a UID (e.g., `e0`), text, aria-label, data-testid, or a selector.
+
+A selector is CSS, XPath (anything beginning `//`), or CSS with a trailing
+`:has-text("...")`. That holds wherever a command takes one — `click`, `wait`,
+`scroll`, `screenshot`, `text`, `computed-styles`, `clean-snapshot` and
+`download-images` all accept the same three spellings, as a positional
+argument or through `--selector` / `--selector-all`.
+
+One exception: the repeatable `--selector` flag of `computed-styles` and
+`computed-styles-diff` (batch mode) sends its values to the daemon joined by
+commas, so a selector that itself contains a comma is cut in two there. Pass
+such a selector positionally instead.
 
 #### scroll flags
 

@@ -491,7 +491,7 @@ Useful for modals, dialogs, and other elements with overflow scroll/auto.`,
 			})
 		},
 	}
-	cmd.Flags().StringVarP(&selector, "selector", "s", "", "CSS selector of scrollable element (required)")
+	cmd.Flags().StringVarP(&selector, "selector", "s", "", "Selector of scrollable element: CSS, XPath or :has-text() (required)")
 	_ = cmd.MarkFlagRequired("selector")
 	cmd.Flags().IntVar(&x, "x", 0, "Horizontal scroll position in pixels")
 	cmd.Flags().IntVar(&y, "y", 0, "Vertical scroll position in pixels")
@@ -544,8 +544,8 @@ Use repeated --selector flags to batch-query multiple selectors in one call.`,
 		},
 	}
 	cmd.Flags().StringVar(&properties, "properties", "", "Comma-separated CSS properties to return (e.g., fontSize,color,fontWeight)")
-	cmd.Flags().StringVar(&selectorAll, "selector-all", "", "CSS selector matching multiple elements to get styles for")
-	cmd.Flags().StringArrayVar(&selectors, "selector", nil, "CSS selector (repeatable for batch mode)")
+	cmd.Flags().StringVar(&selectorAll, "selector-all", "", "Selector (CSS, XPath or :has-text()) matching multiple elements to get styles for")
+	cmd.Flags().StringArrayVar(&selectors, "selector", nil, "Selector (repeatable for batch mode; values are comma-joined, so one containing a comma must be passed positionally)")
 	return cmd
 }
 
@@ -606,8 +606,8 @@ Use repeated --selector flags to batch-diff multiple selectors with an overall s
 	}
 	cmd.Flags().StringVar(&against, "against", "0", "Page index to compare against (e.g., 0, page:0)")
 	cmd.Flags().StringVar(&properties, "properties", "", "Comma-separated CSS properties to compare")
-	cmd.Flags().StringVar(&selectorTarget, "selector-target", "", "CSS selector on target page (defaults to source selector)")
-	cmd.Flags().StringArrayVar(&selectors, "selector", nil, "CSS selector (repeatable for batch mode)")
+	cmd.Flags().StringVar(&selectorTarget, "selector-target", "", "Selector on target page (defaults to source selector)")
+	cmd.Flags().StringArrayVar(&selectors, "selector", nil, "Selector (repeatable for batch mode; values are comma-joined, so one containing a comma must be passed positionally)")
 	return cmd
 }
 
@@ -778,8 +778,8 @@ timeout in milliseconds (default 30000).`,
 	}
 	cmd.Flags().BoolVar(&fullPage, "full", false, "Capture full scrollable page")
 	cmd.Flags().BoolVar(&saveToFile, "file", false, "Save to file instead of base64")
-	cmd.Flags().StringVarP(&selector, "selector", "s", "", "CSS selector of element to screenshot")
-	cmd.Flags().StringVar(&selectorAll, "selector-all", "", "CSS selector matching multiple elements to screenshot")
+	cmd.Flags().StringVarP(&selector, "selector", "s", "", "Selector of element to screenshot: CSS, XPath or :has-text()")
+	cmd.Flags().StringVar(&selectorAll, "selector-all", "", "Selector (CSS, XPath or :has-text()) matching multiple elements to screenshot")
 	cmd.Flags().StringVar(&outputDir, "output-dir", "", "Directory to save screenshots (used with --selector-all)")
 	cmd.Flags().IntVar(&timeout, "timeout", 30000, "Per-element timeout in milliseconds (used with --selector-all)")
 	return cmd

@@ -26,7 +26,7 @@ func GetBrowserTools() []Tool {
 		},
 		{
 			Name:        "browser_screenshot",
-			Description: "Take a screenshot. Supports full page, single element (by CSS selector), full-height element, and multiple elements.",
+			Description: "Take a screenshot. Supports full page, single element (by CSS, XPath or :has-text() selector), full-height element, and multiple elements.",
 			InputSchema: schemaFor(&browserScreenshotSchemaArgs{}),
 		},
 		{
@@ -168,7 +168,7 @@ func GetBrowserTools() []Tool {
 		},
 		{
 			Name:        "browser_download_images",
-			Description: "Download images found within elements matching a CSS selector. Returns file paths of saved images.",
+			Description: "Download images found within the element a selector names (CSS, XPath or :has-text()). Returns file paths of saved images.",
 			InputSchema: schemaFor(&ops.DownloadImagesRequest{}),
 		},
 	}
@@ -190,8 +190,8 @@ func GetBrowserTools() []Tool {
 type browserScreenshotSchemaArgs struct {
 	File        string `json:"file"         jsonschema_description:"File path to save screenshot (default: /tmp/screenshot-<pid>.png)"`
 	FullPage    bool   `json:"full_page"    jsonschema_description:"Capture full scrollable page, or full-height element when combined with selector"`
-	Selector    string `json:"selector"     jsonschema_description:"CSS selector of element to screenshot. Combine with full_page for full-height element capture."`
-	SelectorAll string `json:"selector_all" jsonschema_description:"CSS selector matching multiple elements to screenshot individually"`
+	Selector    string `json:"selector"     jsonschema_description:"Selector (CSS, XPath or :has-text()) of element to screenshot. Combine with full_page for full-height element capture."`
+	SelectorAll string `json:"selector_all" jsonschema_description:"Selector (CSS, XPath or :has-text()) matching multiple elements to screenshot individually"`
 	OutputDir   string `json:"output_dir"   jsonschema_description:"Directory to save screenshots (used with selector_all, default: /tmp/)"`
 }
 
@@ -203,16 +203,16 @@ type browserScreenshotSchemaArgs struct {
 // branches on which one is set. Marking neither as required in the schema is
 // the honest answer; the description spells out the constraint for callers.
 type browserComputedStylesSchemaArgs struct {
-	Selector    string `json:"selector"     jsonschema_description:"CSS selector of a single element. Provide this OR selector_all."`
+	Selector    string `json:"selector"     jsonschema_description:"Selector (CSS, XPath or :has-text()) of a single element. Provide this OR selector_all."`
 	Properties  string `json:"properties"   jsonschema_description:"Comma-separated CSS properties to return (e.g., 'fontSize,color,fontWeight'). Omit for default set."`
-	SelectorAll string `json:"selector_all" jsonschema_description:"CSS selector matching multiple elements (one entry per match). Provide this OR selector."`
+	SelectorAll string `json:"selector_all" jsonschema_description:"Selector (CSS, XPath or :has-text()) matching multiple elements (one entry per match). Provide this OR selector."`
 }
 
 // browserComputedStylesDiffSchemaArgs documents the MCP-specific arguments
 // for browser_computed_styles_diff (comma-separated "properties" again).
 type browserComputedStylesDiffSchemaArgs struct {
-	Selector       string `json:"selector"        jsonschema:"required" jsonschema_description:"CSS selector on the current page"`
+	Selector       string `json:"selector"        jsonschema:"required" jsonschema_description:"Selector on the current page: CSS, XPath or :has-text()"`
 	Against        int    `json:"against"         jsonschema:"required" jsonschema_description:"Page index to compare against (0-based)"`
 	Properties     string `json:"properties"                             jsonschema_description:"Comma-separated CSS properties to compare (omit for default set)"`
-	SelectorTarget string `json:"selector_target"                        jsonschema_description:"CSS selector on the target page (defaults to source selector)"`
+	SelectorTarget string `json:"selector_target"                        jsonschema_description:"Selector on the target page: CSS, XPath or :has-text() (defaults to source selector)"`
 }
