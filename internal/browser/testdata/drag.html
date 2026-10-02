@@ -1,0 +1,36 @@
+<!doctype html>
+<title>Drag</title>
+<style>
+  .zone { width: 200px; min-height: 60px; border: 1px dashed #888; margin: 8px 0; padding: 4px; }
+  .card { width: 120px; padding: 6px; background: #def; }
+</style>
+<body>
+  <h1>Board</h1>
+  <div id="todo" class="zone" aria-label="To do column">
+    <div id="card" class="card" draggable="true">Write the report</div>
+    <div id="other-card" class="card" draggable="true">Something else</div>
+  </div>
+  <div id="done" class="zone" aria-label="Done column">Done</div>
+  <div id="events"></div>
+  <script>
+    const events = document.getElementById("events");
+    const record = (what) => { events.textContent += what + ";"; };
+
+    for (const card of document.querySelectorAll(".card")) {
+      card.addEventListener("dragstart", (e) => {
+        e.dataTransfer.setData("text/plain", card.id);
+        record("dragstart:" + card.id);
+      });
+      card.addEventListener("dragend", () => record("dragend:" + card.id));
+    }
+    for (const zone of document.querySelectorAll(".zone")) {
+      zone.addEventListener("dragover", (e) => { e.preventDefault(); record("dragover:" + zone.id); });
+      zone.addEventListener("drop", (e) => {
+        e.preventDefault();
+        const id = e.dataTransfer.getData("text/plain");
+        zone.appendChild(document.getElementById(id));
+        record("drop:" + id + "->" + zone.id);
+      });
+    }
+  </script>
+</body>

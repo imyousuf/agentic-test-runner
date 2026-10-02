@@ -154,6 +154,9 @@ CLI need no changes.
   display — most pages — the wait returned at once.
 - A snapshot UID is `e` and a number and nothing else. Text beginning that
   way, such as `e2e suite`, was read as element 2.
+- **Drag works.** `atr browser drag`, `POST /drag` and the `browser_drag` tool
+  failed for every pair of elements with `from.getBoundingClientRect is not a
+  function`: both elements were found and then handed to the page as JSON.
 - `atr.waitFor` on a selector the browser cannot parse is a script fault, as
   it already was for `atr.click` and `atr.exists`. It was reported as a
   timeout, which is retried — every retry failing the same way — before

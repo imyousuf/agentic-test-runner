@@ -285,7 +285,11 @@ func (b *Browser) Drag(ctx context.Context, fromTarget, toTarget string) error {
 		return fmt.Errorf("target element not found: %w", err)
 	}
 
-	// Use rod's built-in drag functionality via JavaScript
+	// The elements are passed as the remote objects they are. Handed over as
+	// *rod.Element they are marshalled to JSON, and the page receives two
+	// plain objects with nothing of an element about them — which is how
+	// every drag came to fail on "from.getBoundingClientRect is not a
+	// function".
 	_, err = page.Eval(`(from, to) => {
 		const fromRect = from.getBoundingClientRect();
 		const toRect = to.getBoundingClientRect();
@@ -312,7 +316,7 @@ func (b *Browser) Drag(ctx context.Context, fromTarget, toTarget string) error {
 		from.dispatchEvent(new DragEvent('dragend', {
 			bubbles: true, clientX: toX, clientY: toY, dataTransfer
 		}));
-	}`, fromEl, toEl)
+	}`, fromEl.Object, toEl.Object)
 
 	return err
 }
