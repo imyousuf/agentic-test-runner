@@ -29,94 +29,61 @@ const snapshotSelector = "button, input, select, textarea, a, [role], [aria-labe
 // happened to be.
 var uidPattern = regexp.MustCompile(`^e(\d+)$`)
 
-// reading is one way of interpreting a plain target.
-type reading struct {
-	name string
-	// inPart is true when the reading matches the target as part of some
-	// longer text rather than as the whole of something. Those are the loose
-	// readings, and they are held back: see findPlainTarget.
-	inPart bool
-	// look takes a single look at the page and returns the element this
-	// reading names, or nil when it names nothing right now. It never waits.
-	look func(p *rod.Page) (*rod.Element, error)
+// plainQuery is a plain target, worked out into everything one look at the
+// page needs in order to read it every way it can be read.
+//
+// The fields are in the order the readings are tried, which is the order of
+// precedence: an aria-label beats visible text, a data-testid beats a name,
+// and so on down. It is what the fallback chain has always tried, in the order
+// it has always tried it.
+type plainQuery struct {
+	// Target is the target as written, for the readings that match text.
+	Target string `json:"target"`
+	// Selector is the target as a CSS selector, when it could be one: a word
+	// that is also an element name, "div span". Only a guess, so a miss is
+	// not an answer and one the browser cannot parse is not an error.
+	Selector string `json:"selector"`
+	// UID is the index a snapshot UID names, or -1.
+	UID int `json:"uid"`
+	// Snapshot is the selector whose matches a UID indexes.
+	Snapshot string `json:"snapshot"`
+	// Attributes are the attribute readings, as selectors: aria-label,
+	// data-testid, name, placeholder.
+	Attributes []string `json:"attributes"`
+	// ExactText is an XPath for an element whose own text is the target.
+	//
+	// Within the body, and not in the elements that hold no content: a page
+	// titled "Sign in" with a button that says the same used to resolve to
+	// the <title>, which cannot be clicked, and the click sat for thirty
+	// seconds waiting for it to become clickable.
+	ExactText string `json:"exactText"`
+	// InPart turns on the two readings that match the target as part of some
+	// longer text: a button or link containing it, and any text on the page.
+	// They are the loose end of the list and are held back; see
+	// findPlainTarget.
+	InPart bool `json:"inPart"`
 }
 
-// selectorReading is the name of the reading that tries a target as CSS.
-const selectorReading = "selector"
-
-// readingsOf lists the ways a plain target can be read, in order of
-// precedence.
-//
-// The order is the contract: an aria-label beats visible text, a data-testid
-// beats a name, and so on down. It is what the fallback chain has always
-// tried, in the order it has always tried it.
-func readingsOf(target string) []reading {
-	var out []reading
-
-	// A word that is also a valid selector — "main", "details", "div span" —
-	// is tried as one first. Only a guess, so a miss is not an answer.
+// queryFor works a plain target out into its readings.
+func queryFor(target string) plainQuery {
+	q := plainQuery{
+		Target:    target,
+		UID:       -1,
+		Snapshot:  snapshotSelector,
+		ExactText: "//body/descendant-or-self::*[" + notContentXPath + "][normalize-space(text())=" + xpathLiteral(target) + "]",
+	}
 	if looksLikeCSSSelector(target) {
-		out = append(out, reading{name: selectorReading, look: func(p *rod.Page) (*rod.Element, error) {
-			return has(p.Has(target))
-		}})
+		q.Selector = target
 	}
-
 	if m := uidPattern.FindStringSubmatch(target); m != nil {
-		out = append(out, reading{name: "snapshot UID", look: func(p *rod.Page) (*rod.Element, error) {
-			index, err := strconv.Atoi(m[1])
-			if err != nil {
-				return nil, nil
-			}
-			elements, err := p.Elements(snapshotSelector)
-			if err != nil || index >= len(elements) {
-				return nil, err
-			}
-			return elements[index], nil
-		}})
+		if index, err := strconv.Atoi(m[1]); err == nil {
+			q.UID = index
+		}
 	}
-
 	for _, attribute := range []string{"aria-label", "data-testid", "name", "placeholder"} {
-		selector := "[" + attribute + "=" + cssString(target) + "]"
-		out = append(out, reading{name: attribute, look: func(p *rod.Page) (*rod.Element, error) {
-			return has(p.Has(selector))
-		}})
+		q.Attributes = append(q.Attributes, "["+attribute+"="+cssString(target)+"]")
 	}
-
-	// Exact text first: precise, and it does not match the containers the
-	// text happens to sit inside. Within the body, and not in the elements
-	// that hold no content: a page titled "Sign in" with a button that says
-	// the same used to resolve to the <title>, which cannot be clicked, and
-	// the click sat for thirty seconds waiting for it to become clickable.
-	exactText := "//body/descendant-or-self::*[" + notContentXPath + "][normalize-space(text())=" + xpathLiteral(target) + "]"
-	out = append(out, reading{name: "exact text", look: func(p *rod.Page) (*rod.Element, error) {
-		return has(p.HasX(exactText))
-	}})
-
-	// Then text in part, for buttons and links only.
-	out = append(out, reading{name: "button or link text", inPart: true, look: func(p *rod.Page) (*rod.Element, error) {
-		return lookByJS(p, controlTextQuery, target)
-	}})
-
-	// A label names the field it is for.
-	labelText := "^" + regexp.QuoteMeta(target) + "$"
-	out = append(out, reading{name: "label", look: func(p *rod.Page) (*rod.Element, error) {
-		label, err := has(p.HasR("label", labelText))
-		if label == nil {
-			return nil, err
-		}
-		field, err := label.Attribute("for")
-		if err != nil || field == nil || *field == "" {
-			return nil, err
-		}
-		return has(p.Has("[id=" + cssString(*field) + "]"))
-	}})
-
-	// Last, text anywhere on the page: the innermost element showing it.
-	out = append(out, reading{name: "any text", inPart: true, look: func(p *rod.Page) (*rod.Element, error) {
-		return lookByJS(p, visibleTextQuery, target)
-	}})
-
-	return out
+	return q
 }
 
 // selectorPunctuation is what a selector has and ordinary words do not.
@@ -143,21 +110,8 @@ func writtenAsSelector(target string) bool {
 // says: code, styles and markup held in reserve.
 const notContentXPath = "not(self::script or self::style or self::noscript or self::template)"
 
-// controlTextQuery finds the first button or link whose text contains the
-// target.
-//
-// As written, not as a pattern. This was rod's ElementR, which reads its
-// argument as a regular expression — so "Price (USD" was a syntax error, and a
-// selector not yet on the page was a pattern that matched almost anything:
-// a[href="/logout"] is the letter a followed by one of a dozen characters, and
-// "Features" has one. A target is something a person typed.
-const controlTextQuery = `(needle) => {
-	const textOf = ` + jsTextOf + `;
-	return Array.from(document.querySelectorAll('button, a')).find((el) => textOf(el).includes(needle)) || null;
-}`
-
-// visibleTextQuery finds the innermost element on the page that shows a given
-// text.
+// jsShownText finds the innermost element on the page that shows a given
+// text, as a JavaScript function of the text.
 //
 // "Shows" is the point. This used to be rod's ElementR over every element in
 // the document, which takes the first whose text matches — and the text of an
@@ -173,35 +127,128 @@ const controlTextQuery = `(needle) => {
 // viewport. From the body the search descends for as long as a single child
 // still shows the whole match, and stops at the smallest element that does.
 //
-// The text is matched as written, like controlTextQuery and for its reasons.
-const visibleTextQuery = `(needle) => {
+// The text is matched as written, not as a pattern. ElementR reads its
+// argument as a regular expression — so "Price (USD" was a syntax error, and a
+// selector not yet on the page was a pattern that matched almost anything:
+// a[href="/logout"] is the letter a followed by one of a dozen characters, and
+// "Features" has one. A target is something a person typed.
+const jsShownText = `(needle) => {
+		const textOf = ` + jsTextOf + `;
+		const matches = (el) => textOf(el).includes(needle);
+
+		const body = document.body;
+		if (!body || needle === '') {
+			return null;
+		}
+		const notContent = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE']);
+		const shown = (el) => el.getClientRects().length > 0 || getComputedStyle(el).display === 'contents';
+
+		let el = null;
+		if (matches(body)) {
+			el = body;
+		} else {
+			// What a field shows is its value, which is no element's text.
+			el = Array.from(body.querySelectorAll('input, textarea, select')).find((f) => shown(f) && matches(f)) || null;
+		}
+		if (!el) {
+			return null;
+		}
+
+		for (;;) {
+			const child = Array.from(el.children).find((c) => !notContent.has(c.tagName) && shown(c) && matches(c));
+			if (!child) {
+				return el;
+			}
+			el = child;
+		}
+	}`
+
+// visibleTextQuery is jsShownText on its own, for a wait on text alone.
+const visibleTextQuery = `(needle) => (` + jsShownText + `)(needle)`
+
+// plainTargetQuery takes one look at the page for a plain target, reading it
+// every way a plainQuery says to, and returns the first element any reading
+// names.
+//
+// One look is one round trip. Each reading was once a call of its own, and a
+// look was eight or ten of them — fast enough on a quick machine, and on a
+// slow one long enough that a look begun with time in hand ran out of budget
+// before it reached the readings at the end of the list. Inside the half
+// second an existence check allows, text in part was simply not found there.
+// It also made a look something the page could change under.
+const plainTargetQuery = `(q) => {
 	const textOf = ` + jsTextOf + `;
-	const matches = (el) => textOf(el).includes(needle);
+	const first = (selector) => {
+		// A selector the browser cannot parse names nothing, and says so
+		// quietly: the target is somebody's words, not a selector.
+		try {
+			return document.querySelector(selector);
+		} catch (e) {
+			return null;
+		}
+	};
 
-	const body = document.body;
-	if (!body || needle === '') {
-		return null;
-	}
-	const notContent = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE']);
-	const shown = (el) => el.getClientRects().length > 0 || getComputedStyle(el).display === 'contents';
-
-	let el = null;
-	if (matches(body)) {
-		el = body;
-	} else {
-		// What a field shows is its value, which is no element's text.
-		el = Array.from(body.querySelectorAll('input, textarea, select')).find((f) => shown(f) && matches(f)) || null;
-	}
-	if (!el) {
-		return null;
-	}
-
-	for (;;) {
-		const child = Array.from(el.children).find((c) => !notContent.has(c.tagName) && shown(c) && matches(c));
-		if (!child) {
+	if (q.selector) {
+		const el = first(q.selector);
+		if (el) {
 			return el;
 		}
-		el = child;
+	}
+
+	if (q.uid >= 0) {
+		const numbered = document.querySelectorAll(q.snapshot);
+		if (q.uid < numbered.length) {
+			return numbered[q.uid];
+		}
+	}
+
+	for (const selector of q.attributes) {
+		const el = first(selector);
+		if (el) {
+			return el;
+		}
+	}
+
+	// Exact text: precise, and it does not match the containers the text
+	// happens to sit inside.
+	const exact = document.evaluate(q.exactText, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;
+	if (exact) {
+		return exact;
+	}
+
+	// Then text in part, for buttons and links only.
+	if (q.inPart) {
+		const control = Array.from(document.querySelectorAll('button, a')).find((el) => textOf(el).includes(q.target));
+		if (control) {
+			return control;
+		}
+	}
+
+	// A label names the field it is for.
+	const label = Array.from(document.querySelectorAll('label')).find((el) => textOf(el) === q.target);
+	if (label) {
+		const id = label.getAttribute('for');
+		const field = id ? document.getElementById(id) : null;
+		if (field) {
+			return field;
+		}
+	}
+
+	// Last, text anywhere on the page: the innermost element showing it.
+	if (q.inPart) {
+		return (` + jsShownText + `)(q.target);
+	}
+	return null;
+}`
+
+// selectorParsesQuery reports whether the browser accepts a string as a CSS
+// selector, without looking for anything.
+const selectorParsesQuery = `(selector) => {
+	try {
+		document.createDocumentFragment().querySelector(selector);
+		return true;
+	} catch (e) {
+		return false;
 	}
 }`
 
@@ -213,14 +260,6 @@ func lookByJS(p *rod.Page, js string, args ...any) (*rod.Element, error) {
 		return nil, nil
 	}
 	return el, err
-}
-
-// has adapts rod's Has family, which reports a miss as (false, nil, nil).
-func has(found bool, el *rod.Element, err error) (*rod.Element, error) {
-	if err != nil || !found {
-		return nil, err
-	}
-	return el, nil
 }
 
 // inPartHeadStart is how long the exact readings of a target are tried alone
@@ -253,11 +292,6 @@ func inPartAfter(budget time.Duration) time.Duration {
 // attributes tried before it: two seconds for a click on something already
 // there.
 //
-// A reading that names nothing is tried again on the next look, because the
-// page may yet render what it names. A reading the browser refuses outright —
-// a guessed selector that does not parse — can never name anything, and is
-// dropped.
-//
 // Two things keep "every reading, every look" from being looser than the
 // slices were.
 //
@@ -271,43 +305,37 @@ func inPartAfter(budget time.Duration) time.Duration {
 // And a target written as a selector is never matched in part at all, for as
 // long as it stands as a selector. A selector that matches nothing yet is
 // something to wait for, not something to look for inside the page's text.
-// Once the browser refuses it as a selector — "Total: 5 items" has a colon and
+// When the browser refuses it as a selector — "Total: 5 items" has a colon and
 // is not one — it is words like any others.
 func findPlainTarget(page *rod.Page, target string, budget time.Duration) (*rod.Element, error) {
-	readings := readingsOf(target)
-	asSelector := writtenAsSelector(target)
+	query := queryFor(target)
 
 	p := page.Timeout(budget)
 	defer p.CancelTimeout()
 	ctx := p.GetContext()
+
+	// Whether the target stands as a selector is the browser's to say, and it
+	// is asked once. If it cannot be asked — the page is mid-navigation — the
+	// target keeps the benefit of the doubt, which is the stricter reading.
+	asSelector := writtenAsSelector(target)
+	if asSelector {
+		if parses, err := p.Eval(selectorParsesQuery, target); err == nil && !parses.Value.Bool() {
+			asSelector = false
+		}
+	}
 
 	started := time.Now()
 	inPartFrom := inPartAfter(budget)
 
 	sleep := lookupSleeper()
 	for {
-		inPart := !asSelector && time.Since(started) >= inPartFrom
+		query.InPart = !asSelector && time.Since(started) >= inPartFrom
 
-		for i := 0; i < len(readings); {
-			if readings[i].inPart && !inPart {
-				i++
-				continue
-			}
-
-			el, err := readings[i].look(p)
-			if el != nil && err == nil {
-				return actionBound(page, el), nil
-			}
-			if isSyntaxError(err) {
-				if readings[i].name == selectorReading {
-					asSelector = false
-				}
-				readings = append(readings[:i], readings[i+1:]...)
-				continue
-			}
-			// Anything else — the page navigating under the look, the budget
-			// running out part way through — is not an answer either way.
-			i++
+		// Anything but an element — the page navigating under the look, the
+		// budget running out part way through it — is not an answer either
+		// way, so the next look asks again.
+		if el, err := lookByJS(p, plainTargetQuery, query); el != nil && err == nil {
+			return actionBound(page, el), nil
 		}
 
 		if err := sleep(ctx); err != nil {

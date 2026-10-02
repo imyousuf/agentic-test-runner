@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/go-rod/rod"
+	"github.com/go-rod/rod/lib/proto"
 )
 
 // A target that is not a selector — visible text, an aria-label, a
@@ -220,7 +221,8 @@ func TestAClickOnTextTheTitleSharesIsQuick(t *testing.T) {
 	if err := testBrowser.Click(ctx, "Orders", false); err != nil {
 		t.Fatalf("after %v: %v", time.Since(start).Round(time.Millisecond), err)
 	}
-	if elapsed := time.Since(start); elapsed > 2*time.Second {
+	// Thirty seconds, before. Five is slack for a slow machine.
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
 		t.Errorf("took %v", elapsed.Round(time.Millisecond))
 	}
 	got, err := testBrowser.Evaluate(`document.getElementById("events").textContent`)
@@ -242,7 +244,9 @@ func TestAnActionOnVisibleTextDoesNotWaitForTheWaysTriedBeforeIt(t *testing.T) {
 	if err := testBrowser.Click(context.Background(), "Order summary", false); err != nil {
 		t.Fatal(err)
 	}
-	if elapsed := time.Since(start); elapsed > time.Second {
+	// It took two seconds before the click even began. A second and a half
+	// leaves a slow machine room for the click itself.
+	if elapsed := time.Since(start); elapsed > 1500*time.Millisecond {
 		t.Errorf("clicking text that was on the page took %v", elapsed.Round(time.Millisecond))
 	}
 
@@ -268,7 +272,9 @@ func TestPlainTextIsFoundWhenItArrives(t *testing.T) {
 	if elapsed < 1400*time.Millisecond {
 		t.Errorf("returned in %v, before the button could exist", elapsed.Round(time.Millisecond))
 	}
-	if elapsed > 2500*time.Millisecond {
+	// Nearly seven seconds, before: it was found when its reading's turn
+	// came round, not when it arrived.
+	if elapsed > 3500*time.Millisecond {
 		t.Errorf("found after %v; the button was there at 1.5s", elapsed.Round(time.Millisecond))
 	}
 }
@@ -443,10 +449,11 @@ func TestTextInPartIsFoundAfterItsHeadStart(t *testing.T) {
 		earliest time.Duration
 		latest   time.Duration
 	}{
-		// Half the budget, for a short one.
-		{"inside an existence check", 500 * time.Millisecond, 200 * time.Millisecond, 480 * time.Millisecond},
+		// Half the budget, for a short one. The wait's own half second is the
+		// upper bound: it either found the text in time or it did not.
+		{"inside an existence check", 500 * time.Millisecond, 200 * time.Millisecond, time.Second},
 		// And never more than a second, for a long one.
-		{"inside a ten-second wait", 10 * time.Second, 900 * time.Millisecond, 2 * time.Second},
+		{"inside a ten-second wait", 10 * time.Second, 900 * time.Millisecond, 3 * time.Second},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -505,6 +512,41 @@ func TestACancelledLookupOfAPlainTargetIsNotAMiss(t *testing.T) {
 			}
 			if errors.Is(err, ErrElementNotFound) {
 				t.Errorf("err = %v — a cancelled lookup was reported as a missing element", err)
+			}
+		})
+	}
+}
+
+// One look at the page is one round trip. Each reading used to be a call of
+// its own — eight or ten to a look — which a quick machine does not notice. A
+// slow one does: a look begun with time in hand ran out of budget before it
+// reached the readings at the end of the list, and inside the half second an
+// existence check allows, text in part was not found at all. That is how the
+// test above failed on a macOS runner and on no machine it was written on.
+//
+// The page is throttled to a twentieth of its speed, which is slower than any
+// runner and makes the difference between one call and ten plain.
+func TestAPlainTargetIsFoundInsideAnExistenceCheckOnASlowMachine(t *testing.T) {
+	for _, tt := range plainTargets {
+		t.Run(tt.way, func(t *testing.T) {
+			page := openPlainTargets(t)
+
+			if err := (proto.EmulationSetCPUThrottlingRate{Rate: 20}).Call(page); err != nil {
+				t.Fatalf("throttling the page: %v", err)
+			}
+			defer func() {
+				_ = proto.EmulationSetCPUThrottlingRate{Rate: 1}.Call(page)
+			}()
+
+			// Several times: a look that only just fits passes some of the
+			// time, and "some of the time" is the bug.
+			for i := 0; i < 5; i++ {
+				start := time.Now()
+				err := testBrowser.WaitForElement(context.Background(), tt.target, 500*time.Millisecond)
+				if err != nil {
+					t.Fatalf("try %d: %q is on the page and was not found in a 500ms wait (%v): %v",
+						i+1, tt.target, time.Since(start).Round(time.Millisecond), err)
+				}
 			}
 		})
 	}

@@ -135,7 +135,7 @@ CLI need no changes.
   heading that was there all along as an assertion failure, and
   `atr.expectMissing("Sign in")` passed. A click on visible text worked, after
   two seconds spent on the four attributes tried before it. Every way is now
-  tried on every look. The ways that match text in part join half way through
+  tried on every look, and a look is one round trip to the page. The ways that match text in part join half way through
   the budget (after a second at most), so that an exact match a render away is
   not beaten by a partial one already on the page.
 - **Text in part is read from what the page shows, as written.** It used to

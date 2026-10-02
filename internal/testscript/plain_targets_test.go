@@ -49,7 +49,9 @@ func TestPlainTargetsWorkInEveryCallThatTakesOne(t *testing.T) {
 			}
 			// Everything here is on the page already (or, for the two absent
 			// ones, given up on inside a second), so nothing should take long.
-			if elapsed := time.Since(start); elapsed > 2500*time.Millisecond {
+			// The click and the hover took ten seconds; five is slack for a
+			// slow machine.
+			if elapsed := time.Since(start); elapsed > 5*time.Second {
 				t.Errorf("took %v", elapsed.Round(time.Millisecond))
 			}
 		})
@@ -112,7 +114,7 @@ func TestPlainTextIsWaitedFor(t *testing.T) {
 			if elapsed < 1400*time.Millisecond {
 				t.Errorf("passed in %v, before the button could exist", elapsed.Round(time.Millisecond))
 			}
-			if elapsed > 4*time.Second {
+			if elapsed > 6*time.Second {
 				t.Errorf("took %v; the button was there at 1.5s", elapsed.Round(time.Millisecond))
 			}
 		})

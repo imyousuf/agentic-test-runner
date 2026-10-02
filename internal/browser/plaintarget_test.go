@@ -2,46 +2,78 @@ package browser
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
 
-func readingNames(target string) []string {
-	var names []string
-	for _, r := range readingsOf(target) {
-		names = append(names, r.name)
-	}
-	return names
-}
-
-// Which ways a target is read, and in what order. The order is precedence.
-func TestReadingsOfAPlainTarget(t *testing.T) {
-	always := []string{"aria-label", "data-testid", "name", "placeholder", "exact text", "button or link text", "label", "any text"}
-
+// What one look at the page is told about a target: which readings apply.
+func TestQueryForAPlainTarget(t *testing.T) {
 	tests := []struct {
-		name   string
-		target string
-		want   []string
+		name         string
+		target       string
+		wantSelector string
+		wantUID      int
 	}{
-		{"ordinary text", "Sign in", always},
-		{"a snapshot UID", "e12", append([]string{"snapshot UID"}, always...)},
+		{"ordinary text", "Sign in", "", -1},
+		{"a snapshot UID", "e12", "", 12},
+		{"the first snapshot UID", "e0", "", 0},
 		// Things that begin like a UID and are not one.
-		{"a word beginning with e", "email", always},
-		{"a UID with text after it", "e2e suite", always},
-		{"a bare e", "e", always},
-		{"a negative index", "e-1", always},
+		{"a word beginning with e", "email", "", -1},
+		{"a UID with text after it", "e2e suite", "", -1},
+		{"a bare e", "e", "", -1},
+		{"a negative index", "e-1", "", -1},
 		// A word that is also an element name is tried as a selector first.
-		{"an element name", "details", append([]string{"selector"}, always...)},
-		{"an element name, capitalised", "Details", append([]string{"selector"}, always...)},
-		{"prose with a colon", "Total: 5 items", append([]string{"selector"}, always...)},
+		{"an element name", "details", "details", -1},
+		{"an element name, capitalised", "Details", "Details", -1},
+		{"prose with a colon", "Total: 5 items", "Total: 5 items", -1},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := readingNames(tt.target); !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("readingsOf(%q) =\n  %v\nwant\n  %v", tt.target, got, tt.want)
+			q := queryFor(tt.target)
+
+			if q.Selector != tt.wantSelector {
+				t.Errorf("Selector = %q, want %q", q.Selector, tt.wantSelector)
+			}
+			if q.UID != tt.wantUID {
+				t.Errorf("UID = %d, want %d", q.UID, tt.wantUID)
+			}
+			if q.Target != tt.target {
+				t.Errorf("Target = %q, want the target as written", q.Target)
+			}
+			// A UID is an index into what a snapshot numbers.
+			if q.Snapshot != snapshotSelector {
+				t.Errorf("Snapshot = %q, want the snapshot's own selector", q.Snapshot)
+			}
+			// The in-part readings are off until the lookup turns them on.
+			if q.InPart {
+				t.Error("InPart is on from the start")
 			}
 		})
+	}
+}
+
+// The attribute readings, in the order they take precedence, with the target
+// quoted so that punctuation in it is not syntax.
+func TestQueryForQuotesTheTarget(t *testing.T) {
+	q := queryFor(`Say "hi"`)
+
+	want := []string{
+		`[aria-label="Say \"hi\""]`,
+		`[data-testid="Say \"hi\""]`,
+		`[name="Say \"hi\""]`,
+		`[placeholder="Say \"hi\""]`,
+	}
+	if !reflect.DeepEqual(q.Attributes, want) {
+		t.Errorf("Attributes =\n  %q\nwant\n  %q", q.Attributes, want)
+	}
+	if !strings.Contains(q.ExactText, `normalize-space(text())='Say "hi"'`) {
+		t.Errorf("ExactText = %s, want the target as an XPath literal", q.ExactText)
+	}
+	// Scoped to what a page says: the body, less its code and styles.
+	if !strings.HasPrefix(q.ExactText, "//body/") || !strings.Contains(q.ExactText, "self::script") {
+		t.Errorf("ExactText = %s, want it kept to the body's content", q.ExactText)
 	}
 }
 
