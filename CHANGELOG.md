@@ -90,6 +90,21 @@ CLI need no changes.
   resolves CSS, XPath and `:has-text()` through the same code. An XPath that
   does not parse is reported as an invalid selector — a script fault — instead
   of as an environment failure to be retried. (#29)
+- **A `:has-text()` target is waited for.** It was looked up once, at the
+  moment of the call, so `atr.click`, `atr.waitFor` and `atr.expectExists`
+  failed within milliseconds on an element that was still rendering, whatever
+  timeout they had been given — where the same element named by CSS or XPath
+  was polled for. `expectExists` reported that as an assertion failure, which
+  blames the application and is never retried, with a message claiming a wait
+  that had not happened ("it was not there after 30s", from a 1.7s run). The
+  lookup now polls until the caller's budget is spent, in one round trip per
+  poll. `expectExists`, `expectMissing` and `waitFor` report the time they
+  actually waited instead of the timeout they were handed. (#30)
+- `atr.waitFor` on a selector the browser cannot parse is a script fault, as
+  it already was for `atr.click` and `atr.exists`. It was reported as a
+  timeout, which is retried — every retry failing the same way — before
+  anything looked at the script; with `{visible: true}` it also spent the whole
+  timeout first.
 - Computer click/move/drag/hover responses no longer leak the internal
   `NoDisplay` sentinel (`-1`) through the `display` field. The field is now
   omitted entirely when the request didn't specify a display, and round-trips

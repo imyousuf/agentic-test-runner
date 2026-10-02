@@ -362,6 +362,9 @@ func TestMalformedXPathIsReportedAsInvalidEverywhere(t *testing.T) {
 		{"WaitForElement", func() error {
 			return testBrowser.WaitForElement(context.Background(), malformed, 2*time.Second)
 		}},
+		{"WaitForElementVisible", func() error {
+			return testBrowser.WaitForElementVisible(context.Background(), malformed, 10*time.Second)
+		}},
 		{"GetTextContent", func() error {
 			_, err := testBrowser.GetTextContent(malformed, "flat")
 			return err

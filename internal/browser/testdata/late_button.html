@@ -1,0 +1,45 @@
+<!doctype html>
+<title>Late button</title>
+<body>
+  <h1>Late button</h1>
+  <!-- Present from the start, and never matching: a lookup that settles for
+       the first button it sees would click this one. -->
+  <button id="other" type="button">Not yet</button>
+  <div id="slot"></div>
+  <div id="events"></div>
+  <script>
+    const params = new URLSearchParams(location.search);
+    const delay = Number(params.get("ms") || 1500);
+
+    // mode=append (the default): the button does not exist until the delay.
+    // mode=relabel: it exists from the start as "Loading…" and gets its text
+    //   after the delay — the element is found at once and the text is not.
+    const mode = params.get("mode") || "append";
+
+    const button = document.createElement("button");
+    button.id = "ready";
+    button.type = "button";
+    button.addEventListener("click", () => {
+      document.getElementById("events").textContent += "click:ready;";
+    });
+
+    if (mode === "relabel") {
+      button.textContent = "Loading…";
+      document.getElementById("slot").appendChild(button);
+    }
+
+    // With manual=1 the clock does not start until the test calls arm(). A
+    // test that measures how long a lookup waited needs the delay to run from
+    // the moment it starts looking, not from whenever the page happened to
+    // finish loading.
+    window.arm = () => setTimeout(() => {
+      button.textContent = "Ready now";
+      if (mode !== "relabel") {
+        document.getElementById("slot").appendChild(button);
+      }
+    }, delay);
+    if (params.get("manual") !== "1") {
+      window.arm();
+    }
+  </script>
+</body>
