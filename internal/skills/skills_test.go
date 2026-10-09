@@ -97,6 +97,15 @@ func TestSkillsDocumentCurrentCapabilities(t *testing.T) {
 		{"hoisting repeated operations", "refactor-ops"},
 		{"a script that names its own operation", "local-helper"},
 		{"triage separated from compilation", "--no-triage"},
+		{"session recording", "atr record start"},
+		{"stopping a recording without hunting for a pid", "atr record stop"},
+		{"asking what is recording", "atr record status"},
+		{"the console and network journal", "devtools.jsonl"},
+		{"failures on the recording timeline", "netfail"},
+		{"query redaction in the journal", "--redact-query"},
+		{"rebuilding an interrupted recording", "atr record repair"},
+		{"the browser live view", "atr remote"},
+		{"a live view that cannot touch the browser", "--view-only"},
 	}
 
 	files := skillFiles(t)

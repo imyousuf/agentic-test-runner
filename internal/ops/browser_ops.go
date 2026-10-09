@@ -885,6 +885,10 @@ func ClosePage(_ context.Context, b *browser.Browser, req ClosePageRequest) (Pag
 // RecordStartRequest begins a recording session.
 type RecordStartRequest struct {
 	URL string `json:"url" jsonschema_description:"Initial URL to navigate to before recording (optional)"`
+	// Overlay draws the recorder's panel into the page. Off by default: the
+	// panel is part of the page once drawn, so it appears in a session
+	// recording's frames and in any screenshot taken while it is up.
+	Overlay bool `json:"overlay" jsonschema_description:"Draw the recorder panel in the page (default false; it appears in screenshots and session recordings)"`
 }
 
 // RecordStartResult reports that recording has started.
@@ -894,7 +898,7 @@ type RecordStartResult struct {
 
 // RecordStart begins a recording session.
 func RecordStart(_ context.Context, b *browser.Browser, req RecordStartRequest) (RecordStartResult, error) {
-	if err := b.StartRecording(req.URL); err != nil {
+	if err := b.StartRecording(req.URL, req.Overlay); err != nil {
 		return RecordStartResult{}, err
 	}
 	return RecordStartResult{Recording: true}, nil

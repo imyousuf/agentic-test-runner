@@ -36,11 +36,24 @@ jobs:
       - name: Download dependencies
         run: go mod download
 
+      # Kept as `go build ./...` rather than `make build`: this compiles every
+      # package, including any that the atr binary does not import.
       - name: Build
         run: go build -v ./...
 
       - name: Run tests
         run: go test -v -race ./...
+
+      # The release workflow builds through the Makefile. Exercise it here too,
+      # or a break in it passes every PR check and only fails after merge.
+      # GNU make is not in the Windows runner image.
+      - name: Install make (Windows)
+        if: matrix.os == 'windows-latest'
+        run: choco install make --no-progress -y
+
+      - name: Build through the Makefile
+        shell: bash
+        run: make build VERSION=ci COMMIT="$GITHUB_SHA" BUILD_DATE=1970-01-01T00:00:00Z
 
   lint:
     name: Lint
@@ -66,10 +79,52 @@ jobs:
       - name: Run go vet
         run: go vet ./...
 
+      # The noweb tag lets contributors build without Node. Nothing exercised
+      # it before, so it was free to break.
+      - name: Build without the web assets
+        run: go build -tags noweb ./...
+
       - name: Check formatting
         run: |
           if [ -n "$(gofmt -l .)" ]; then
             echo "Code is not formatted. Run 'gofmt -w .'"
             gofmt -l .
+            exit 1
+          fi
+
+  # web/dist is committed so that "go install ...@latest" works: //go:embed
+  # resolves on the installing user's machine, from a module zip that contains
+  # tracked files only. Committing build output risks it drifting from web/src,
+  # so rebuild it here and fail if the result differs from what is checked in.
+  # Linux only: the check compares bytes, and it is the platform the artifact
+  # is built on.
+  web-assets:
+    name: Web assets are current
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Rebuild web assets
+        working-directory: web
+        run: npm ci && npm run build
+
+      # Vite puts a content hash in each filename, so changed sources produce a
+      # new file and orphan the old one. "git diff" alone does not see the new
+      # file, so check the porcelain status too.
+      - name: Verify committed web/dist matches the rebuild
+        run: |
+          if ! git diff --quiet -- web/dist || [ -n "$(git status --porcelain -- web/dist)" ]; then
+            echo "web/dist is out of date. Run 'make web' and commit the result."
+            git status --porcelain -- web/dist
+            git diff --stat -- web/dist
             exit 1
           fi

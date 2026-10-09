@@ -47,6 +47,14 @@ type FailureContext struct {
 
 	// SimilarElements contains elements similar to what was being searched for.
 	SimilarElements []browser.ElementInfo `json:"similar_elements,omitempty"`
+
+	// RecordingID identifies the session recording that covers this run, when
+	// `atr run --behavior --record` was used. A screenshot shows the moment of
+	// the failure; the recording shows how the run arrived there.
+	RecordingID string `json:"recording_id,omitempty"`
+
+	// RecordingPath is the directory of that recording.
+	RecordingPath string `json:"recording_path,omitempty"`
 }
 
 // ConsoleEntry represents a browser console log entry.

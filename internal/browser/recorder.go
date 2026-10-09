@@ -33,6 +33,7 @@ type RecordingSession struct {
 	sequence    int
 	startTime   time.Time
 	startURL    string
+	overlay     bool           // draw the in-page panel; off by default
 	stopFuncs   []func() error // page.Expose() cleanup functions
 	removeFuncs []func() error // EvalOnNewDocument cleanup functions
 	doneCh      chan struct{}  // closed when recording stops
@@ -40,7 +41,7 @@ type RecordingSession struct {
 
 // StartRecording begins recording user interactions across all open pages.
 // If initialURL is non-empty, the browser navigates to it first.
-func (b *Browser) StartRecording(initialURL string) error {
+func (b *Browser) StartRecording(initialURL string, overlay bool) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -57,6 +58,7 @@ func (b *Browser) StartRecording(initialURL string) error {
 		events:    make([]RecordedEvent, 0),
 		startTime: time.Now(),
 		startURL:  initialURL,
+		overlay:   overlay,
 		doneCh:    make(chan struct{}),
 	}
 	b.recording = session
@@ -227,7 +229,8 @@ func (b *Browser) injectRecorder(page *rod.Page) {
 	session.mu.Unlock()
 
 	// Register the recorder init script to run on every new document
-	remove, err := page.EvalOnNewDocument(recorderInitScript)
+	script := recorderScript(session.overlay)
+	remove, err := page.EvalOnNewDocument(script)
 	if err == nil {
 		session.mu.Lock()
 		session.removeFuncs = append(session.removeFuncs, remove)
@@ -235,7 +238,7 @@ func (b *Browser) injectRecorder(page *rod.Page) {
 	}
 
 	// Run the recorder immediately on the current document
-	_, _ = page.Eval(`() => { ` + recorderInitScript + ` }`)
+	_, _ = page.Eval(`() => { ` + script + ` }`)
 }
 
 // handleRecorderEvent processes events sent from the JS recorder.
@@ -448,18 +451,57 @@ func describeElement(evt RecordedEvent) string {
 	return sel
 }
 
+// recorderScript builds the injected script.
+//
+// The overlay is a parameter rather than a constant because it is drawn into
+// the page under test: with it on, every session recording and every
+// screenshot taken during a capture carries a picture of the recorder.
+func recorderScript(overlay bool) string {
+	return CaptureScript(defaultBinding, overlay)
+}
+
+// defaultBinding is the JS→Go function name "atr browser record" exposes.
+const defaultBinding = "__atrRecordEvent"
+
+/*
+CaptureScript builds the interaction capture script.
+
+The binding name is a parameter so that two consumers can capture from the same
+page at once without fighting over one global. "atr browser record" writes a
+spec; the live view's recorder puts the same interactions on a session
+timeline. They see the same DOM events because there is only one script that
+knows how to read them -- selectors, shadow DOM, click de-duplication and
+password masking are hard enough once.
+
+The events it reports are described on RecordedEvent.
+*/
+func CaptureScript(binding string, overlay bool) string {
+	flag := "false"
+	if overlay {
+		flag = "true"
+	}
+	script := strings.ReplaceAll(recorderInitScript, "__ATR_BINDING__", binding)
+	script = strings.ReplaceAll(script, "__ATR_ATTACHED__", "__atrAttached_"+binding)
+	// Substituted as a literal rather than declared. The script is injected
+	// twice on purpose -- once for new documents, once for the one already
+	// loaded -- and a top-level "const" made the second injection die with
+	// "Identifier ... has already been declared", which the recording then
+	// reported as an error in the page under test.
+	return strings.ReplaceAll(script, "__ATR_OVERLAY__", flag)
+}
+
 // recorderInitScript is the JavaScript IIFE injected into every page to capture
 // user interactions and render the recording overlay.
 const recorderInitScript = `(function() {
   // Guard: only activate if the Go bridge function exists
-  if (typeof window.__atrRecordEvent !== 'function') return;
+  if (typeof window.__ATR_BINDING__ !== 'function') return;
   // Guard: don't attach event listeners twice
-  if (window.__atrRecorderListenersAttached) {
+  if (window.__ATR_ATTACHED__) {
     // But DO retry overlay creation if it's missing
     if (!document.getElementById('__atr-recorder-overlay')) createOverlay();
     return;
   }
-  window.__atrRecorderListenersAttached = true;
+  window.__ATR_ATTACHED__ = true;
 
   // --- Selector Generation ---
   function generateSelector(el) {
@@ -652,7 +694,7 @@ const recorderInitScript = `(function() {
     data.url = location.href;
     data.pageTitle = document.title;
     try {
-      window.__atrRecordEvent(data);
+      window.__ATR_BINDING__(data);
     } catch(e) { /* binding may be gone during navigation */ }
     // Update overlay
     addOverlayStep(data);
@@ -668,6 +710,10 @@ const recorderInitScript = `(function() {
   let stepCount = 0;
 
   function createOverlay() {
+    // Off by default. The panel is drawn into the page being recorded, so it
+    // lands in a session recording's frames and in any screenshot taken while
+    // it is up -- evidence of the tool, in the evidence about the app.
+    if (!__ATR_OVERLAY__) return;
     if (document.getElementById('__atr-recorder-overlay')) return;
     // Wait for body if it doesn't exist yet — poll every 50ms (max 5s)
     if (!document.body) {
@@ -771,6 +817,7 @@ const recorderInitScript = `(function() {
   }
 
   function addOverlayStep(data) {
+    if (!__ATR_OVERLAY__) return;
     if (data.type === 'stop') return;
     stepCount++;
     const countEl = document.getElementById('__atr-recorder-count');

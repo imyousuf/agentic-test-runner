@@ -61,6 +61,17 @@ jobs:
             libxtst-dev libxss-dev libpng-dev \
             libxkbcommon-dev libx11-dev xclip xsel
 
+      # No Node step: web/dist is committed, so the embedded assets are already
+      # present. CI's "web-assets" job is what guarantees they match web/src.
+      # Rebuilding here would ship whatever this runner produced instead of the
+      # reviewed artifact.
+
+      # The build step goes through the Makefile so the version stamping has a
+      # single definition, but GNU Make is not on the Windows runner's PATH.
+      - name: Install make (Windows)
+        if: matrix.goos == 'windows'
+        run: choco install make --no-progress -y
+
       - name: Download dependencies
         run: go mod download
 
@@ -81,6 +92,10 @@ jobs:
             go test ./...
           fi
 
+      # Built through make so the version stamping has a single definition.
+      # The inline ldflags this replaces set -X main.version, but those
+      # variables live in internal/cli and do not exist in package main, so the
+      # linker ignored them and every release reported "atr version dev".
       - name: Build binary
         env:
           GOOS: ${{ matrix.goos }}
@@ -88,11 +103,12 @@ jobs:
         shell: bash
         run: |
           SHORT_SHA=$(git rev-parse --short HEAD)
-          VERSION="dev-$SHORT_SHA"
-          DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-          LDFLAGS="-X main.version=$VERSION -X main.commit=${{ github.sha }} -X main.date=$DATE"
           mkdir -p dist
-          go build -ldflags "$LDFLAGS" -o dist/atr${{ matrix.ext }} ./cmd/atr
+          make build \
+            VERSION="dev-$SHORT_SHA" \
+            COMMIT="${{ github.sha }}" \
+            BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          mv bin/atr dist/atr${{ matrix.ext }}
 
       - name: Archive (tar.gz)
         if: matrix.archive == 'tar.gz'
