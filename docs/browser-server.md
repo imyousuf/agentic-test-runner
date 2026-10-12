@@ -18,6 +18,9 @@ Key features:
 - **State persistence**: State file at `~/.atr/browser.state` tracks endpoint
 - **Human-readable output**: Default output for humans, `--json` for structured data
 - **Full browser control**: Navigate, click, type, screenshot, inspect elements
+- **Stays out of your way**: a headed browser does not take the keyboard focus
+  from the window you are working in (see [Working alongside the
+  browser](#working-alongside-the-browser))
 
 ## Quick Start
 
@@ -100,6 +103,32 @@ atr browser forward    # Go forward in history
 atr browser reload     # Reload current page
 ```
 
+## Working alongside the browser
+
+ATR is usually driving the browser while you do something else, so a headed
+browser is kept from taking the keyboard focus away from the window you are
+working in:
+
+- **New pages open in a window of their own, behind yours.** `new-page`, and
+  the tab `atr run --behavior` opens in a running daemon, used to open as a
+  foreground tab, which raises the browser over your work. The page still
+  renders — screenshots, clicks and reads work as before — and you can bring
+  its window forward yourself.
+- **Switching pages does not raise the browser.** Each page ATR opens is the
+  visible tab of its own window, so `select-page` has nothing to bring
+  forward. Only a tab hidden behind another in the same window — one you
+  opened yourself — is activated.
+- **Clicks and Tab give the focus straight back.** Chrome focuses its window on
+  every mouse-down it is sent, and when Tab moves the focus out of the page; no
+  setting turns that off. On Linux under X11, ATR notes the window you were in
+  and hands the focus back to it as soon as the browser takes it, usually
+  within a tenth of a second. You may see the browser flash; your keystrokes go
+  where you were typing.
+
+If the browser window was already the one in front — you are watching it —
+ATR leaves it there. On macOS and Windows the focus is not yet given back
+after a click.
+
 ## Page Management
 
 ### Open New Tab
@@ -108,7 +137,8 @@ atr browser reload     # Reload current page
 atr browser new-page [url]
 ```
 
-Opens a new tab, optionally navigating to a URL.
+Opens a new page, optionally navigating to a URL. In a headed browser it opens
+in a window of its own, behind the window you are working in.
 
 ### List Tabs
 

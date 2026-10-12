@@ -132,10 +132,15 @@ func (b *Browser) Click(ctx context.Context, target string, doubleClick bool) er
 		return err
 	}
 
+	clicks := 1
 	if doubleClick {
-		return el.Click(proto.InputMouseButtonLeft, 2)
+		clicks = 2
 	}
-	return el.Click(proto.InputMouseButtonLeft, 1)
+	// Chrome focuses the page on every trusted mouse-down, and on a desktop
+	// that activates its window. See focus.go.
+	return b.keepFocus(func() error {
+		return el.Click(proto.InputMouseButtonLeft, clicks)
+	})
 }
 
 // Fill types text into an element.
@@ -189,6 +194,15 @@ func (b *Browser) PressKey(key string) error {
 
 	// Convert key names to rod input keys and press
 	keys := parseKeyCombo(key)
+
+	// Tab past the last focusable element moves the focus out of the page
+	// and into the browser's own toolbar, which activates its window. Other
+	// keys stay in the page and do not, so only Tab pays for the watch.
+	for _, k := range keys {
+		if k == input.Tab {
+			return b.keepFocus(func() error { return page.Keyboard.Type(keys...) })
+		}
+	}
 	return page.Keyboard.Type(keys...)
 }
 

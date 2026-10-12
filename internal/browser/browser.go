@@ -73,6 +73,13 @@ type Browser struct {
 	// targetEvents serialises target bookkeeping off rod's event-dispatch
 	// goroutine. See queueTargetEvent.
 	targetEvents chan func()
+
+	// windowed is true when the browser shows its pages in windows on a
+	// desktop, where it can take the focus away from the user.
+	windowed bool
+	// focus gives the user's window the focus back when the browser takes
+	// it. Nil when there is no desktop to do that on. See focus.go.
+	focus *focusKeeper
 }
 
 // ConsoleMessage represents a browser console message.
@@ -224,6 +231,11 @@ func (b *Browser) Launch(ctx context.Context) error {
 	controlURL, err := l.Launch()
 	if err != nil {
 		return fmt.Errorf("failed to launch browser: %w", err)
+	}
+
+	b.windowed = !b.config.Headless
+	if b.windowed {
+		b.focus = newFocusKeeper(newWindowSystem(l.PID()))
 	}
 
 	// Store the control URL for external access (e.g., MCP servers)
@@ -527,6 +539,18 @@ func (b *Browser) Connect(ctx context.Context, cdpEndpoint string) error {
 	// Build a realistic user agent from the actual browser version
 	b.initUserAgent()
 
+	// Whether the browser has windows is the browser's to say, not this
+	// process's configuration: `atr run --headless` reusing a headed daemon
+	// still drives a browser on the user's desktop.
+	if ver, err := (proto.BrowserGetVersion{}).Call(browser); err == nil {
+		b.windowed = !strings.HasPrefix(ver.Product, "Headless")
+	}
+	if b.windowed {
+		// No process ID for a browser this process did not start; its
+		// windows are recognised by their class instead.
+		b.focus = newFocusKeeper(newWindowSystem(0))
+	}
+
 	// Sync existing pages from the connected browser
 	b.syncExistingPages()
 
@@ -555,6 +579,9 @@ func (b *Browser) Close() error {
 
 	b.mu.Lock()
 	defer b.mu.Unlock()
+
+	b.focus.close()
+	b.focus = nil
 
 	if b.browser == nil {
 		return nil
@@ -687,10 +714,16 @@ func (b *Browser) openPage(ctx context.Context, url string) error {
 	// rod's Browser.Page, so that the target id is known before anything
 	// attaches to it. Attaching is adoptTarget's job alone — see there for why
 	// a target must not end up with two sessions.
-	target, err := proto.TargetCreateTarget{
-		URL:              "about:blank",
-		BrowserContextID: rodBrowser.BrowserContextID,
-	}.Call(rodBrowser)
+	b.mu.RLock()
+	windowed := b.windowed
+	b.mu.RUnlock()
+
+	var target *proto.TargetCreateTargetResult
+	err := b.keepFocus(func() error {
+		var err error
+		target, err = newPageTarget(rodBrowser.BrowserContextID, windowed).Call(rodBrowser)
+		return err
+	})
 	if err != nil {
 		return fmt.Errorf("failed to create page: %w", err)
 	}
@@ -1055,10 +1088,76 @@ func (b *Browser) SelectPage(index int) error {
 	}
 	b.current = index
 	page := b.pages[index]
+	windowed := b.windowed
 	b.mu.Unlock()
 
-	_, err := page.Activate()
-	return err
+	// Without windows nothing can be taken from anybody, and activating is
+	// what makes the page the one that renders.
+	if !windowed {
+		_, err := page.Activate()
+		return err
+	}
+
+	// On a desktop, activating a tab activates its window too: Chrome has no
+	// way to do one without the other, and it takes the focus from whatever
+	// the user is working in. A page that is already the visible tab of its
+	// window does not need it — and every page ATR opens is, in a window of
+	// its own — so only a tab hidden behind another is activated, and the
+	// focus is given back afterwards.
+	if !needsActivation(pageVisibility(page)) {
+		return nil
+	}
+	return b.keepFocus(func() error {
+		_, err := page.Activate()
+		return err
+	})
+}
+
+// pageVisibilityTimeout bounds asking a page whether it is shown.
+const pageVisibilityTimeout = 2 * time.Second
+
+// pageVisibility is the page's document.visibilityState, or "" when it cannot
+// be told.
+func pageVisibility(page *rod.Page) string {
+	res, err := page.Timeout(pageVisibilityTimeout).Eval(`() => document.visibilityState`)
+	if err != nil {
+		return ""
+	}
+	return res.Value.Str()
+}
+
+// needsActivation reports whether a page with this visibility has to be
+// activated to become the one shown. Only a page known to be visible is left
+// alone: one that could not answer is activated, as every page used to be.
+func needsActivation(visibility string) bool {
+	return visibility != "visible"
+}
+
+// newPageTarget is the request that opens a page.
+//
+// On a desktop, in a window of its own, opened behind whatever the user is
+// working in. A foreground tab — what Target.createTarget makes by default —
+// activates the browser's window and takes the focus; a background tab does
+// not, but it does not render either, so a screenshot of it never returns. A
+// background window is both: it takes nothing from the user, and its page is
+// the visible tab of its window, so it renders, and selecting it later needs
+// no activation.
+func newPageTarget(contextID proto.BrowserBrowserContextID, windowed bool) proto.TargetCreateTarget {
+	return proto.TargetCreateTarget{
+		URL:              "about:blank",
+		BrowserContextID: contextID,
+		NewWindow:        windowed,
+		Background:       windowed,
+	}
+}
+
+// keepFocus runs fn, a call that may make the browser take the focus from the
+// user's window, and gives it back if it does. See focus.go.
+func (b *Browser) keepFocus(fn func() error) error {
+	b.mu.RLock()
+	k := b.focus
+	b.mu.RUnlock()
+	return k.around(fn)
 }
 
 // ClosePage closes the page at the given index.

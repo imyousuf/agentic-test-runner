@@ -80,6 +80,15 @@ CLI need no changes.
 
 ### Fixed
 
+- **A headed browser no longer takes the focus from the window you are working
+  in.** Opening a page, switching pages and every click raised the browser
+  over your work on X11 — and with it went your next keystrokes. New pages now
+  open in a background window of their own, which renders as before; switching
+  between ATR's pages no longer activates anything; and when Chrome focuses
+  its window on a click or a Tab out of the page, which it does on every
+  mouse-down and no setting turns off, ATR gives the focus back to the window
+  you were in (Linux/X11). Affects `atr browser`, `atr run --behavior` against
+  a headed daemon or browser, and the MCP browser tools.
 - **One target grammar for every call.** `atr.text`, `atr.expectText` and
   `atr.scroll` — and the `text`, `scroll`, `screenshot`, `computed-styles`,
   `clean-snapshot` and `download-images` commands behind them — refused an
