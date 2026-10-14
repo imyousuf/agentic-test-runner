@@ -126,8 +126,15 @@ working in:
   where you were typing.
 
 If the browser window was already the one in front — you are watching it —
-ATR leaves it there. On macOS and Windows the focus is not yet given back
-after a click.
+ATR leaves it there. Two things are allowed to take the focus, because you are
+meant to use them next:
+
+- **A dialog the click opened**, such as the file chooser behind a file input.
+  It stays in front, so `atr computer type` reaches it.
+- **`atr browser record`**, which brings the page being recorded forward: the
+  recording is you clicking on it.
+
+On macOS and Windows the focus is not yet given back after a click.
 
 ## Page Management
 

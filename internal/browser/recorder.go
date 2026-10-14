@@ -40,16 +40,41 @@ type RecordingSession struct {
 
 // StartRecording begins recording user interactions across all open pages.
 // If initialURL is non-empty, the browser navigates to it first.
+//
+// The page being recorded is brought to the front. Everywhere else a headed
+// browser keeps out of the user's way (see focus.go), but a recording is
+// something the user does, with their own mouse, on this page — a page opened
+// behind their terminal, as new pages now are, is one they would have to go
+// looking for before they could start.
 func (b *Browser) StartRecording(initialURL string) error {
+	page, err := b.startRecording(initialURL)
+	if err != nil {
+		return err
+	}
+
+	b.mu.RLock()
+	windowed := b.windowed
+	b.mu.RUnlock()
+	if windowed && page != nil {
+		// Unguarded on purpose: taking the focus is the point. After the
+		// lock is released, as for every CDP call.
+		_, _ = page.Activate()
+	}
+	return nil
+}
+
+// startRecording is StartRecording without bringing the page forward. It
+// returns the page the recording starts on.
+func (b *Browser) startRecording(initialURL string) (*rod.Page, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
 	if b.recording != nil && b.recording.active {
-		return fmt.Errorf("recording already in progress")
+		return nil, fmt.Errorf("recording already in progress")
 	}
 
 	if len(b.pages) == 0 && initialURL == "" {
-		return fmt.Errorf("no pages open; provide a URL or navigate first")
+		return nil, fmt.Errorf("no pages open; provide a URL or navigate first")
 	}
 
 	session := &RecordingSession{
@@ -71,13 +96,13 @@ func (b *Browser) StartRecording(initialURL string) error {
 			b.mu.Lock()
 			if err != nil {
 				b.recording = nil
-				return fmt.Errorf("failed to create page: %w", err)
+				return nil, fmt.Errorf("failed to create page: %w", err)
 			}
 		} else {
 			page := b.pages[b.current]
 			if err := page.Navigate(normalizeURL(initialURL)); err != nil {
 				b.recording = nil
-				return fmt.Errorf("failed to navigate: %w", err)
+				return nil, fmt.Errorf("failed to navigate: %w", err)
 			}
 			// b.waitLoad rather than page.WaitLoad: this runs with b.mu held,
 			// and rod's WaitLoad has no deadline of its own, so a page that
@@ -99,7 +124,10 @@ func (b *Browser) StartRecording(initialURL string) error {
 		b.injectRecorder(page)
 	}
 
-	return nil
+	if b.current < 0 || b.current >= len(b.pages) {
+		return nil, nil
+	}
+	return b.pages[b.current], nil
 }
 
 // StopRecording stops the recording session, cleans up injected scripts,

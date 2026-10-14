@@ -42,6 +42,9 @@ type windowSystem interface {
 	active() (uint32, bool)
 	// ownedByBrowser reports whether w is one of the browser's own windows.
 	ownedByBrowser(w uint32) bool
+	// isDialog reports whether w is a dialog — transient for another window,
+	// typed as a dialog, or modal. Chrome's file chooser is all three.
+	isDialog(w uint32) bool
 	// activate asks for w to be given the focus.
 	activate(w uint32) error
 	// close releases the connection to the desktop.
@@ -97,7 +100,10 @@ func newFocusKeeper(ws windowSystem) *focusKeeper {
 // Nothing is given back when the user was in the browser already: they are
 // watching it, and pulling them out of it would be its own kind of theft.
 // Nor when the focus moves to some window that is not the browser's — that
-// was the user, choosing.
+// was the user, choosing. Nor when it moves to a dialog of the browser's: a
+// click on a file input opens the operating system's file chooser, and the
+// caller clicked it in order to use that next — taking the focus off it is
+// what would make `atr computer type` land in the wrong window.
 func (k *focusKeeper) around(fn func() error) error {
 	if k == nil {
 		return fn()
@@ -148,6 +154,10 @@ func (k *focusKeeper) giveBack(users uint32) {
 		if cur, ok := k.ws.active(); ok && cur != users {
 			if cur == 0 || !k.ws.ownedByBrowser(cur) {
 				// The user went somewhere else themselves.
+				return
+			}
+			if k.ws.isDialog(cur) {
+				// The call opened a dialog, which is the point of it.
 				return
 			}
 			_ = k.ws.activate(users)

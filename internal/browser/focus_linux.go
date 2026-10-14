@@ -66,6 +66,31 @@ func (x *x11Windows) ownedByBrowser(w uint32) bool {
 	return err == nil && isBrowserClass(class.Class+" "+class.Instance)
 }
 
+func (x *x11Windows) isDialog(w uint32) bool {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+
+	win := xproto.Window(w)
+	if parent, err := icccm.WmTransientForGet(x.xu, win); err == nil && parent != 0 {
+		return true
+	}
+	if types, err := ewmh.WmWindowTypeGet(x.xu, win); err == nil {
+		for _, t := range types {
+			if t == "_NET_WM_WINDOW_TYPE_DIALOG" {
+				return true
+			}
+		}
+	}
+	if states, err := ewmh.WmStateGet(x.xu, win); err == nil {
+		for _, s := range states {
+			if s == "_NET_WM_STATE_MODAL" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // activate asks the window manager to give w the focus, as a pager would.
 // A pager's request is honoured where an application's may be refused, and
 // giving the user back their own window is exactly what a pager is for.

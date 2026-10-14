@@ -182,8 +182,10 @@ mouse-down (Chrome focuses the contents on every one; nothing turns it off).
 So `newPageTarget` opens each page in a background window of its own,
 `SelectPage` activates only a tab that is hidden, and calls that may still take
 the focus — clicks, Tab, activation — go through `keepFocus`, which gives the
-user's window the focus back on X11. Anything new that dispatches mouse input
-or activates a target belongs inside `keepFocus` too. It is proved by
+user's window the focus back on X11 — except to a dialog of the browser's,
+such as the file chooser a click on a file input opens, which the caller means
+to use next. `StartRecording` activates its page deliberately. Anything new that
+dispatches mouse input or activates a target belongs inside `keepFocus` too. It is proved by
 `TestTheBrowserDoesNotTakeTheFocus`, which needs a nested display with a window
 manager (see its comment) and is skipped without one.
 

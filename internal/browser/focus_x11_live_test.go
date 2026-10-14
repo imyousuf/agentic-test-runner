@@ -41,6 +41,10 @@ func TestTheBrowserDoesNotTakeTheFocus(t *testing.T) {
 	// Everything below — Chrome, the keeper's own connection, this test's —
 	// is on that display, and the rest of the package is on none.
 	t.Setenv("DISPLAY", display)
+	// The file chooser below must open on that display too. With a session
+	// bus to reach, Chrome may ask the desktop portal for it instead, which
+	// would put it on the real desktop — so there is none to reach.
+	t.Setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path=/nonexistent/atr-focus-test")
 
 	xu, err := xgbutil.NewConn()
 	if err != nil {
@@ -148,6 +152,59 @@ func TestTheBrowserDoesNotTakeTheFocus(t *testing.T) {
 		}
 	}
 
+	// A click that opens the operating system's file chooser leaves the
+	// chooser with the focus. Whoever clicked a file input means to use the
+	// chooser next — `atr computer type` the path into it — and handing the
+	// focus back to the user's window would send that typing somewhere else.
+	if err := b.NewPage(ctx, testFixtureURL+"/file_input.html"); err != nil {
+		t.Fatal(err)
+	}
+	putUserInFront()
+	// Here the chooser opens 165–260ms after the click, after the page's own
+	// window has grabbed the focus at about 40ms. The keeper gives that grab
+	// back and stops watching before the chooser arrives, so the chooser would
+	// end up with the focus whether or not dialogs were left alone. On a
+	// faster machine it arrives while the keeper is still watching. The watch
+	// is widened for this click to be that machine: then only leaving dialogs
+	// alone keeps the chooser in front.
+	watch, settle := b.focus.watch, b.focus.settle
+	b.focus.watch, b.focus.settle = 3*time.Second, 2*time.Second
+	err = b.Click(ctx, "#upload", false)
+	b.focus.watch, b.focus.settle = watch, settle
+	if err != nil {
+		t.Fatalf("clicking the file input: %v", err)
+	}
+	chooser := waitForActive(t, xu, 10*time.Second, func(w xproto.Window) bool {
+		return b.focus.ws.ownedByBrowser(uint32(w)) && b.focus.ws.isDialog(uint32(w))
+	})
+	if chooser == 0 {
+		active, _ := ewmh.ActiveWindowGet(xu)
+		name, _ := ewmh.WmNameGet(xu, active)
+		t.Errorf("after clicking a file input the focus is on %q, want the browser's file chooser", name)
+	} else {
+		time.Sleep(700 * time.Millisecond)
+		if w, _ := ewmh.ActiveWindowGet(xu); w != chooser {
+			t.Error("the file chooser had the focus and lost it")
+		}
+		_ = ewmh.CloseWindow(xu, chooser)
+		time.Sleep(time.Second)
+	}
+
+	// A recording is something the user does, on the page, so the page being
+	// recorded is the one exception: it is brought forward.
+	putUserInFront()
+	if err := b.StartRecording(""); err != nil {
+		t.Fatalf("starting a recording: %v", err)
+	}
+	if w := waitForActive(t, xu, 5*time.Second, func(w xproto.Window) bool {
+		return b.focus.ws.ownedByBrowser(uint32(w))
+	}); w == 0 {
+		t.Error("starting a recording did not bring the browser forward")
+	}
+	if _, err := b.StopRecording(); err != nil {
+		t.Fatalf("stopping the recording: %v", err)
+	}
+
 	// The control. Without the keeper, activating a page does take the focus
 	// on this display — so the steps above passed because the focus was kept,
 	// not because nothing here could have taken it.
@@ -162,6 +219,20 @@ func TestTheBrowserDoesNotTakeTheFocus(t *testing.T) {
 	if settled() {
 		t.Error("control: an unguarded activation did not take the focus, so this display cannot tell a kept focus from an untested one")
 	}
+}
+
+// waitForActive waits for a window matching want to have the focus, and returns
+// it, or 0 if none does in time.
+func waitForActive(t *testing.T, xu *xgbutil.XUtil, within time.Duration, want func(xproto.Window) bool) xproto.Window {
+	t.Helper()
+	deadline := time.Now().Add(within)
+	for time.Now().Before(deadline) {
+		if w, err := ewmh.ActiveWindowGet(xu); err == nil && w != 0 && want(w) {
+			return w
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	return 0
 }
 
 // startUsersWindow opens a window to stand in for the user's work, and returns

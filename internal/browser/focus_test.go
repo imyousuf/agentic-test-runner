@@ -16,6 +16,7 @@ type fakeDesktop struct {
 	focused   uint32
 	readable  bool
 	browsers  map[uint32]bool
+	dialogs   map[uint32]bool
 	requests  []uint32
 	timeline  []func() // run, one per call, by the next active() after the guarded call
 	closed    bool
@@ -27,13 +28,15 @@ const (
 	usersTerminal uint32 = 102
 	browserWindow uint32 = 201
 	browserPopup  uint32 = 202
+	fileChooser   uint32 = 203
 )
 
 func newFakeDesktop(focused uint32) *fakeDesktop {
 	return &fakeDesktop{
 		focused:  focused,
 		readable: true,
-		browsers: map[uint32]bool{browserWindow: true, browserPopup: true},
+		browsers: map[uint32]bool{browserWindow: true, browserPopup: true, fileChooser: true},
+		dialogs:  map[uint32]bool{fileChooser: true},
 	}
 }
 
@@ -49,6 +52,8 @@ func (d *fakeDesktop) active() (uint32, bool) {
 }
 
 func (d *fakeDesktop) ownedByBrowser(w uint32) bool { return d.browsers[w] }
+
+func (d *fakeDesktop) isDialog(w uint32) bool { return d.dialogs[w] }
 
 func (d *fakeDesktop) activate(w uint32) error {
 	d.mu.Lock()
@@ -164,6 +169,35 @@ func TestASecondGrabIsGivenBackToo(t *testing.T) {
 	}
 	if len(d.requests) != 2 {
 		t.Errorf("activation requests = %v, want two", d.requests)
+	}
+}
+
+// A click on a file input opens the operating system's file chooser, which
+// belongs to the browser and takes the focus. Whoever clicked means to use it
+// next — `atr computer type` the path into it — so it keeps the focus.
+func TestADialogTheCallOpenedKeepsTheFocus(t *testing.T) {
+	d := newFakeDesktop(usersEditor)
+	d.timeline = []func(){d.focusTo(fileChooser)}
+
+	if err := fastKeeper(d).around(d.call(nil)); err != nil {
+		t.Fatal(err)
+	}
+	if d.focused != fileChooser || len(d.requests) != 0 {
+		t.Errorf("focus = %d, requests = %v; want the file chooser left with the focus", d.focused, d.requests)
+	}
+}
+
+// The browser window grabbing first and the dialog opening after it is the
+// same: the dialog is what the call was for.
+func TestADialogAfterAGrabKeepsTheFocus(t *testing.T) {
+	d := newFakeDesktop(usersEditor)
+	d.timeline = []func(){d.focusTo(browserWindow), d.nothing(), d.focusTo(fileChooser)}
+
+	if err := fastKeeper(d).around(d.call(nil)); err != nil {
+		t.Fatal(err)
+	}
+	if d.focused != fileChooser {
+		t.Errorf("focus ended on %d, want the file chooser", d.focused)
 	}
 }
 

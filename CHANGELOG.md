@@ -87,8 +87,12 @@ CLI need no changes.
   between ATR's pages no longer activates anything; and when Chrome focuses
   its window on a click or a Tab out of the page, which it does on every
   mouse-down and no setting turns off, ATR gives the focus back to the window
-  you were in (Linux/X11). Affects `atr browser`, `atr run --behavior` against
-  a headed daemon or browser, and the MCP browser tools.
+  you were in (Linux/X11). A dialog the click opened — the file chooser behind
+  a file input — keeps the focus, and `atr browser record` still brings its
+  page forward. Affects `atr browser`, `atr run --behavior` against a headed
+  daemon or browser, and the MCP browser tools. A click costs about 120ms more
+  while you are in another window; nothing more while you are in the browser
+  or headless.
 - **One target grammar for every call.** `atr.text`, `atr.expectText` and
   `atr.scroll` — and the `text`, `scroll`, `screenshot`, `computed-styles`,
   `clean-snapshot` and `download-images` commands behind them — refused an
