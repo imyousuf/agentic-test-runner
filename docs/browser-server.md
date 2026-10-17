@@ -105,36 +105,51 @@ atr browser reload     # Reload current page
 
 ## Working alongside the browser
 
-ATR is usually driving the browser while you do something else, so a headed
-browser is kept from taking the keyboard focus away from the window you are
-working in:
+ATR is usually driving the browser while you do something else. On Linux, a
+headed browser is kept from taking the keyboard focus away from the window you
+are working in. (On macOS and Windows it behaves as it always has: there the
+changes below have not been measured.)
 
-- **New pages open in a window of their own, behind yours.** `new-page`, and
-  the tab `atr run --behavior` opens in a running daemon, used to open as a
-  foreground tab, which raises the browser over your work. The page still
-  renders — screenshots, clicks and reads work as before — and you can bring
-  its window forward yourself.
+- **New pages open in a window of their own, behind yours.** `new-page`, the
+  first page after `atr browser start`, and the page `atr run --behavior` opens
+  in a running daemon used to open as foreground tabs, which raise the browser
+  over your work. The page still renders — screenshots, clicks and reads work as
+  before. When you want to use it yourself, bring it forward from the taskbar
+  (or with `atr computer window focus --title "<page title>"`).
 - **Switching pages does not raise the browser.** Each page ATR opens is the
-  visible tab of its own window, so `select-page` has nothing to bring
-  forward. Only a tab hidden behind another in the same window — one you
-  opened yourself — is activated.
+  visible tab of its own window, so `select-page` has nothing to bring forward.
+  A tab hidden behind another in the same window — one you opened, or one a
+  page opened with a link or `window.open` — is activated, and the focus is
+  given back.
 - **Clicks and Tab give the focus straight back.** Chrome focuses its window on
   every mouse-down it is sent, and when Tab moves the focus out of the page; no
-  setting turns that off. On Linux under X11, ATR notes the window you were in
-  and hands the focus back to it as soon as the browser takes it, usually
-  within a tenth of a second. You may see the browser flash; your keystrokes go
-  where you were typing.
+  setting turns that off. Under X11, ATR notes the window you were in and hands
+  the focus back as soon as the browser takes it, usually within a tenth of a
+  second. You may see the browser flash; your keystrokes go where you were
+  typing.
+- **The page still behaves as focused.** To a page, losing the focus is you
+  switching away: the focused field blurs and a menu open on it closes. So
+  after giving the focus back, ATR keeps the page behaving as focused, as it
+  would have been had the browser kept the focus — and lets it go once ATR has
+  left the page alone for two minutes, so a page you are not reading (a chat,
+  say) is not told that you are.
 
-If the browser window was already the one in front — you are watching it —
-ATR leaves it there. Two things are allowed to take the focus, because you are
-meant to use them next:
+If the browser was already the window in front — you are watching it — ATR
+leaves it there. Two things bring it forward on purpose, because you are meant
+to use them next:
 
-- **A dialog the click opened**, such as the file chooser behind a file input.
-  It stays in front, so `atr computer type` reaches it.
+- **A click on a file input, or on its label.** The file chooser it opens gets
+  the focus, so `atr computer type` reaches it. An upload button whose own
+  script opens the chooser is not recognisable as one; its chooser may open
+  behind your window, flagged as wanting attention. Click the file input or its
+  label instead, or focus the chooser with `atr computer window focus`.
 - **`atr browser record`**, which brings the page being recorded forward: the
   recording is you clicking on it.
 
-On macOS and Windows the focus is not yet given back after a click.
+The cost: while you are in another window, a click takes about a tenth of a
+second longer, and so does each Tab key press — up to three tenths when the
+browser takes nothing. Nothing more while you are in the browser, headless, or
+on macOS and Windows.
 
 ## Page Management
 
@@ -703,7 +718,8 @@ atr browser start --persist-session
 
 # 2. Login to a site
 atr browser navigate https://github.com
-# ... manually login ...
+# ... manually login (on Linux the window opens behind yours: bring it
+#     forward from the taskbar) ...
 
 # 3. Stop browser
 atr browser stop

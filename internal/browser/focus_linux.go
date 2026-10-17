@@ -12,26 +12,36 @@ import (
 	"github.com/jezek/xgbutil/icccm"
 )
 
+// keepsOutOfTheWay says whether a headed browser here is kept from taking the
+// user's focus. Linux is where it has been measured.
+const keepsOutOfTheWay = true
+
 // x11Windows reads and sets the focus through the window manager, by EWMH.
 type x11Windows struct {
 	mu sync.Mutex
 	xu *xgbutil.XUtil
 	// browserPID is the browser's process. Chrome stamps it on every window
-	// it opens, as _NET_WM_PID. Zero for a browser ATR connected to.
+	// it opens, as _NET_WM_PID, and it is how the browser's windows are told
+	// from everybody else's — including the user's own Chrome.
 	browserPID int
 }
 
-// newWindowSystem connects to the X11 desktop the browser shows on, or
-// returns nil when there is none to keep the focus on: no display, or no
-// window manager that reports which window is active.
-//
-// On a Wayland session the browser is not an X11 client, the compositor does
-// not let it take the focus in the first place, and the active window read
-// here is never one of its windows — so nothing is ever given back.
-func newWindowSystem(browserPID int) windowSystem {
-	if os.Getenv("DISPLAY") == "" {
+// desktopConnector returns how to connect to the X11 desktop for a browser
+// with this process ID, or nil when there is no way to tell its windows.
+func desktopConnector(browserPID int) func() windowSystem {
+	if browserPID <= 0 || os.Getenv("DISPLAY") == "" {
 		return nil
 	}
+	return func() windowSystem { return newX11Windows(browserPID) }
+}
+
+// newX11Windows connects to the X11 desktop, or returns nil when there is no
+// window manager that reports which window is active.
+//
+// On a Wayland session the browser may not be an X11 client at all: the
+// compositor does not let it take the focus in the first place, and it has no
+// windows here — so browserHasWindows says so and nothing is watched.
+func newX11Windows(browserPID int) windowSystem {
 	xu, err := xgbutil.NewConn()
 	if err != nil {
 		return nil
@@ -40,6 +50,24 @@ func newWindowSystem(browserPID int) windowSystem {
 		xu.Conn().Close()
 		return nil
 	}
+
+	// Every X client is sent some events whether it asked for them or not —
+	// a keyboard mapping change goes to all of them — and xgb queues them
+	// until they are read, in a buffer of a few thousand. Unread, a long-
+	// lived connection fills it, and then every request on it blocks for
+	// good. This connection lives as long as the browser, so its events are
+	// read, and dropped, as they come. The loop ends when the connection
+	// closes.
+	conn := xu.Conn()
+	go func() {
+		for {
+			ev, err := conn.WaitForEvent()
+			if ev == nil && err == nil {
+				return
+			}
+		}
+	}()
+
 	return &x11Windows{xu: xu, browserPID: browserPID}
 }
 
@@ -57,13 +85,28 @@ func (x *x11Windows) active() (uint32, bool) {
 func (x *x11Windows) ownedByBrowser(w uint32) bool {
 	x.mu.Lock()
 	defer x.mu.Unlock()
+	return x.ownedLocked(xproto.Window(w))
+}
 
-	if x.browserPID > 0 {
-		pid, err := ewmh.WmPidGet(x.xu, xproto.Window(w))
-		return err == nil && int(pid) == x.browserPID
+func (x *x11Windows) ownedLocked(w xproto.Window) bool {
+	pid, err := ewmh.WmPidGet(x.xu, w)
+	return err == nil && int(pid) == x.browserPID
+}
+
+func (x *x11Windows) browserHasWindows() bool {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+
+	clients, err := ewmh.ClientListGet(x.xu)
+	if err != nil {
+		return false
 	}
-	class, err := icccm.WmClassGet(x.xu, xproto.Window(w))
-	return err == nil && isBrowserClass(class.Class+" "+class.Instance)
+	for _, w := range clients {
+		if x.ownedLocked(w) {
+			return true
+		}
+	}
+	return false
 }
 
 func (x *x11Windows) isDialog(w uint32) bool {

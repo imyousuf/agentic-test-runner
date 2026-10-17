@@ -75,11 +75,20 @@ type Browser struct {
 	targetEvents chan func()
 
 	// windowed is true when the browser shows its pages in windows on a
-	// desktop, where it can take the focus away from the user.
+	// desktop where ATR keeps it from taking the user's focus — Linux, for
+	// now. See focus.go.
 	windowed bool
 	// focus gives the user's window the focus back when the browser takes
-	// it. Nil when there is no desktop to do that on. See focus.go.
+	// it. Nil when there is no desktop to do that on.
 	focus *focusKeeper
+
+	// focusHolds are the pages whose focus is being held after the user's
+	// window was given the focus back, keyed by target. See holdFocus.
+	focusHoldMu sync.Mutex
+	focusHolds  map[proto.TargetTargetID]*time.Timer
+	// focusHoldFor overrides focusHoldTime, for tests that cannot wait two
+	// minutes to see a hold lapse.
+	focusHoldFor time.Duration
 }
 
 // ConsoleMessage represents a browser console message.
@@ -233,9 +242,13 @@ func (b *Browser) Launch(ctx context.Context) error {
 		return fmt.Errorf("failed to launch browser: %w", err)
 	}
 
-	b.windowed = !b.config.Headless
+	b.windowed = !b.config.Headless && keepsOutOfTheWay
 	if b.windowed {
-		b.focus = newFocusKeeper(newWindowSystem(l.PID()))
+		// Connected on first use, not here: launching never waits on the
+		// desktop, and b.mu is held.
+		if connect := desktopConnector(l.PID()); connect != nil {
+			b.focus = newFocusKeeper(connect)
+		}
 	}
 
 	// Store the control URL for external access (e.g., MCP servers)
@@ -543,12 +556,16 @@ func (b *Browser) Connect(ctx context.Context, cdpEndpoint string) error {
 	// process's configuration: `atr run --headless` reusing a headed daemon
 	// still drives a browser on the user's desktop.
 	if ver, err := (proto.BrowserGetVersion{}).Call(browser); err == nil {
-		b.windowed = !strings.HasPrefix(ver.Product, "Headless")
+		b.windowed = !reportsHeadless(ver.Product, ver.UserAgent) && keepsOutOfTheWay
 	}
 	if b.windowed {
-		// No process ID for a browser this process did not start; its
-		// windows are recognised by their class instead.
-		b.focus = newFocusKeeper(newWindowSystem(0))
+		// The browser's windows are told from everybody else's by its
+		// process ID, which a browser this process did not start has to be
+		// asked for. Without it nothing is guarded: telling them apart by
+		// class would take the user's own Chrome for this one.
+		if connect := desktopConnector(browserProcessID(browser)); connect != nil {
+			b.focus = newFocusKeeper(connect)
+		}
 	}
 
 	// Sync existing pages from the connected browser
@@ -558,6 +575,34 @@ func (b *Browser) Connect(ctx context.Context, cdpEndpoint string) error {
 	b.startTargetListener()
 
 	return nil
+}
+
+// browserProcessID asks a browser for its own process ID, or returns 0 when it
+// will not say.
+func browserProcessID(browser *rod.Browser) int {
+	info, err := (proto.SystemInfoGetProcessInfo{}).Call(browser)
+	if err != nil {
+		return 0
+	}
+	for _, p := range info.ProcessInfo {
+		if p.Type == "browser" {
+			return p.ID
+		}
+	}
+	return 0
+}
+
+// reportsHeadless reports whether a browser's Browser.getVersion says it runs
+// headless.
+//
+// The product name alone does not: Chrome's current headless mode — what a
+// plain --headless gives, and what rod launches — reports "Chrome/155..." like
+// a headed browser, and only the old mode said "HeadlessChrome". Read from the
+// product alone, every headless daemon looked windowed to a process connecting
+// to it. The user agent says HeadlessChrome in both modes. It is the browser's
+// own, not the per-page override ATR sets.
+func reportsHeadless(product, userAgent string) bool {
+	return strings.HasPrefix(product, "HeadlessChrome") || strings.Contains(userAgent, "HeadlessChrome")
 }
 
 // CDPEndpoint returns the CDP WebSocket URL for this browser.
@@ -582,6 +627,7 @@ func (b *Browser) Close() error {
 
 	b.focus.close()
 	b.focus = nil
+	b.releaseFocusHolds()
 
 	if b.browser == nil {
 		return nil
@@ -718,12 +764,10 @@ func (b *Browser) openPage(ctx context.Context, url string) error {
 	windowed := b.windowed
 	b.mu.RUnlock()
 
-	var target *proto.TargetCreateTargetResult
-	err := b.keepFocus(func() error {
-		var err error
-		target, err = newPageTarget(rodBrowser.BrowserContextID, windowed).Call(rodBrowser)
-		return err
-	})
+	// Not guarded by keepFocus: a background window takes nothing, and
+	// watching for a grab that does not come would cost every new page the
+	// whole watch.
+	target, err := newPageTarget(rodBrowser.BrowserContextID, windowed).Call(rodBrowser)
 	if err != nil {
 		return fmt.Errorf("failed to create page: %w", err)
 	}
@@ -1104,10 +1148,14 @@ func (b *Browser) SelectPage(index int) error {
 	// window does not need it — and every page ATR opens is, in a window of
 	// its own — so only a tab hidden behind another is activated, and the
 	// focus is given back afterwards.
+	//
+	// Asking costs a round trip to the page, and a page whose main thread is
+	// held — an alert() open on it — cannot answer: then it is activated
+	// after pageVisibilityTimeout, as every page used to be.
 	if !needsActivation(pageVisibility(page)) {
 		return nil
 	}
-	return b.keepFocus(func() error {
+	return b.keepFocus(page, func() error {
 		_, err := page.Activate()
 		return err
 	})
@@ -1151,13 +1199,80 @@ func newPageTarget(contextID proto.BrowserBrowserContextID, windowed bool) proto
 	}
 }
 
-// keepFocus runs fn, a call that may make the browser take the focus from the
-// user's window, and gives it back if it does. See focus.go.
-func (b *Browser) keepFocus(fn func() error) error {
+// keepFocus runs fn, a call on page that may make the browser take the focus
+// from the user's window, and gives it back if it does. See focus.go.
+func (b *Browser) keepFocus(page *rod.Page, fn func() error) error {
 	b.mu.RLock()
 	k := b.focus
 	b.mu.RUnlock()
-	return k.around(fn)
+	return k.around(func() { b.holdFocus(page) }, fn)
+}
+
+// focusHoldTime is how long a page's focus is held after ATR last gave the
+// user's window the focus back from it.
+//
+// Long enough to span the gap between one step and the next when an agent is
+// thinking between them, which can be most of a minute; short enough that a
+// page ATR has finished with goes back to knowing it is not being looked at.
+const focusHoldTime = 2 * time.Minute
+
+// holdFocus keeps page behaving as focused for focusHoldTime, starting now.
+//
+// The browser has just taken the focus for page and is about to be made to
+// give it back. To the page that is the user switching away: its focused
+// element blurs and a menu open on it closes, which would never happen
+// headless or with the focus left where Chrome put it — so the step after a
+// click would find a different page from the one the click left. Chrome's
+// focus emulation keeps the page focused whatever the desktop does.
+//
+// Held for a while rather than for good. A page that is always focused tells
+// the application someone is reading it — a chat marks its messages read, a
+// presence indicator stays green — and the user's own pages in a long-lived
+// daemon are not something ATR should be reading on their behalf. So the hold
+// lapses once ATR has left the page alone for focusHoldTime, and the page
+// learns, as it would have, that nobody is looking.
+func (b *Browser) holdFocus(page *rod.Page) {
+	if page == nil {
+		return
+	}
+	target := page.TargetID
+
+	b.focusHoldMu.Lock()
+	if b.focusHolds == nil {
+		b.focusHolds = make(map[proto.TargetTargetID]*time.Timer)
+	}
+	holdFor := focusHoldTime
+	if b.focusHoldFor > 0 {
+		holdFor = b.focusHoldFor
+	}
+	if timer, held := b.focusHolds[target]; held {
+		timer.Reset(holdFor)
+		b.focusHoldMu.Unlock()
+		return
+	}
+	b.focusHolds[target] = time.AfterFunc(holdFor, func() {
+		b.focusHoldMu.Lock()
+		delete(b.focusHolds, target)
+		b.focusHoldMu.Unlock()
+		// The page may have closed meanwhile; then there is nothing to
+		// release.
+		_ = proto.EmulationSetFocusEmulationEnabled{Enabled: false}.Call(page)
+	})
+	b.focusHoldMu.Unlock()
+
+	// Neither lock is held across the CDP call.
+	_ = proto.EmulationSetFocusEmulationEnabled{Enabled: true}.Call(page)
+}
+
+// releaseFocusHolds stops every pending hold release. The browser is closing,
+// and its pages with it.
+func (b *Browser) releaseFocusHolds() {
+	b.focusHoldMu.Lock()
+	defer b.focusHoldMu.Unlock()
+	for target, timer := range b.focusHolds {
+		timer.Stop()
+		delete(b.focusHolds, target)
+	}
 }
 
 // ClosePage closes the page at the given index.

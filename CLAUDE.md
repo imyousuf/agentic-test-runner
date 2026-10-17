@@ -175,17 +175,22 @@ probes with a trivial `Runtime.evaluate` between them, so this is reported as
 after the whole page budget. Tests that are not about renderer health skip on
 that one typed error.
 
-A headed browser must not take the focus from the user's window
-(`internal/browser/focus.go`). Three things make Chrome activate its window:
-a foreground `Target.createTarget`, `Target.activateTarget`, and any trusted
-mouse-down (Chrome focuses the contents on every one; nothing turns it off).
-So `newPageTarget` opens each page in a background window of its own,
-`SelectPage` activates only a tab that is hidden, and calls that may still take
-the focus — clicks, Tab, activation — go through `keepFocus`, which gives the
-user's window the focus back on X11 — except to a dialog of the browser's,
-such as the file chooser a click on a file input opens, which the caller means
-to use next. `StartRecording` activates its page deliberately. Anything new that
-dispatches mouse input or activates a target belongs inside `keepFocus` too. It is proved by
+A headed browser on Linux must not take the focus from the user's window
+(`internal/browser/focus.go`; `Browser.windowed` is false elsewhere, and there
+nothing changes). Three things make Chrome activate its window: a foreground
+`Target.createTarget`, `Target.activateTarget`, and any trusted mouse-down
+(Chrome focuses the contents on every one; nothing turns it off). So
+`newPageTarget` opens each page in a background window of its own, `SelectPage`
+activates only a tab that is hidden, and calls that may still take the focus —
+clicks, Tab, activation — go through `keepFocus`, which gives the user's window
+the focus back on X11 and holds the page's focus (`holdFocus`, Chrome's focus
+emulation, released after two minutes idle) so the page does not see a blur.
+A dialog of the browser's that takes the focus is left with it. Clicks on a
+file input and `StartRecording` bring the browser forward deliberately.
+Anything new that dispatches mouse input or activates a target belongs inside
+`keepFocus` too. The keeper's X connection is long-lived, so its events must be
+drained (see `newX11Windows`), and the browser's windows are known only by its
+process ID — never by window class, which would match the user's own Chrome. It is proved by
 `TestTheBrowserDoesNotTakeTheFocus`, which needs a nested display with a window
 manager (see its comment) and is skipped without one.
 

@@ -81,18 +81,25 @@ CLI need no changes.
 ### Fixed
 
 - **A headed browser no longer takes the focus from the window you are working
-  in.** Opening a page, switching pages and every click raised the browser
-  over your work on X11 — and with it went your next keystrokes. New pages now
-  open in a background window of their own, which renders as before; switching
-  between ATR's pages no longer activates anything; and when Chrome focuses
-  its window on a click or a Tab out of the page, which it does on every
-  mouse-down and no setting turns off, ATR gives the focus back to the window
-  you were in (Linux/X11). A dialog the click opened — the file chooser behind
-  a file input — keeps the focus, and `atr browser record` still brings its
-  page forward. Affects `atr browser`, `atr run --behavior` against a headed
-  daemon or browser, and the MCP browser tools. A click costs about 120ms more
-  while you are in another window; nothing more while you are in the browser
-  or headless.
+  in (Linux).** Opening a page, switching pages and every click raised the
+  browser over your work on X11 — and with it went your next keystrokes.
+  - New pages open in a background window of their own, behind yours, and
+    render as before. That includes the first page after `atr browser start`:
+    bring it forward from the taskbar when you want to use it.
+  - Switching between ATR's pages no longer activates anything; a tab hidden
+    behind another in the same window is activated and the focus given back.
+  - When Chrome focuses its window on a click or a Tab out of the page — it
+    does on every mouse-down, and no setting turns that off — ATR gives the
+    focus back to the window you were in, under X11.
+  - The page keeps behaving as focused afterwards, so a field does not blur and
+    a menu does not close because the focus went back to you. That lapses after
+    two minutes without ATR touching the page.
+  - A click on a file input or its label, and `atr browser record`, bring the
+    browser forward on purpose: you are meant to use what they open. An upload
+    button whose own script opens the chooser may open it behind your window.
+  - The cost, while you are in another window: about 120ms per click, and up to
+    300ms per Tab key press. Nothing while you are in the browser or headless.
+  - macOS and Windows are unchanged.
 - **One target grammar for every call.** `atr.text`, `atr.expectText` and
   `atr.scroll` — and the `text`, `scroll`, `screenshot`, `computed-styles`,
   `clean-snapshot` and `download-images` commands behind them — refused an

@@ -5,5 +5,9 @@
   <!-- Clicking this opens the operating system's file chooser: a window of
        the browser's own, which whoever clicked it means to use next. -->
   <input id="upload" type="file">
+  <label id="upload-label" for="upload">Choose a file</label>
+  <!-- An upload button of the common kind: its own handler opens the
+       chooser. Nothing about the button says it will. -->
+  <button id="pick" type="button" onclick="document.getElementById('upload').click()">Pick a file</button>
   <button id="plain" type="button">Plain button</button>
 </body>

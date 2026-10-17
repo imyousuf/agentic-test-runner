@@ -136,11 +136,42 @@ func (b *Browser) Click(ctx context.Context, target string, doubleClick bool) er
 	if doubleClick {
 		clicks = 2
 	}
+
+	// A file input opens the operating system's file chooser, and whoever
+	// clicks one means to use the chooser next — `atr computer type` the path
+	// into it. The window manager gives a dialog the focus only if the window
+	// it belongs to has had it: a page in a background window ATR opened has
+	// not, so its chooser would open behind the user's work, flagged as
+	// wanting attention, and the typing would land in the user's window. So
+	// the browser is brought forward first, on purpose, as it would have been
+	// before ATR kept out of the user's way.
+	b.mu.RLock()
+	windowed := b.windowed
+	b.mu.RUnlock()
+	if windowed && opensFileChooser(el) {
+		_, _ = page.Activate()
+		return el.Click(proto.InputMouseButtonLeft, clicks)
+	}
+
 	// Chrome focuses the page on every trusted mouse-down, and on a desktop
 	// that activates its window. See focus.go.
-	return b.keepFocus(func() error {
+	return b.keepFocus(page, func() error {
 		return el.Click(proto.InputMouseButtonLeft, clicks)
 	})
+}
+
+// opensFileChooser reports whether clicking el opens the file chooser: el is
+// a file input, or a label for one. False when the page cannot say.
+func opensFileChooser(el *rod.Element) bool {
+	res, err := el.Eval(`function() {
+		const isFileInput = (e) => !!e && e.tagName === 'INPUT' && e.type === 'file';
+		if (isFileInput(this)) {
+			return true;
+		}
+		const label = this.closest('label');
+		return !!label && isFileInput(label.control);
+	}`)
+	return err == nil && res.Value.Bool()
 }
 
 // Fill types text into an element.
@@ -200,7 +231,7 @@ func (b *Browser) PressKey(key string) error {
 	// keys stay in the page and do not, so only Tab pays for the watch.
 	for _, k := range keys {
 		if k == input.Tab {
-			return b.keepFocus(func() error { return page.Keyboard.Type(keys...) })
+			return b.keepFocus(page, func() error { return page.Keyboard.Type(keys...) })
 		}
 	}
 	return page.Keyboard.Type(keys...)

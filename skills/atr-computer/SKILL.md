@@ -120,6 +120,9 @@ atr browser start
 atr browser navigate https://example.com/upload
 
 atr computer start --countdown-mode off
+# On Linux a new browser page opens in its own window *behind* yours, so bring
+# it forward before dropping onto it by coordinates.
+atr computer window focus --title "Upload"        # the page's title
 atr computer app launch nautilus
 atr computer window focus --title "Files"
 atr computer drag --from 200,300 --to 1200,400   # drag file into browser
