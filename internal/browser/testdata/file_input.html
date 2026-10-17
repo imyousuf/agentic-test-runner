@@ -1,0 +1,34 @@
+<!doctype html>
+<title>Upload</title>
+<body>
+  <h1>Upload</h1>
+  <!-- Clicking this opens the operating system's file chooser: a window of
+       the browser's own, which whoever clicked it means to use next. -->
+  <input id="upload" type="file">
+  <label id="upload-label" for="upload">Choose a file</label>
+  <!-- An upload button of the common kind: its own handler opens the
+       chooser. Nothing about the button says it will. -->
+  <button id="pick" type="button" onclick="document.getElementById('upload').click()">Pick a file</button>
+  <button id="plain" type="button">Plain button</button>
+  <!-- An upload button of the other common kind: a transparent file input
+       laid over it, which is what a click on the button lands on. -->
+  <div id="styled" style="position: relative; display: inline-block; padding: 8px 16px; border: 1px solid">
+    Upload a photo
+    <input id="overlay" type="file" style="position: absolute; inset: 0; opacity: 0">
+  </div>
+  <!-- The same, inside a web component. -->
+  <upload-button id="shadowed"></upload-button>
+  <script>
+    customElements.define("upload-button", class extends HTMLElement {
+      constructor() {
+        super();
+        this.attachShadow({ mode: "open" }).innerHTML =
+          '<div style="position: relative; display: inline-block; padding: 8px 16px; border: 1px solid">' +
+          'Attach<input type="file" style="position: absolute; inset: 0; opacity: 0"></div>';
+      }
+    });
+  </script>
+  <!-- A disabled file input opens nothing, nor does its label. -->
+  <input id="off" type="file" disabled>
+  <label id="off-label" for="off">Uploads are closed</label>
+</body>

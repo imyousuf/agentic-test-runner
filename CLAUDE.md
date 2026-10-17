@@ -175,6 +175,32 @@ probes with a trivial `Runtime.evaluate` between them, so this is reported as
 after the whole page budget. Tests that are not about renderer health skip on
 that one typed error.
 
+A headed browser on Linux must not take the focus from the user's window
+(`internal/browser/focus.go`; `Browser.windowed` is false elsewhere, and there
+nothing changes). Three things make Chrome activate its window: a foreground
+`Target.createTarget`, `Target.activateTarget`, and any trusted mouse-down
+(Chrome focuses the contents on every one; nothing turns it off). So
+`newPageTarget` opens each page in a background window of its own, `SelectPage`
+activates only a tab that is hidden, and calls that may still take the focus —
+clicks, Tab, activation — go through `keepFocus`, which gives the user's window
+the focus back on X11 and holds the page's focus (`holdFocus`, Chrome's focus
+emulation) so the page does not see a blur. A hold lapses two minutes after ATR
+last used the page: `CurrentPage` renews it and the waits keep it (`usePage`),
+so a long wait must call `usePage` too, and anything polled from outside (the
+health check) must not renew it (`Glance`). Its CDP calls are bounded — Chrome
+passes them to the renderer, which a `confirm()` holds — and a held page reports
+itself visible even as a hidden tab, so `SelectPage` asks the browser whether
+it shares its window instead (`aloneInWindow`).
+Only the mouse press is guarded in `Click`, not rod's wait before it.
+A dialog of the browser's that takes the focus is left with it. Clicks on a
+file input and `StartRecording` bring the browser forward deliberately.
+Anything new that dispatches mouse input or activates a target belongs inside
+`keepFocus` too. The keeper's X connection is long-lived, so its events must be
+drained (see `newX11Windows`), and the browser's windows are known only by its
+process ID — never by window class, which would match the user's own Chrome. It is proved by
+`TestTheBrowserDoesNotTakeTheFocus`, which needs a nested display with a window
+manager (see its comment) and is skipped without one.
+
 Related: `tryFind` rebinds a found element to a fresh action-sized deadline.
 The search timeout it was found under (500ms on the UID path) must not follow
 the element into the caller's next operations — `Fill` makes three more CDP

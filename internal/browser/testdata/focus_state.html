@@ -1,0 +1,17 @@
+<!doctype html>
+<title>Focus state</title>
+<!-- Records what the page sees of its own focus: a field whose menu opens on
+     focus and closes on blur, as a combobox does, and the window events. -->
+<body>
+  <input id="name" placeholder="Name">
+  <div id="menu" hidden>Menu open</div>
+  <div id="log"></div>
+  <script>
+    const log = (s) => { document.getElementById("log").textContent += s + ";"; };
+    const name = document.getElementById("name");
+    name.addEventListener("focus", () => { document.getElementById("menu").hidden = false; log("focus"); });
+    name.addEventListener("blur", () => { document.getElementById("menu").hidden = true; log("blur"); });
+    window.addEventListener("blur", () => log("window-blur"));
+    window.addEventListener("focus", () => log("window-focus"));
+  </script>
+</body>

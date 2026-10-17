@@ -398,7 +398,7 @@ func newBrowserReloadCmd() *cobra.Command {
 func newBrowserNewPageCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "new-page [url]",
-		Short: "Open new tab",
+		Short: "Open a new page (in a headed browser, in its own window behind yours)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			url := "about:blank"
 			if len(args) > 0 {
