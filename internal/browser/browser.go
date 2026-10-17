@@ -85,10 +85,13 @@ type Browser struct {
 	// focusHolds are the pages whose focus is being held after the user's
 	// window was given the focus back, keyed by target. See holdFocus.
 	focusHoldMu sync.Mutex
-	focusHolds  map[proto.TargetTargetID]*time.Timer
+	focusHolds  map[proto.TargetTargetID]*focusHold
 	// focusHoldFor overrides focusHoldTime, for tests that cannot wait two
 	// minutes to see a hold lapse.
 	focusHoldFor time.Duration
+	// focusEmulationMu serialises the calls that put a hold into effect and
+	// take it out. See applyFocusHold.
+	focusEmulationMu sync.Mutex
 }
 
 // ConsoleMessage represents a browser console message.
@@ -974,7 +977,21 @@ func (b *Browser) setupEventListeners(page *rod.Page) {
 }
 
 // CurrentPage returns the currently selected page.
+//
+// Every call on a page starts here, so this is also where a hold on the
+// page's focus is put off lapsing. See holdFocus.
 func (b *Browser) CurrentPage() (*rod.Page, error) {
+	page, err := b.selectedPage()
+	if err != nil {
+		return nil, err
+	}
+	b.touchPage(page)
+	return page, nil
+}
+
+// selectedPage is the currently selected page, without counting as a call on
+// it.
+func (b *Browser) selectedPage() (*rod.Page, error) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 
@@ -982,6 +999,22 @@ func (b *Browser) CurrentPage() (*rod.Page, error) {
 		return nil, fmt.Errorf("no page selected")
 	}
 	return b.pages[b.current], nil
+}
+
+// Glance returns the current page's URL and title without counting as a call
+// on the page. It is for health checks: one polled from outside would
+// otherwise keep a page's focus held for as long as it kept polling. See
+// holdFocus.
+func (b *Browser) Glance() (url, title string) {
+	page, err := b.selectedPage()
+	if err != nil {
+		return "", ""
+	}
+	info, err := page.Info()
+	if err != nil {
+		return "", ""
+	}
+	return info.URL, info.Title
 }
 
 // ListPages returns information about all open pages.
@@ -1133,6 +1166,7 @@ func (b *Browser) SelectPage(index int) error {
 	b.current = index
 	page := b.pages[index]
 	windowed := b.windowed
+	rodBrowser := b.browser
 	b.mu.Unlock()
 
 	// Without windows nothing can be taken from anybody, and activating is
@@ -1152,13 +1186,57 @@ func (b *Browser) SelectPage(index int) error {
 	// Asking costs a round trip to the page, and a page whose main thread is
 	// held — an alert() open on it — cannot answer: then it is activated
 	// after pageVisibilityTimeout, as every page used to be.
-	if !needsActivation(pageVisibility(page)) {
+	//
+	// A page whose focus is being held cannot be asked at all. Chrome's focus
+	// emulation counts as somebody capturing the page, and a captured page is
+	// visible to itself even as a hidden tab. So the browser is asked
+	// instead, which never waits on the page: a held page alone in its window
+	// is the tab it shows — and, held, renders even if the window is
+	// minimised — and one sharing its window is activated.
+	if b.focusHeld(page) {
+		if aloneInWindow(rodBrowser, page.TargetID) {
+			return nil
+		}
+	} else if !needsActivation(pageVisibility(page)) {
 		return nil
 	}
 	return b.keepFocus(page, func() error {
 		_, err := page.Activate()
 		return err
 	})
+}
+
+// aloneInWindow reports whether target is the only page in its window, by
+// asking the browser rather than the page. False when it cannot be told.
+func aloneInWindow(browser *rod.Browser, target proto.TargetTargetID) bool {
+	if browser == nil {
+		return false
+	}
+	browser = browser.Timeout(pageVisibilityTimeout)
+	defer browser.CancelTimeout()
+
+	own, err := proto.BrowserGetWindowForTarget{TargetID: target}.Call(browser)
+	if err != nil {
+		return false
+	}
+	targets, err := proto.TargetGetTargets{}.Call(browser)
+	if err != nil {
+		return false
+	}
+	for _, info := range targets.TargetInfos {
+		if info.Type != proto.TargetTargetInfoTypePage || info.TargetID == target {
+			continue
+		}
+		other, err := proto.BrowserGetWindowForTarget{TargetID: info.TargetID}.Call(browser)
+		if err != nil {
+			// Gone since it was listed, or not in a window at all.
+			continue
+		}
+		if other.WindowID == own.WindowID {
+			return false
+		}
+	}
+	return true
 }
 
 // pageVisibilityTimeout bounds asking a page whether it is shown.
@@ -1208,15 +1286,36 @@ func (b *Browser) keepFocus(page *rod.Page, fn func() error) error {
 	return k.around(func() { b.holdFocus(page) }, fn)
 }
 
-// focusHoldTime is how long a page's focus is held after ATR last gave the
-// user's window the focus back from it.
+// focusHoldTime is how long a page's focus is held after ATR last used the
+// page.
 //
 // Long enough to span the gap between one step and the next when an agent is
 // thinking between them, which can be most of a minute; short enough that a
 // page ATR has finished with goes back to knowing it is not being looked at.
 const focusHoldTime = 2 * time.Minute
 
-// holdFocus keeps page behaving as focused for focusHoldTime, starting now.
+// focusHoldCallTimeout bounds the wait for each call that puts a hold into
+// effect or takes it out. Chrome passes them to the page, and a page whose
+// main thread is busy — rendering what a click changed, a confirm() waiting
+// for an answer, a wedged renderer — answers late or never. The hold is made
+// just before the focus is given back, so the user's window waits as long as
+// this. Not waiting longer loses nothing: the call has been sent, and Chrome
+// delivers it, in order, once the page can take it.
+const focusHoldCallTimeout = 250 * time.Millisecond
+
+// focusHold is one page's held focus.
+type focusHold struct {
+	// until is when the hold lapses, unless ATR uses the page before then.
+	until time.Time
+	// inUse counts calls on the page still running — a wait can outlast the
+	// hold, and must not have the page blur under it.
+	inUse int
+	page  *rod.Page
+	timer *time.Timer
+}
+
+// holdFocus keeps page behaving as focused until ATR has left it alone for
+// focusHoldTime.
 //
 // The browser has just taken the focus for page and is about to be made to
 // give it back. To the page that is the user switching away: its focused
@@ -1229,8 +1328,9 @@ const focusHoldTime = 2 * time.Minute
 // the application someone is reading it — a chat marks its messages read, a
 // presence indicator stays green — and the user's own pages in a long-lived
 // daemon are not something ATR should be reading on their behalf. So the hold
-// lapses once ATR has left the page alone for focusHoldTime, and the page
-// learns, as it would have, that nobody is looking.
+// lapses once ATR has left the page alone for focusHoldTime — every call on
+// the page puts that off; see usePage — and the page learns, as it would
+// have, that nobody is looking.
 func (b *Browser) holdFocus(page *rod.Page) {
 	if page == nil {
 		return
@@ -1239,29 +1339,116 @@ func (b *Browser) holdFocus(page *rod.Page) {
 
 	b.focusHoldMu.Lock()
 	if b.focusHolds == nil {
-		b.focusHolds = make(map[proto.TargetTargetID]*time.Timer)
+		b.focusHolds = make(map[proto.TargetTargetID]*focusHold)
 	}
-	holdFor := focusHoldTime
-	if b.focusHoldFor > 0 {
-		holdFor = b.focusHoldFor
+	holdFor := b.focusHoldDurationLocked()
+	if h, held := b.focusHolds[target]; held {
+		h.until = time.Now().Add(holdFor)
+	} else {
+		h := &focusHold{until: time.Now().Add(holdFor), page: page}
+		// The lock is held until h.timer is set, so the timer cannot fire
+		// and find it unset.
+		h.timer = time.AfterFunc(holdFor, func() { b.lapseFocusHold(h) })
+		b.focusHolds[target] = h
 	}
-	if timer, held := b.focusHolds[target]; held {
-		timer.Reset(holdFor)
+	b.focusHoldMu.Unlock()
+
+	// Applied even when already held: the call that first put it into effect
+	// may have found the page unable to answer.
+	b.applyFocusHold(page)
+}
+
+// lapseFocusHold ends h if ATR has left its page alone for long enough;
+// otherwise it looks again when it next could be.
+func (b *Browser) lapseFocusHold(h *focusHold) {
+	target := h.page.TargetID
+
+	b.focusHoldMu.Lock()
+	if b.focusHolds[target] != h {
+		// Released already, by Close.
 		b.focusHoldMu.Unlock()
 		return
 	}
-	b.focusHolds[target] = time.AfterFunc(holdFor, func() {
-		b.focusHoldMu.Lock()
-		delete(b.focusHolds, target)
+	if h.inUse > 0 {
+		h.timer.Reset(b.focusHoldDurationLocked())
 		b.focusHoldMu.Unlock()
-		// The page may have closed meanwhile; then there is nothing to
-		// release.
-		_ = proto.EmulationSetFocusEmulationEnabled{Enabled: false}.Call(page)
-	})
+		return
+	}
+	if wait := time.Until(h.until); wait > 0 {
+		h.timer.Reset(wait)
+		b.focusHoldMu.Unlock()
+		return
+	}
+	delete(b.focusHolds, target)
 	b.focusHoldMu.Unlock()
 
-	// Neither lock is held across the CDP call.
-	_ = proto.EmulationSetFocusEmulationEnabled{Enabled: true}.Call(page)
+	// The page may have closed meanwhile; then there is nothing to release.
+	b.applyFocusHold(h.page)
+}
+
+// applyFocusHold puts into effect whether page's focus is held now.
+//
+// A hold and a lapse each decide under focusHoldMu but make their call after
+// letting go of it, so a lapse deciding to release and a new hold deciding to
+// hold could otherwise reach Chrome in either order — and the page be left
+// unheld while recorded as held. One call at a time, each reading the
+// decision once it has its turn, means the last call Chrome sees carries the
+// latest decision.
+func (b *Browser) applyFocusHold(page *rod.Page) {
+	b.focusEmulationMu.Lock()
+	defer b.focusEmulationMu.Unlock()
+
+	b.focusHoldMu.Lock()
+	_, held := b.focusHolds[page.TargetID]
+	b.focusHoldMu.Unlock()
+
+	p := page.Timeout(focusHoldCallTimeout)
+	defer p.CancelTimeout()
+	_ = proto.EmulationSetFocusEmulationEnabled{Enabled: held}.Call(p)
+}
+
+// usePage records that ATR is using page: a hold on it lapses no sooner than
+// focusHoldTime after the call this begins, and not while it runs. The
+// returned function ends the call.
+func (b *Browser) usePage(page *rod.Page) (done func()) {
+	b.focusHoldMu.Lock()
+	defer b.focusHoldMu.Unlock()
+
+	h := b.focusHolds[page.TargetID]
+	if h == nil {
+		return func() {}
+	}
+	h.until = time.Now().Add(b.focusHoldDurationLocked())
+	h.inUse++
+	return func() {
+		b.focusHoldMu.Lock()
+		defer b.focusHoldMu.Unlock()
+		h.inUse--
+		h.until = time.Now().Add(b.focusHoldDurationLocked())
+	}
+}
+
+// touchPage records a call on page that has already finished, or will very
+// soon: a hold on it lapses no sooner than focusHoldTime from now.
+func (b *Browser) touchPage(page *rod.Page) {
+	b.usePage(page)()
+}
+
+// focusHeld reports whether page's focus is being held.
+func (b *Browser) focusHeld(page *rod.Page) bool {
+	b.focusHoldMu.Lock()
+	defer b.focusHoldMu.Unlock()
+	_, held := b.focusHolds[page.TargetID]
+	return held
+}
+
+// focusHoldDurationLocked is how long a hold lasts. Called with focusHoldMu
+// held.
+func (b *Browser) focusHoldDurationLocked() time.Duration {
+	if b.focusHoldFor > 0 {
+		return b.focusHoldFor
+	}
+	return focusHoldTime
 }
 
 // releaseFocusHolds stops every pending hold release. The browser is closing,
@@ -1269,8 +1456,8 @@ func (b *Browser) holdFocus(page *rod.Page) {
 func (b *Browser) releaseFocusHolds() {
 	b.focusHoldMu.Lock()
 	defer b.focusHoldMu.Unlock()
-	for target, timer := range b.focusHolds {
-		timer.Stop()
+	for target, h := range b.focusHolds {
+		h.timer.Stop()
 		delete(b.focusHolds, target)
 	}
 }
@@ -1845,6 +2032,7 @@ func (b *Browser) WaitForText(ctx context.Context, text string, timeout time.Dur
 	if err != nil {
 		return err
 	}
+	defer b.usePage(page)()
 	page = bindDeadline(page, ctx)
 
 	// The text has to be on the page: in what the body renders, or in the

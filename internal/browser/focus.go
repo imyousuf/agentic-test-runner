@@ -103,13 +103,15 @@ type focusKeeper struct {
 	// this desktop. Once true it stays true.
 	hasWindows atomic.Bool
 
-	// guarding counts calls in flight that started with the focus on a user
-	// window. While one is, the browser having the focus may be that call's
-	// grab rather than the user's choice — see usersWindowNow.
+	// guarding counts calls in flight that are watching for a grab to give
+	// back: those that started with the focus on a user window, and those
+	// that started while one of them was in flight and took its window over.
+	// While any is, the browser having the focus may be a grab rather than
+	// the user's choice — see usersWindowNow.
 	guarding atomic.Int32
 
 	mu sync.Mutex
-	// usersWindow is the user's window as recorded by the calls being
+	// usersWindow is the user's window as last recorded by a call being
 	// guarded. Meaningful only while guarding is above zero.
 	usersWindow uint32
 }
@@ -252,7 +254,21 @@ func (k *focusKeeper) giveBack(ws windowSystem, users uint32, holdPage func()) {
 			if returns >= focusMaxReturns {
 				return
 			}
+			// The window manager takes a moment to act on that, and until it
+			// has, the browser still has the focus — the same grab, not a
+			// second one to give back again.
+			k.waitWhileActive(ws, cur, k.watch)
 			deadline = time.Now().Add(k.settle)
+		}
+		time.Sleep(k.poll)
+	}
+}
+
+// waitWhileActive waits until w no longer has the focus, or for at most d.
+func (k *focusKeeper) waitWhileActive(ws windowSystem, w uint32, d time.Duration) {
+	for until := time.Now().Add(d); time.Now().Before(until); {
+		if cur, ok := ws.active(); !ok || cur != w {
+			return
 		}
 		time.Sleep(k.poll)
 	}

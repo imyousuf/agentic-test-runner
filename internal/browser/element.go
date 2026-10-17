@@ -137,6 +137,24 @@ func (b *Browser) Click(ctx context.Context, target string, doubleClick bool) er
 		clicks = 2
 	}
 
+	// What rod's Element.Click does, taken apart: the wait for the element to
+	// be clickable can take most of the action's deadline, and only the press
+	// itself can take the focus — so only the press is guarded. Guarding the
+	// wait as well would note the user's window before it, and a user who
+	// went into the browser meanwhile to watch would be pulled back out.
+	pt, err := el.WaitInteractable()
+	if err != nil {
+		return err
+	}
+	mouse := el.Page().Mouse
+	if err := mouse.MoveTo(*pt); err != nil {
+		return err
+	}
+	if err := el.WaitEnabled(); err != nil {
+		return err
+	}
+	press := func() error { return mouse.Click(proto.InputMouseButtonLeft, clicks) }
+
 	// A file input opens the operating system's file chooser, and whoever
 	// clicks one means to use the chooser next — `atr computer type` the path
 	// into it. The window manager gives a dialog the focus only if the window
@@ -148,29 +166,45 @@ func (b *Browser) Click(ctx context.Context, target string, doubleClick bool) er
 	b.mu.RLock()
 	windowed := b.windowed
 	b.mu.RUnlock()
-	if windowed && opensFileChooser(el) {
+	if windowed && opensFileChooser(el, *pt) {
 		_, _ = page.Activate()
-		return el.Click(proto.InputMouseButtonLeft, clicks)
+		return press()
 	}
 
 	// Chrome focuses the page on every trusted mouse-down, and on a desktop
 	// that activates its window. See focus.go.
-	return b.keepFocus(page, func() error {
-		return el.Click(proto.InputMouseButtonLeft, clicks)
-	})
+	return b.keepFocus(page, press)
 }
 
-// opensFileChooser reports whether clicking el opens the file chooser: el is
-// a file input, or a label for one. False when the page cannot say.
-func opensFileChooser(el *rod.Element) bool {
-	res, err := el.Eval(`function() {
-		const isFileInput = (e) => !!e && e.tagName === 'INPUT' && e.type === 'file';
-		if (isFileInput(this)) {
-			return true;
+// opensFileChooser reports whether a click on el at pt opens the file chooser:
+// el is a file input, or a label for one, or the element the click lands on
+// is — an upload button styled over a transparent file input inside it is
+// clicked by its text, and it is the input that takes the click, in a web
+// component's shadow root or not. A disabled input opens nothing. False when
+// the page cannot say.
+func opensFileChooser(el *rod.Element, pt proto.Point) bool {
+	res, err := el.Eval(`function(x, y) {
+		const isFileInput = (e) => !!e && e.tagName === 'INPUT' && e.type === 'file' && !e.disabled;
+		const opens = (e) => {
+			if (!e) {
+				return false;
+			}
+			if (isFileInput(e)) {
+				return true;
+			}
+			const label = e.closest('label');
+			return !!label && isFileInput(label.control);
+		};
+		let hit = document.elementFromPoint(x, y);
+		while (hit && hit.shadowRoot) {
+			const inner = hit.shadowRoot.elementFromPoint(x, y);
+			if (!inner || inner === hit) {
+				break;
+			}
+			hit = inner;
 		}
-		const label = this.closest('label');
-		return !!label && isFileInput(label.control);
-	}`)
+		return opens(this) || opens(hit);
+	}`, pt.X, pt.Y)
 	return err == nil && res.Value.Bool()
 }
 
@@ -377,6 +411,7 @@ func (b *Browser) WaitForElement(ctx context.Context, target string, timeout tim
 	if err != nil {
 		return err
 	}
+	defer b.usePage(page)()
 
 	page = bindDeadline(page, ctx).Timeout(timeout)
 	_, err = b.findElementWithin(page, target, timeout, toSeeIfPresent)
@@ -391,6 +426,7 @@ func (b *Browser) WaitForElementVisible(ctx context.Context, target string, time
 	if err != nil {
 		return err
 	}
+	defer b.usePage(page)()
 	if ctx == nil {
 		ctx = context.Background()
 	}

@@ -130,26 +130,30 @@ changes below have not been measured.)
 - **The page still behaves as focused.** To a page, losing the focus is you
   switching away: the focused field blurs and a menu open on it closes. So
   after giving the focus back, ATR keeps the page behaving as focused, as it
-  would have been had the browser kept the focus — and lets it go once ATR has
-  left the page alone for two minutes, so a page you are not reading (a chat,
-  say) is not told that you are.
+  would have been had the browser kept the focus. That lasts while ATR is using
+  the page, waits included, and lapses once ATR has left the page alone for two
+  minutes, so a page you are not reading (a chat, say) is not told that you
+  are.
 
 If the browser was already the window in front — you are watching it — ATR
 leaves it there. Two things bring it forward on purpose, because you are meant
 to use them next:
 
-- **A click on a file input, or on its label.** The file chooser it opens gets
+- **A click that lands on a file input, or on its label** — an upload button
+  laid over a transparent file input included. The file chooser it opens gets
   the focus, so `atr computer type` reaches it. An upload button whose own
-  script opens the chooser is not recognisable as one; its chooser may open
-  behind your window, flagged as wanting attention. Click the file input or its
-  label instead, or focus the chooser with `atr computer window focus`.
+  script opens the chooser is not recognisable as one, and neither is Enter
+  pressed on a file input; that chooser may open behind your window, flagged as
+  wanting attention. Click the file input or its label instead, or focus the
+  chooser with `atr computer window focus`.
 - **`atr browser record`**, which brings the page being recorded forward: the
   recording is you clicking on it.
 
-The cost: while you are in another window, a click takes about a tenth of a
-second longer, and so does each Tab key press — up to three tenths when the
-browser takes nothing. Nothing more while you are in the browser, headless, or
-on macOS and Windows.
+The cost: while you are in another window, a click takes about a quarter to a
+third of a second longer, and so does each Tab key press — that is how long
+ATR watches for the browser to take the focus. A page still busy from the
+click can add up to another quarter of a second. Nothing more while you are in
+the browser, headless, or on macOS and Windows.
 
 ## Page Management
 

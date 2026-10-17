@@ -92,13 +92,15 @@ CLI need no changes.
     does on every mouse-down, and no setting turns that off — ATR gives the
     focus back to the window you were in, under X11.
   - The page keeps behaving as focused afterwards, so a field does not blur and
-    a menu does not close because the focus went back to you. That lapses after
-    two minutes without ATR touching the page.
-  - A click on a file input or its label, and `atr browser record`, bring the
-    browser forward on purpose: you are meant to use what they open. An upload
-    button whose own script opens the chooser may open it behind your window.
-  - The cost, while you are in another window: about 120ms per click, and up to
-    300ms per Tab key press. Nothing while you are in the browser or headless.
+    a menu does not close because the focus went back to you. That lasts while
+    ATR is using the page, and lapses two minutes after it stops.
+  - A click that lands on a file input or its label, and `atr browser record`,
+    bring the browser forward on purpose: you are meant to use what they open.
+    An upload button whose own script opens the chooser, or Enter on a file
+    input, may open it behind your window.
+  - The cost, while you are in another window: about 0.3s per click and per Tab
+    key press, a little more when the page is still busy from the click.
+    Nothing while you are in the browser or headless.
   - macOS and Windows are unchanged.
 - **One target grammar for every call.** `atr.text`, `atr.expectText` and
   `atr.scroll` — and the `text`, `scroll`, `screenshot`, `computed-styles`,

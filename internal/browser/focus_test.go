@@ -23,6 +23,11 @@ type fakeDesktop struct {
 	timeline  []func() // run, one per active() call, once the guarded call has been made
 	afterCall bool
 	closed    bool
+	// lag is how many looks it takes the window manager to act on a
+	// request; 0 acts on it at once.
+	lag       int
+	pending   uint32
+	pendingIn int
 }
 
 const (
@@ -46,6 +51,11 @@ func newFakeDesktop(focused uint32) *fakeDesktop {
 func (d *fakeDesktop) active() (uint32, bool) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if d.pendingIn > 0 {
+		if d.pendingIn--; d.pendingIn == 0 {
+			d.focused = d.pending
+		}
+	}
 	if d.afterCall && len(d.timeline) > 0 {
 		next := d.timeline[0]
 		d.timeline = d.timeline[1:]
@@ -62,6 +72,10 @@ func (d *fakeDesktop) activate(w uint32) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.requests = append(d.requests, w)
+	if d.lag > 0 {
+		d.pending, d.pendingIn = w, d.lag
+		return nil
+	}
 	d.focused = w
 	return nil
 }
@@ -274,10 +288,52 @@ func TestASecondGrabIsGivenBackToo(t *testing.T) {
 	}
 }
 
+// The window manager takes a moment to act on a request, and until it has,
+// the browser still has the focus. That is the grab already given back, not
+// another one: one grab, one request.
+func TestAGrabIsGivenBackOnceThoughTheWindowManagerIsSlow(t *testing.T) {
+	d := newFakeDesktop(usersEditor)
+	// Slower than the keeper settles (40ms), within how long it watches.
+	d.lag = 60
+	d.timeline = []func(){d.focusTo(browserWindow)}
+
+	k := fastKeeper(d)
+	k.watch = 400 * time.Millisecond
+	if err := k.around(nil, d.call(nil)); err != nil {
+		t.Fatal(err)
+	}
+	if focused, requests := d.state(); focused != usersEditor || len(requests) != 1 {
+		t.Errorf("focus = %d, requests = %v; want one request, ending on the editor", focused, requests)
+	}
+}
+
+// And a slow window manager does not use up the returns, so a click that
+// opens a pop-up still has its second grab given back.
+func TestASecondGrabIsGivenBackThoughTheWindowManagerIsSlow(t *testing.T) {
+	d := newFakeDesktop(usersEditor)
+	d.lag = 20
+	d.timeline = []func(){d.focusTo(browserWindow)}
+	for i := 0; i < 30; i++ {
+		d.timeline = append(d.timeline, d.nothing())
+	}
+	d.timeline = append(d.timeline, d.focusTo(browserPopup))
+
+	k := fastKeeper(d)
+	k.watch = 300 * time.Millisecond
+	k.settle = 200 * time.Millisecond
+	if err := k.around(nil, d.call(nil)); err != nil {
+		t.Fatal(err)
+	}
+	if focused, requests := d.state(); focused != usersEditor || len(requests) != 2 {
+		t.Errorf("focus = %d, requests = %v; want two, ending on the editor", focused, requests)
+	}
+}
+
 // A browser that keeps grabbing cannot hold the caller for ever.
 func TestABrowserThatKeepsGrabbingIsGivenUpOn(t *testing.T) {
 	d := newFakeDesktop(usersEditor)
-	for i := 0; i < 50; i++ {
+	// Grabbing at every look, for longer than the keeper could watch.
+	for i := 0; i < 20000; i++ {
 		d.timeline = append(d.timeline, d.focusTo(browserWindow))
 	}
 

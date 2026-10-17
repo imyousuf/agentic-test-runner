@@ -91,10 +91,11 @@ func (s *Server) registerRoutes() {
 
 // handleHealth handles GET /api/v1/health
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	url, title := s.browser.Glance()
 	writeSuccess(w, map[string]interface{}{
 		"status":    "ok",
-		"url":       s.browser.CurrentURL(),
-		"title":     s.browser.PageTitle(),
+		"url":       url,
+		"title":     title,
 		"pages":     len(s.browser.ListPages()),
 		"timestamp": time.Now().Format(time.RFC3339),
 	})

@@ -154,11 +154,12 @@ func TestTheBrowserDoesNotTakeTheFocus(t *testing.T) {
 	})
 
 	// The hold is for a while, not for good: a page always focused tells the
-	// application someone is reading it. Once ATR leaves the page alone, it
-	// learns — as it would have — that nobody is looking.
-	t.Run("the hold lapses once ATR leaves the page alone", func(t *testing.T) {
-		b.focusHoldFor = 2 * time.Second
-		defer func() { b.focusHoldFor = 0 }()
+	// application someone is reading it. It lasts while ATR is using the page
+	// — a step that only reads or fills must not find it blurred — and once
+	// ATR leaves the page alone, it learns, as it would have, that nobody is
+	// looking.
+	t.Run("the hold lasts while ATR uses the page, and lapses once it stops", func(t *testing.T) {
+		setFocusHoldFor(t, b, 2*time.Second)
 
 		if err := b.NewPage(ctx, testFixtureURL+"/focus_state.html"); err != nil {
 			t.Fatal(err)
@@ -173,6 +174,17 @@ func TestTheBrowserDoesNotTakeTheFocus(t *testing.T) {
 		}
 		if st := pageFocusState(t, page); !st.HasFocus {
 			t.Fatalf("not held after the click: %+v", st)
+		}
+
+		// Twice the hold, with ATR reading the page throughout.
+		for i := 0; i < 8; i++ {
+			time.Sleep(500 * time.Millisecond)
+			if _, err := b.Evaluate(`document.title`); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if st := pageFocusState(t, page); !st.HasFocus || strings.Contains(st.Log, "blur") {
+			t.Fatalf("while ATR was using the page it was %+v; want it held throughout", st)
 		}
 
 		time.Sleep(4 * time.Second)
@@ -224,6 +236,108 @@ func TestTheBrowserDoesNotTakeTheFocus(t *testing.T) {
 			t.Error("activating a hidden tab took the focus from the user's window")
 		}
 		d.wantScreenshot(t, b, opened)
+	})
+
+	// A held page cannot say whether it is shown: Chrome's focus emulation
+	// counts as somebody capturing it, and a captured page is visible to
+	// itself even as a hidden tab. So a held tab hidden behind another is
+	// still activated when selected.
+	t.Run("a held tab hidden behind another is still activated", func(t *testing.T) {
+		if err := b.NewPage(ctx, testFixtureURL+"/focus_state.html"); err != nil {
+			t.Fatal(err)
+		}
+		held, err := b.CurrentPage()
+		if err != nil {
+			t.Fatal(err)
+		}
+		d.putUserInFront(t)
+		if err := b.Click(ctx, "#name", false); err != nil {
+			t.Fatal(err)
+		}
+		if !b.focusHeld(held) {
+			t.Fatal("the click left nothing held, so this test means nothing")
+		}
+		heldIndex := -1
+		before := b.ListPages()
+		for _, p := range before {
+			if p.TargetID == string(held.TargetID) {
+				heldIndex = p.Index
+			}
+		}
+
+		// A tab in front of it, in its window.
+		if _, err := held.Eval(`() => { window.open("/has_text.html", "_blank"); return true; }`); err != nil {
+			t.Fatalf("opening a tab from the page: %v", err)
+		}
+		var opened *rod.Page
+		for i := 0; i < 50 && opened == nil; i++ {
+			time.Sleep(100 * time.Millisecond)
+			if pages := b.ListPages(); len(pages) > len(before) {
+				opened = pageByTarget(t, b, pages[len(pages)-1].TargetID)
+			}
+		}
+		if opened == nil {
+			t.Fatal("the opened tab was never adopted")
+		}
+		time.Sleep(500 * time.Millisecond)
+		if v := pageVisibility(opened); v != "visible" {
+			t.Fatalf("the opened tab is %q, want it in front for this test to mean anything", v)
+		}
+		t.Logf("the held tab, hidden behind it, says it is %q", pageVisibility(held))
+
+		d.putUserInFront(t)
+		if err := b.SelectPage(heldIndex); err != nil {
+			t.Fatal(err)
+		}
+		if !d.settled() {
+			t.Error("selecting the held tab took the focus from the user's window")
+		}
+		hidden := false
+		for i := 0; i < 20 && !hidden; i++ {
+			hidden = pageVisibility(opened) == "hidden"
+			time.Sleep(100 * time.Millisecond)
+		}
+		if !hidden {
+			t.Error("the tab in front is still in front: the held tab was never activated")
+		}
+	})
+
+	// And a held page alone in its window is the tab it shows: selecting it
+	// activates nothing — not even for a moment, given back.
+	t.Run("selecting a held page alone in its window activates nothing", func(t *testing.T) {
+		if err := b.NewPage(ctx, testFixtureURL+"/focus_state.html"); err != nil {
+			t.Fatal(err)
+		}
+		held, err := b.CurrentPage()
+		if err != nil {
+			t.Fatal(err)
+		}
+		d.putUserInFront(t)
+		if err := b.Click(ctx, "#name", false); err != nil {
+			t.Fatal(err)
+		}
+		if !b.focusHeld(held) {
+			t.Fatal("the click left nothing held, so this test means nothing")
+		}
+		heldIndex := -1
+		for _, p := range b.ListPages() {
+			if p.TargetID == string(held.TargetID) {
+				heldIndex = p.Index
+			}
+		}
+		if err := b.NewPage(ctx, testFixtureURL+"/has_text.html"); err != nil {
+			t.Fatal(err)
+		}
+
+		d.putUserInFront(t)
+		if d.browserTookTheFocusDuring(t, b, func() {
+			if err := b.SelectPage(heldIndex); err != nil {
+				t.Fatal(err)
+			}
+		}) {
+			t.Error("selecting a held page alone in its window activated it")
+		}
+		d.wantScreenshot(t, b, heldIndex)
 	})
 
 	// A click on a file input opens the operating system's file chooser, and
@@ -415,6 +529,38 @@ func (d *focusDesktop) putUserInFront(t *testing.T) {
 
 // settled reports whether the user's window has the focus once the browser
 // has had time to take it — longer than any grab measured.
+// browserTookTheFocusDuring reports whether one of the browser's windows had
+// the focus at any moment during fn, or in the half second after: a grab given
+// back at once still counts.
+func (d *focusDesktop) browserTookTheFocusDuring(t *testing.T, b *Browser, fn func()) bool {
+	t.Helper()
+	ws := b.focus.desktop()
+	if ws == nil {
+		t.Fatal("no desktop to watch")
+	}
+	stop := make(chan struct{})
+	took := make(chan bool, 1)
+	go func() {
+		seen := false
+		for {
+			select {
+			case <-stop:
+				took <- seen
+				return
+			default:
+			}
+			if w, err := ewmh.ActiveWindowGet(d.xu); err == nil && w != d.users && ws.ownedByBrowser(uint32(w)) {
+				seen = true
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+	}()
+	fn()
+	time.Sleep(500 * time.Millisecond)
+	close(stop)
+	return <-took
+}
+
 func (d *focusDesktop) settled() bool {
 	time.Sleep(700 * time.Millisecond)
 	return d.inFront()
